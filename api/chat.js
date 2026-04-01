@@ -5,6 +5,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ==================== MODEL UTAMA ====================
+const MAIN_MODEL = "qwen/qwen3.6-plus-preview:free";
+
 function calculateAge(dob) {
   if (!dob) return '?';
   const birth = new Date(dob);
@@ -315,13 +318,13 @@ ATURAN PENTING:
       userContent = userMessage;
     }
 
-    let messages = [systemPrompt, ...chatHistory, { role: "user", content: userContent }];
-    const modelFirst = image_base64 ? "openai/gpt-4o" : "openai/gpt-4o-mini";
+    // Model: pakai Qwen kecuali ada gambar (Qwen ini text-only)
+    const modelFirst = image_base64 ? "openai/gpt-4o" : MAIN_MODEL;
 
     // ── 7. FIRST CALL ──
     let payloadFirst = {
       model: modelFirst,
-      messages: messages,
+      messages: [systemPrompt, ...chatHistory, { role: "user", content: userContent }],
       temperature: 0.7,
       max_tokens: 4000
     };
@@ -356,7 +359,7 @@ ATURAN PENTING:
     let searchMetadata = null;
 
     if (toolCallsLength > 0) {
-      messages.push(aiMessage);
+      messages.push(aiMessage);  // ← ini sudah ada di atas, tapi biar aman
 
       for (const toolCall of aiMessage.tool_calls) {
         const args = JSON.parse(toolCall.function.arguments);
@@ -380,7 +383,7 @@ ATURAN PENTING:
         });
       }
 
-      // Second call — tanpa tools agar tidak print JSON
+      // Second call — pakai Qwen juga
       const secondResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: 'POST',
         headers: {
@@ -388,7 +391,7 @@ ATURAN PENTING:
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: "openai/gpt-4o-mini",
+          model: MAIN_MODEL,
           messages: messages,
           temperature: 0.7,
           max_tokens: 8000,
@@ -416,7 +419,7 @@ ATURAN PENTING:
           method: 'POST',
           headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: "openai/gpt-4o-mini",
+            model: MAIN_MODEL,
             messages: [{ role: "user", content: `Buatkan judul singkat (maks 3-4 kata) tanpa tanda kutip, tanpa titik di akhir, untuk pesan: "${userMessage}"` }],
             temperature: 0.3,
             max_tokens: 15
