@@ -306,6 +306,38 @@ body::before {
 }
 .send-btn:hover { transform: scale(1.1); }
 
+/* ─── SETTINGS MENU (GABUNGAN BROWSING & PERSONA) ─── */
+.settings-wrapper { position: relative; flex-shrink: 0; }
+.settings-btn { 
+  background: transparent; border: none; color: var(--text-muted); 
+  font-size: 20px; cursor: pointer; padding: 8px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; transition: .2s;
+}
+.settings-btn:hover { color: var(--blue-dark); background: var(--bg2); transform: scale(1.1); }
+.settings-menu {
+  position: absolute; bottom: 120%; left: 0;
+  background: #ffffff; border: 2px solid var(--blue-light); border-radius: 16px;
+  box-shadow: var(--shadow-md); padding: 8px 0; width: 200px;
+  display: none; flex-direction: column; z-index: 100;
+  transform: translateY(10px); opacity: 0; transition: all 0.2s ease;
+}
+.settings-menu.show { display: flex; transform: translateY(0); opacity: 1; }
+.settings-header { 
+  padding: 6px 16px; font-size: 11px; font-weight: 700; 
+  color: var(--blue-dark); text-transform: uppercase; letter-spacing: 0.5px; 
+}
+.settings-item {
+  padding: 8px 16px; font-size: 14px; color: var(--text); background: none; border: none;
+  text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  transition: background 0.2s;
+}
+.settings-item:hover { background: var(--off-white); }
+.settings-item.active { color: var(--blue-dark); font-weight: 600; }
+.settings-item i.check { color: #5ab4d4; opacity: 0; transition: 0.2s; }
+.settings-item.active i.check { opacity: 1; }
+.settings-divider { height: 1px; background: rgba(138,234,245,.3); margin: 6px 0; }
+
+
 /* ─── SIDEBAR UTAMA (BERLAKU UNTUK DESKTOP & DASAR) ─── */
 .sidebar {
   display: flex;
@@ -462,6 +494,7 @@ body::before {
 .btn-cancel:hover { background: #e2e8f0; }
 .btn-confirm { background: #e74c3c; color: white; }
 .btn-confirm:hover { background: #c0392b; transform: scale(1.05); }
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -516,19 +549,17 @@ body::before {
   </div>
 
   <div class="chat-area" id="chatArea"></div>
-
-  <div class="input-area">
+        <div class="input-area">
     <div class="input-wrap">
-      <button onclick="toggleBrowsing()" id="browsingBtn" title="Browsing Mode (Nyala/Mati)">🌐</button>
-
+      <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="handleImageSelected(this)">
+  <div class="settings-wrapper">
+        <button type="button" class="settings-btn" onclick="toggleSettingsMenu()" title="Pengaturan AI">
+          <i class="fas fa-sliders-h"></i>
+        </button>
+        <div id="settingsMenu" class="settings-menu">
+          </div>
+      </div>
       <textarea id="messageInput" rows="1" placeholder="Ketik pesan…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-
-      <select id="personaSelect" onchange="changePersona(this.value)" title="Pilih Gaya AI">
-        <option value="Auto">✨ Auto</option>
-        <option value="Santai">😌 Santai</option>
-        <option value="Kritikus Brutal">🔥 Kritikus</option>
-        <option value="Rosalia">🌹 Rosalia</option>
-      </select>
       <button class="send-btn" onclick="handleSend()">▶</button>
     </div>
   </div>
@@ -543,6 +574,129 @@ let sessions = [];
 let currentSessionId = null;
 let currentPersona = localStorage.getItem('aai_persona') || 'Auto';
 let isBrowsingMode = localStorage.getItem('aai_browsing_mode') !== 'false'; // default true
+let currentMessages = []; 
+let activeMessageIds = new Set();
+let activeVersionMap = {};
+let currentUtterance = null;
+let isSpeaking = false;
+
+function speakText(btn, text) {
+  // Kalau lagi ngomong → stop
+  if (isSpeaking) {
+    speechSynthesis.cancel();
+    isSpeaking = false;
+    // Reset semua tombol TTS
+    document.querySelectorAll('.tts-btn i').forEach(i => {
+      i.className = 'fas fa-volume-up';
+      i.style.color = 'inherit';
+    });
+    return;
+  }
+ 
+  // Bersihkan markdown dari teks sebelum dibaca
+  const cleanText = text
+    .replace(/```[\s\S]*?```/g, 'blok kode')
+    .replace(/`[^`]+`/g, '')
+    .replace(/[#*_~>\[\]]/g, '')
+    .replace(/https?:\/\/\S+/g, 'tautan')
+    .trim();
+ 
+  currentUtterance = new SpeechSynthesisUtterance(cleanText);
+  currentUtterance.lang = 'id-ID';
+  currentUtterance.rate = 1.0;
+  currentUtterance.pitch = 1.1;
+ 
+  // Pilih suara Indonesia kalau ada
+  const voices = speechSynthesis.getVoices();
+  const idVoice = voices.find(v => v.lang.startsWith('id')) || voices.find(v => v.lang.startsWith('en'));
+  if (idVoice) currentUtterance.voice = idVoice;
+ 
+  const icon = btn.querySelector('i');
+  icon.className = 'fas fa-stop-circle';
+  icon.style.color = '#e74c3c';
+  isSpeaking = true;
+ 
+  currentUtterance.onend = () => {
+    isSpeaking = false;
+    icon.className = 'fas fa-volume-up';
+    icon.style.color = 'inherit';
+  };
+  currentUtterance.onerror = () => {
+    isSpeaking = false;
+    icon.className = 'fas fa-volume-up';
+    icon.style.color = 'inherit';
+  };
+ 
+  speechSynthesis.speak(currentUtterance);
+}
+ 
+// ─────────────────────────────────────────────
+// FITUR 1B: IMAGE UPLOAD
+// ─────────────────────────────────────────────
+ 
+let pendingImageBase64 = null;
+let pendingImageMime = null;
+ 
+function triggerImageUpload() {
+  document.getElementById('imageFileInput').click();
+}
+ 
+function handleImageSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+ 
+  // Validasi tipe file
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    alert('Hanya mendukung JPG, PNG, GIF, WEBP ya!');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    alert('Ukuran gambar maksimal 5MB!');
+    return;
+  }
+ 
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const base64Full = e.target.result; // "data:image/jpeg;base64,..."
+    pendingImageMime = file.type;
+    pendingImageBase64 = base64Full.split(',')[1]; // Ambil bagian base64 saja
+ 
+    // Tampilkan preview
+    showImagePreview(base64Full, file.name);
+  };
+  reader.readAsDataURL(file);
+ 
+  // Reset input agar file yang sama bisa dipilih ulang
+  input.value = '';
+}
+ 
+function showImagePreview(src, name) {
+  // Hapus preview lama kalau ada
+  document.getElementById('imagePreviewContainer')?.remove();
+ 
+  const inputWrapper = document.getElementById('inputBar') || document.querySelector('.input-area');
+  const preview = document.createElement('div');
+  preview.id = 'imagePreviewContainer';
+  preview.style.cssText = `
+    display:flex; align-items:center; gap:10px;
+    padding:8px 14px; background:var(--bg2);
+    border-top:1px solid var(--b); font-size:13px;
+  `;
+  preview.innerHTML = `
+    <img src="${src}" style="height:48px;width:48px;object-fit:cover;border-radius:8px;border:1px solid var(--b);">
+    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">${name}</span>
+    <button onclick="clearImagePreview()" style="border:none;background:none;cursor:pointer;font-size:18px;color:#e74c3c;" title="Hapus gambar">✕</button>
+  `;
+  inputWrapper.insertAdjacentElement('beforebegin', preview);
+}
+ 
+function clearImagePreview() {
+  pendingImageBase64 = null;
+  pendingImageMime = null;
+  document.getElementById('imagePreviewContainer')?.remove();
+}
+
 
 // ─── DEBUG HELPER ───
 function logDebug(msg, color = '#2a7a9e') {
@@ -550,45 +704,34 @@ function logDebug(msg, color = '#2a7a9e') {
 }
 
 
-// PASTIKAN FUNGSI INI HANYA SEPERTI INI SAJA (Hapus pemanggilan .innerHTML):
-function toggleBrowsing() {
-  isBrowsingMode = !isBrowsingMode;
-  localStorage.setItem('aai_browsing_mode', isBrowsingMode); 
-  
-  const btn = document.getElementById('browsingBtn');
 
-  if (isBrowsingMode) {
-    btn.classList.add('on');
-  } else {
-    btn.classList.remove('on');
-  }
-  
-  logDebug(`Browsing mode diubah → ${isBrowsingMode}`, '#e74c3c');
-}
-// ─── SEND MESSAGE (dengan debug super jelas) ───
 async function sendMessage(text) {
   const area = document.getElementById('chatArea');
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
-  
-  appendMessage('user', text);
+ 
+  // Simpan & bersihkan gambar pending sebelum append
+  const imageBase64 = pendingImageBase64;
+  const imageMime = pendingImageMime;
+  const imagePreviewSrc = imageBase64 ? `data:${imageMime};base64,${imageBase64}` : null;
+ 
+  clearImagePreview();
+ 
+  appendMessage('user', text, null, imagePreviewSrc ? { imageUrl: imagePreviewSrc } : null);
   scrollBottom();
-
+ 
   const typingId = 'typing_' + Date.now();
-  const browsingInfo = isBrowsingMode ? '🌐 mencari info terkini…' : '';
   area.insertAdjacentHTML('beforeend', `
     <div class="msg-row assistant" id="${typingId}">
-      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite; background:transparent;">
+      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;background:transparent;">
         <img src="/ayaka.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
       </div>
       <div class="typing-indicator">
         <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-        <span style="margin-left:12px;font-size:13.5px;">AAi berpikir ${browsingInfo}</span>
+        <span style="margin-left:12px;font-size:13.5px;">AAi berpikir ${isBrowsingMode ? '🌐' : ''}…</span>
       </div>
     </div>`);
   scrollBottom();
-
-  logDebug(`Mengirim pesan → browsing_mode = ${isBrowsingMode} | persona = ${currentPersona}`);
-
+ 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -598,18 +741,28 @@ async function sendMessage(text) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        browsing_mode: isBrowsingMode   // ← WAJIB true
+        browsing_mode: isBrowsingMode,
+        image_base64: imageBase64,   // ← BARU
+        image_mime: imageMime         // ← BARU
       })
     });
-
+ 
     document.getElementById(typingId)?.remove();
     const data = await res.json();
-
-    logDebug(`Backend balas → status ${res.status} | reply ada? ${!!data.reply}`, res.ok ? '#2a7a9e' : '#e74c3c');
-
     if (!res.ok) throw new Error(data.error || 'Server error');
-    
+ 
     appendMessage('assistant', data.reply);
+ 
+    // Push ke currentMessages
+    const parentForUser = currentMessages.length > 0 ? currentMessages[currentMessages.length - 1].id : null;
+    currentMessages.push({ id: data.user_message_id, role: 'user', content: text, parent_id: parentForUser, created_at: new Date().toISOString() });
+    currentMessages.push({ id: data.message_id, role: 'assistant', content: data.reply, parent_id: data.user_message_id, created_at: new Date().toISOString() });
+ 
+    const userRows = area.querySelectorAll('.msg-row.user');
+    userRows[userRows.length - 1]?.setAttribute('data-id', data.user_message_id);
+    const aiRows = area.querySelectorAll('.msg-row.assistant');
+    aiRows[aiRows.length - 1]?.setAttribute('data-id', data.message_id);
+ 
     if (data.session_id && !currentSessionId) {
       currentSessionId = data.session_id;
       loadSessions();
@@ -617,7 +770,6 @@ async function sendMessage(text) {
   } catch (e) {
     document.getElementById(typingId)?.remove();
     appendMessage('assistant', `⚠️ ${e.message}`);
-    logDebug(`ERROR: ${e.message}`, '#e74c3c');
   }
 }
 
@@ -723,15 +875,18 @@ async function loadSession(id) {
   const session = sessions.find(s => s.id === id);
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
 
-  const res = await fetch(`/api/messages?session_id=${id}`);
-  const messages = await res.json();
-
-  const area = document.getElementById('chatArea');
-  area.innerHTML = '';
-  messages.forEach(m => appendMessage(m.role, m.content, m.created_at));
-  scrollBottom();
-  if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
-  renderSidebar();
+  try {
+    const res = await fetch(`/api/messages?session_id=${id}`);
+    if (!res.ok) throw new Error("Gagal memuat pesan");
+    currentMessages = await res.json();
+    
+    renderMessageTree(); 
+    
+    if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+    renderSidebar();
+  } catch (e) {
+    logDebug(`Error load session: ${e.message}`, '#e74c3c');
+  }
 }
 
 function newChat() {
@@ -749,60 +904,138 @@ function newChat() {
   renderSidebar();
 }
 
+// Fungsi untuk mencari jalur terpanjang/terbaru dari percakapan
+function buildActiveBranch() {
+  if (currentMessages.length === 0) return [];
+ 
+  // Mulai dari pesan paling awal (tidak punya parent)
+  let current = currentMessages.find(m => !m.parent_id);
+  if (!current) return [];
+ 
+  const branch = [current];
+ 
+  while (true) {
+    const children = currentMessages.filter(m => m.parent_id === current.id);
+    if (children.length === 0) break;
+ 
+    // Ambil versi yang dipilih user, atau fallback ke yang paling baru (terakhir)
+    const selectedId = activeVersionMap[current.id];
+    const selected = selectedId
+      ? children.find(c => c.id === selectedId)
+      : children[children.length - 1];
+ 
+    current = selected || children[children.length - 1];
+    branch.push(current);
+  }
+ 
+  activeMessageIds = new Set(branch.map(m => m.id));
+  return branch;
+}
 
 
-function appendMessage(role, content, timestamp = null, metadata = null) {
+function switchVersion(id) {
+  const msg = currentMessages.find(m => m.id === id);
+  if (!msg || !msg.parent_id) return;
+  activeVersionMap[msg.parent_id] = id;
+  renderMessageTree();
+  scrollBottom();
+}
+ 
+
+function renderMessageTree() {
   const area = document.getElementById('chatArea');
-  const time = timestamp 
-    ? new Date(timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})
-    : new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'});
-
-  let html = '';
+  area.innerHTML = '';
   
+  const activeBranch = buildActiveBranch();
+  
+  activeBranch.forEach(m => {
+    const siblings = currentMessages.filter(sib => sib.parent_id === m.parent_id && sib.role === m.role);
+    const currentIndex = siblings.findIndex(sib => sib.id === m.id);
+    
+    appendMessage(m.role, m.content, m.created_at, null, m.id, {
+      total: siblings.length,
+      current: currentIndex + 1,
+      siblings: siblings.map(s => s.id)
+    });
+  });
+  
+  scrollBottom();
+}
+
+function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
+  const area = document.getElementById('chatArea');
+  const time = timestamp
+    ? new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+    : new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+ 
+  let html = '';
+ 
   if (role === 'assistant') {
-    // Generate HTML untuk Sumber jika ada metadata
     let sourcesHtml = '';
     if (metadata && metadata.sources && metadata.sources.length > 0) {
       sourcesHtml = `
-      <div class="sources-container">
-        <div class="source-label"><i class="fas fa-search"></i> Referensi Terpercaya</div>
-        <div class="source-grid">
-          ${metadata.sources.map(s => `<a href="${s.link}" target="_blank" class="source-item"><i class="fas fa-link"></i> ${s.title}</a>`).join('')}
-        </div>
-        ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Search Result">` : ''}
-      </div>`;
+        <div class="sources-container">
+          <div class="source-label"><i class="fas fa-search"></i> Referensi</div>
+          <div class="source-grid">
+            ${metadata.sources.map(s => `<a href="${s.link}" target="_blank" class="source-item"><i class="fas fa-link"></i> ${s.title}</a>`).join('')}
+          </div>
+          ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Search Result">` : ''}
+        </div>`;
     }
-
+ 
+    let versionHtml = `<span class="version-tag">V.1</span>`;
+    if (versionInfo && versionInfo.total > 1) {
+      const prevId = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
+      const nextId = versionInfo.current < versionInfo.total ? versionInfo.siblings[versionInfo.current] : null;
+      versionHtml = `
+        <span class="version-tag" style="display:flex;align-items:center;gap:6px;background:#e2e8f0;color:var(--text);padding:2px 8px;border-radius:12px;">
+          <button style="border:none;background:none;cursor:${prevId ? 'pointer' : 'default'};opacity:${prevId ? '1' : '0.3'};padding:0 4px;" ${prevId ? `onclick="switchVersion('${prevId}')"` : ''}>◀</button>
+          <span>${versionInfo.current} / ${versionInfo.total}</span>
+          <button style="border:none;background:none;cursor:${nextId ? 'pointer' : 'default'};opacity:${nextId ? '1' : '0.3'};padding:0 4px;" ${nextId ? `onclick="switchVersion('${nextId}')"` : ''}>▶</button>
+        </span>`;
+    }
+ 
+    // Simpan plain text untuk TTS (encode di data attribute)
+    const encodedContent = encodeURIComponent(content);
+ 
     html = `
-    <div class="msg-row assistant">
-      <div style="display:flex; align-items:center; gap:10px;">
+    <div class="msg-row assistant" data-id="${messageId || ''}" data-content="${encodedContent}">
+      <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
         </div>
-        <div style="font-weight:700; font-size:15px; color:var(--blue-dark); font-family:'Cormorant Garamond', serif;">AAi <span class="version-tag">V.1</span></div>
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi ${versionHtml}</div>
       </div>
       <div class="bubble">${formatContent(content)}</div>
       ${sourcesHtml}
       <div class="msg-actions">
-         <button title="Copy Jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-         <button title="Ulangi Jawaban" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-         <span style="font-size:11px; opacity:.65; margin-left:auto;">${time}</span>
+        <button title="Copy Jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button title="Ulangi Jawaban" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button class="tts-btn" title="Dengarkan Jawaban" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.content))">
+          <i class="fas fa-volume-up"></i>
+        </button>
+        <span style="font-size:11px;opacity:.65;margin-left:auto;">${time}</span>
       </div>
     </div>`;
   } else {
-    // User Bubble dengan tombol Copy
+    // User bubble — tampilkan gambar kalau ada
+    const imgPreview = metadata?.imageUrl
+      ? `<img src="${metadata.imageUrl}" style="max-width:200px;max-height:200px;border-radius:10px;margin-bottom:8px;display:block;">`
+      : '';
+ 
     html = `
-    <div class="msg-row user" data-raw="${encodeURIComponent(content)}">
-      <div style="flex:1; width:100%;">
+    <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId || ''}">
+      <div style="flex:1;width:100%;">
+        ${imgPreview}
         <div class="bubble">${formatContent(content)}</div>
         <div class="user-actions">
-           <span style="font-size:11px; opacity:.65; margin-right:auto;">${time}</span>
-           <button title="Copy Pesan" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
+          <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
+          <button title="Copy Pesan" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
         </div>
       </div>
     </div>`;
   }
-
+ 
   area.insertAdjacentHTML('beforeend', html);
   scrollBottom();
 }
@@ -833,45 +1066,54 @@ function copyFullAI(btn) {
 
 function regenerateAI(btn) {
   const aiRow = btn.closest('.msg-row.assistant');
+  const aiMessageId = aiRow.getAttribute('data-id');
+ 
+  // Cari pesan user di atasnya untuk ambil teks & ID
   let current = aiRow.previousElementSibling;
   let rawUserText = '';
-  
+  let userMessageId = null;
+ 
   while (current) {
     if (current.classList.contains('user')) {
       rawUserText = decodeURIComponent(current.getAttribute('data-raw'));
+      userMessageId = current.getAttribute('data-id') || null;
       break;
     }
     current = current.previousElementSibling;
   }
-
+ 
+  // Fallback: cari di currentMessages lewat parent_id AI message
+  if (!userMessageId && aiMessageId) {
+    const aiMsg = currentMessages.find(m => m.id === aiMessageId);
+    userMessageId = aiMsg?.parent_id || null;
+    if (!rawUserText) {
+      const userMsg = currentMessages.find(m => m.id === userMessageId);
+      rawUserText = userMsg?.content || '';
+    }
+  }
+ 
   if (rawUserText) {
-    const icon = btn.querySelector('i');
-    icon.classList.add('fa-spin');
-    
-    // Hapus AI yang lama saja, JANGAN panggil sendMessage(rawUserText) biasa
-    aiRow.remove(); 
-    
-    // Panggil fungsi kirim pesan tapi versi "DIAM" (tanpa append user bubble lagi)
-    executeRegenerate(rawUserText);
+    executeRegenerate(rawUserText, userMessageId);
   }
 }
 
 // Fungsi khusus Regenerate agar tidak menduplikasi bubble user
-async function executeRegenerate(text) {
+async function executeRegenerate(text, userMessageId = null) {
   const area = document.getElementById('chatArea');
   const typingId = 'typing_' + Date.now();
-  
-  // Langsung munculin Ayaka mikir tanpa nambahin bubble user lagi
+ 
   area.insertAdjacentHTML('beforeend', `
     <div class="msg-row assistant" id="${typingId}">
-      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;"><img src="/ayaka.gif" alt="Ayaka"></div>
+      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;">
+        <img src="/ayaka.gif" alt="Ayaka">
+      </div>
       <div class="typing-indicator">
         <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
         <span style="margin-left:12px;font-size:13.5px;">AAi meramu ulang jawaban...</span>
       </div>
     </div>`);
   scrollBottom();
-
+ 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -881,15 +1123,33 @@ async function executeRegenerate(text) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        browsing_mode: isBrowsingMode 
+        browsing_mode: isBrowsingMode,
+        user_message_id: userMessageId   // ← kunci: beritahu backend ini regenerate
       })
     });
-
+ 
     document.getElementById(typingId)?.remove();
     const data = await res.json();
-    
-    // Kirim metadata (sources) ke appendMessage jika ada
-    appendMessage('assistant', data.reply, null, data.metadata); 
+ 
+    if (!res.ok) throw new Error(data.error || 'Server error');
+ 
+    // ── Tambah versi baru ke currentMessages ──
+    currentMessages.push({
+      id: data.message_id,
+      role: 'assistant',
+      content: data.reply,
+      parent_id: userMessageId,
+      created_at: new Date().toISOString()
+    });
+ 
+    // ── Auto-pilih versi baru ini ──
+    if (userMessageId) {
+      activeVersionMap[userMessageId] = data.message_id;
+    }
+ 
+    // Re-render seluruh tree biar navigasi versi muncul
+    renderMessageTree();
+ 
   } catch (e) {
     document.getElementById(typingId)?.remove();
     appendMessage('assistant', `⚠️ Gagal memuat ulang: ${e.message}`);
@@ -939,7 +1199,6 @@ function formatContent(text) {
   return html;
 }
 
-
 function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -949,8 +1208,79 @@ function scrollBottom() {
   area.scrollTop = area.scrollHeight;
 }
 
-
 // ─── LAINNYA ───
+// ─── PENGATURAN MENU (BROWSING & PERSONA) ───
+function toggleSettingsMenu() {
+  const menu = document.getElementById('settingsMenu');
+  menu.classList.toggle('show');
+  if (menu.classList.contains('show')) {
+    renderSettingsMenu();
+  }
+}
+
+// Render isi menu secara dinamis agar centang selalu update
+// Render isi menu secara dinamis agar centang selalu update
+function renderSettingsMenu() {
+  const menu = document.getElementById('settingsMenu');
+  const personas = [
+    { val: 'Auto', label: '✨ Auto' },
+    { val: 'Santai', label: '😌 Santai' },
+    { val: 'Kritikus Brutal', label: '🔥 Kritikus' },
+    { val: 'Rosalia', label: '🌹 Rosalia' }
+  ];
+
+  let html = `
+    <div class="settings-header">Media</div>
+    <button class="settings-item" onclick="triggerImageUpload(); document.getElementById('settingsMenu').classList.remove('show');">
+      <span><i class="fas fa-image" style="margin-right:8px; width:16px;"></i>Upload Gambar</span>
+    </button>
+    <div class="settings-divider"></div>
+
+    <div class="settings-header">Jaringan</div>
+    <button class="settings-item ${isBrowsingMode ? 'active' : ''}" onclick="toggleBrowsingUI()">
+      <span><i class="fas fa-globe" style="margin-right:8px; width:16px;"></i>Browsing Mode</span>
+      <i class="fas fa-check check"></i>
+    </button>
+    <div class="settings-divider"></div>
+
+    <div class="settings-header">Persona AI</div>
+  `;
+
+  personas.forEach(p => {
+    const isActive = currentPersona === p.val;
+    html += `
+      <button class="settings-item ${isActive ? 'active' : ''}" onclick="selectPersonaUI('${p.val}')">
+        <span>${p.label}</span>
+        <i class="fas fa-check check"></i>
+      </button>
+    `;
+  });
+
+  menu.innerHTML = html;
+}
+
+function toggleBrowsingUI() {
+  isBrowsingMode = !isBrowsingMode;
+  localStorage.setItem('aai_browsing_mode', isBrowsingMode);
+  renderSettingsMenu(); // Render ulang agar centang langsung berubah
+  logDebug(`Browsing mode diubah → ${isBrowsingMode}`, '#e74c3c');
+}
+
+function selectPersonaUI(val) {
+  currentPersona = val;
+  localStorage.setItem('aai_persona', val);
+  renderSettingsMenu(); // Render ulang agar centang pindah
+}
+
+// Tutup menu pengaturan jika user klik di luar area menu
+document.addEventListener('click', function(e) {
+  const wrapper = document.querySelector('.settings-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    document.getElementById('settingsMenu').classList.remove('show');
+  }
+});
+
+
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -964,10 +1294,6 @@ function autoResize(el) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px'; // Max tinggi dikurangi jadi 120px
 }
 
-function changePersona(val) {
-  currentPersona = val;
-  localStorage.setItem('aai_persona', val);
-}
 
 function handleSend() {
   const inp = document.getElementById('messageInput');
@@ -997,7 +1323,6 @@ document.addEventListener('click', function(e) {
 });
 
 
-
 // ─── LOGOUT ───
 function logout() {
   if (confirm("Yakin mau keluar, Bos?")) {
@@ -1006,20 +1331,10 @@ function logout() {
   }
 }
 
-
 // ─── INIT ───
 loadSessions();
-document.getElementById('personaSelect').value = currentPersona;
 newChat();
 
-// Tambahkan blok ini untuk menyesuaikan warna tombol saat awal load
-if (isBrowsingMode) {
-  document.getElementById('browsingBtn').classList.add('on');
-} else {
-  document.getElementById('browsingBtn').classList.remove('on');
-}
-
-logDebug('Frontend siap • Browsing default = ' + isBrowsingMode);
 </script>
 </body>
 </html>
