@@ -5,6 +5,20 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+function calculateAge(dob) {
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+
+  return age;
+}
+
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Cuma terima POST bos!' });
@@ -12,6 +26,22 @@ export default async function handler(req, res) {
 
   try {
     const { message, session_id, user_id, persona_name } = req.body;
+      // ====================== GET USER + PERSON ======================
+const { data: user } = await supabase
+  .from('users')
+  .select('id, person_id')
+  .eq('username', 'teguh')
+  .single();
+
+if (!user || !user.person_id) {
+  throw new Error("User atau person belum terhubung!");
+}
+
+const { data: person } = await supabase
+  .from('persons')
+  .select('name, date_of_birth, role')
+  .eq('id', user.person_id)
+  .single();
 
     if (!message || typeof message !== 'string') {
       return res.status(400).json({ error: 'Pesan kosong bro!' });
@@ -43,6 +73,11 @@ export default async function handler(req, res) {
       currentSessionId = newSession.id;
     }
 
+
+    const age = person.date_of_birth
+  ? calculateAge(person.date_of_birth)
+  : null;
+
     // ====================== 2. AMBIL PROMPT DARI PERSONA ======================
     let targetPersona = persona_name;
     const msgLower = userMessage.toLowerCase();
@@ -73,7 +108,22 @@ export default async function handler(req, res) {
       }
     }
 
-    const systemPrompt = { role: "system", content: systemContent };
+    const systemPrompt = {
+  role: "system",
+  content: `
+You are a brutally logical AI critic.
+
+Current speaker:
+- Name: ${person.name}
+- Role: ${person.role}
+- Age: ${age}
+
+Behavior:
+- Challenge assumptions
+- Find logical flaws
+- Stay brutally honest
+`
+};
 
     // ====================== 3. HISTORY ======================
     const { data: history } = await supabase
@@ -84,28 +134,34 @@ export default async function handler(req, res) {
 
     const lastMessages = (history || []).slice(-10);
 
-    // ====================== 4. GROQ ======================
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY belum diset!");
+    // ====================== 4 open router ======================
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY belum diset!");
 
-    const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [systemPrompt, ...lastMessages, { role: "user", content: userMessage }],
-        temperature: 0.7,
-        max_tokens: 1024
-      })
-    });
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': 'http://localhost:3000',
+    'X-Title': 'Aplikasi Chat Kamu'
+  },
+  body: JSON.stringify({
+    model: "meta-llama/llama-4-maverick",
+    messages: [
+      systemPrompt,
+      ...lastMessages,
+      { role: "user", content: userMessage }
+    ],
+    temperature: 0.7,
+    max_tokens: 1024
+  })
+});
 
-    const groqData = await groqResponse.json();
-    if (!groqResponse.ok) throw new Error(groqData.error?.message || "Groq error");
+    const Data = await response.json();
+    if (!response.ok) throw new Error(Data.error?.message || "open router error");
 
-    const aiReply = groqData.choices?.[0]?.message?.content || "AI lagi bingung.";
+    const aiReply = Data.choices?.[0]?.message?.content || "AI lagi bingung.";
 
     // ====================== 5. SIMPAN ======================
     await supabase.from('messages').insert([
