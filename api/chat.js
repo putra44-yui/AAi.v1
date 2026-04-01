@@ -16,39 +16,50 @@ function calculateAge(dob) {
 }
 import https from 'https';
 
-// ==================== WEB SEARCH (WIKIPEDIA API - STABIL & GRATIS) ====================
+// ==================== WEB SEARCH (TAVILY API - KHUSUS AI) ====================
 async function webSearch(query) {
-  console.log(`🌐 [WebSearch] Query: "${query}"`);
+  console.log(`🌐 [WebSearch Tavily] Query: "${query}"`);
   try {
-    const res = await fetch('https://google.serper.dev/search', {
+    const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
-      headers: {
-        'X-API-KEY': process.env.SERPER_API_KEY,
-        'Content-Type': 'application/json'
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.TAVILY_API_KEY}`
       },
-      body: JSON.stringify({ q: query, gl: 'id', hl: 'id', num: 5 })
+      body: JSON.stringify({
+        query: query,
+        include_images: true,
+        max_results: 7
+      })
     });
+
+    // Tangkap 401 secara khusus dengan pesan jelas
+    if (res.status === 401) {
+      console.error('❌ Tavily 401: API key tidak valid atau dev key terbatas.');
+      return { 
+        result: 'Pencarian tidak tersedia (API key perlu diperbaharui). Jawab dari pengetahuanmu saja dan beritahu user.',
+        metadata: null 
+      };
+    }
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    // Gabungkan hasil organik jadi teks ringkas
-    const results = (data.organic || []).slice(0, 3).map(r =>
-      `• ${r.title}\n  ${r.snippet}`
-    ).join('\n\n');
-
-    const answer = data.answerBox?.answer || data.answerBox?.snippet || '';
+    const sources = (data.results || []).map(r => ({ title: r.title, link: r.url }));
+    const image = (data.images && data.images.length > 0) ? data.images : null;
+    const resultsText = (data.results || []).map(r => `• ${r.title}\n  ${r.content}`).join('\n\n');
 
     return {
-      result: (answer ? `Jawaban Langsung: ${answer}\n\n` : '') + (results || 'Tidak ada hasil.'),
-      source: data.organic?.[0]?.link || 'Google Search'
+      result: resultsText || 'Tidak ada hasil.',
+      metadata: { sources, image }
     };
 
   } catch (e) {
     console.error(`❌ WebSearch Error:`, e.message);
-    return { result: `Gagal mencari: ${e.message}`, source: 'System' };
+    return { result: `Gagal mencari: ${e.message}`, metadata: null };
   }
 }
+
 // ==================== TOOL DEFINITION ====================
 const webSearchTool = {
   type: "function",
@@ -148,7 +159,7 @@ Persona aktif: ${personaList.join(' + ')}
 ${combinedSystem}
 
 ATURAN PENTING:
-- Gunakan bahasa Indonesia sehari-hari + emoji.
+- Gunakan bahasa Indonesia sehari-hari + emoji dan kalimat yang panjang.
 - beri respon detail dan panjang, jangan pelit kata.
 - bantu perkerjaan kosep sulit, excel, coding, dll.
 - Jika pertanyaan berhubungan dengan:
@@ -174,7 +185,7 @@ ATURAN PENTING:
     let payloadFirst = {
       model: "openai/gpt-4o-mini",
       messages: messages,
-      temperature: 0.75,
+      temperature: 0.7,
       max_tokens: 4000 // Turunkan ke 4000 agar aman dari limit batas output
     };
 
@@ -211,47 +222,57 @@ let toolCallsLength = aiMessage?.tool_calls?.length ?? 0;
 
     console.log("🔧 Tool calls:", toolCallsLength);
 
-    // ====================== HANDLE TOOL CALL ======================
+ // ====================== HANDLE TOOL CALL ======================
+    let searchMetadata = null; // Siapkan keranjang metadata
+
     if (toolCallsLength > 0) {
-      
       messages.push(aiMessage);
 
-      // 2. Jalankan semua tool yang diminta AI
       for (const toolCall of aiMessage.tool_calls) {
-        const args = JSON.parse(toolCall.function.arguments);
-        const searchQuery = args.query;
+  const args = JSON.parse(toolCall.function.arguments);
+  const searchQuery = args.query;
+  console.log("🔍 Melakukan web search:", searchQuery);
 
-        console.log("🔍 Melakukan web search:", searchQuery);
+  let toolResultContent = '';
+  try {
+    const searchResult = await webSearch(searchQuery);
+    if (!searchMetadata && searchResult.metadata) {
+      searchMetadata = searchResult.metadata;
+    }
+    toolResultContent = `Hasil pencarian:\n${searchResult.result}`;
+  } catch (err) {
+    // Kalau Tavily 401 / gagal, kasih tahu AI dengan sopan
+    toolResultContent = `Pencarian gagal: ${err.message}. Jawablah berdasarkan pengetahuanmu dan informasikan ke user bahwa pencarian tidak tersedia saat ini.`;
+    console.error("❌ Tool call error:", err.message);
+  }
 
-        const searchResult = await webSearch(searchQuery);
-        
-        // 3. Masukkan hasil pencarian masing-masing tool ke history
-        messages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          name: "web_search",
-          content: `Hasil pencarian:\n${searchResult.result}\n\nSumber: ${searchResult.source || 'Internet'}`
-        });
-      }
+  messages.push({
+    role: "tool",
+    tool_call_id: toolCall.id,
+    name: "web_search",
+    content: toolResultContent
+  });
+}
 
-      // 4. Lakukan pemanggilan API KEDUA SETELAH semua tool selesai mencari data
-      const secondResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: "meta-llama/llama-4-maverick",
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 8000, // <-- Hati-hati jangan kegedean, saya set 8000
-          top_p: 0.9
-        })
-      });
+// ── Pemanggilan kedua — JANGAN kirim tools lagi agar Llama tidak output JSON mentah ──
+const secondResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    model: "meta-llama/llama-4-maverick",
+    messages: messages,
+    temperature: 0.7,
+    max_tokens: 8000,
+    top_p: 0.9,
+    tool_choice: "none" 
+  })
+});
       
-
-data = await secondResponse.json();
+      data = await secondResponse.json();
       aiMessage = data.choices?.[0]?.message ?? null;
     }
     const aiReply = (aiMessage && aiMessage.content) ? aiMessage.content : "Maaf, aku lagi bingung.";
+
     // ====================== SIMPAN KE DATABASE ======================
     let currentSessionId = session_id;
 
@@ -279,11 +300,11 @@ data = await secondResponse.json();
 
 const titleData = await titleRes.json();
         
-    if (titleData.choices && titleData.choices.length > 0 && titleData.choices.message && titleData.choices.message.content) {
-          newTitle = titleData.choices.message.content
-            .replace(/["']/g, '')           // hapus kutip
-            .trim();
-        }
+if (titleData.choices?.[0]?.message?.content) {
+  newTitle = titleData.choices[0].message.content
+    .replace(/["']/g, '')
+    .trim();
+}
       } catch (err) {
         console.error("Gagal buat auto-title:", err);
         newTitle = userMessage.substring(0, 30); // fallback
@@ -313,7 +334,8 @@ const titleData = await titleRes.json();
 
     res.status(200).json({ 
       reply: aiReply, 
-      session_id: currentSessionId 
+      session_id: currentSessionId,
+      metadata: searchMetadata 
     });
 
   } catch (error) {

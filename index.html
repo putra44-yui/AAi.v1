@@ -73,7 +73,9 @@ body::before {
   font-family: 'Cormorant Garamond', serif; 
   font-size: 32px; font-weight: 700;
   background: linear-gradient(120deg, #5ab4d4, #d2b3e6);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text; /* DITAMBAHKAN BARIS INI BIAR VS CODE TIDAK CEREWET */
+  -webkit-text-fill-color: transparent;
 }
 
 .new-chat-btn {
@@ -108,35 +110,83 @@ body::before {
   scroll-behavior: smooth;
 }
 
-/* AVATAR & BUBBLE */
-.msg-row.assistant { display: flex; align-items: flex-end; gap: 14px; max-width: 82%; }
+/* ─── AVATAR & BUBBLE (DIROMBAK TOTAL) ─── */
+/* AI Assistant: Avatar di atas, tanpa balon, teks justify */
+.msg-row.assistant { 
+  display: flex; 
+  flex-direction: column; /* Avatar di atas jawaban */
+  align-items: flex-start; 
+  gap: 8px; 
+  max-width: 100%; /* Memaksimalkan lebar layar */
+}
 .assistant .avatar {
-  width: 48px; height: 48px; border-radius: 18px;
+  width: 38px; height: 38px; /* Dikecilkan sedikit biar elegan */
+  border-radius: 50%;
   background: transparent; 
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 6px 18px rgba(138,234,245,.35);
   flex-shrink: 0;
-  animation: stickerFloat 3.5s ease-in-out infinite;
-  position: relative;
 }
 .assistant .avatar img { width: 100%; height: 100%; object-fit: contain; }
-
-@keyframes stickerFloat { 0%,100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-12px) rotate(8deg); } }
-
-.msg-row.user { display: flex; justify-content: flex-end; max-width: 82%; margin-left: auto; }
-.user .bubble {
-  background: #ffffff; color: #1e2a44;
-  padding: 16px 22px; border-radius: 24px; border-bottom-right-radius: 8px;
-  border: 2px solid #c8eaf5; box-shadow: 0 6px 20px rgba(138,234,245,.18);
-  font-size: 15.5px; line-height: 1.65;
-}
-
 .assistant .bubble {
-  background: #c8eaf5; color: #1e2a44;
-  padding: 16px 22px; border-radius: 24px; border-bottom-left-radius: 8px;
-  box-shadow: 0 6px 20px rgba(138,234,245,.22);
-  font-size: 15.5px; line-height: 1.65;
+  background: transparent; /* Balon dibuang */
+  color: var(--text);
+  padding: 0; 
+  border: none; box-shadow: none;
+  font-size: 15.5px; 
+  line-height: 1.5; /* Spasi vertikal dikurangi (dari 1.65) */
+  text-align: justify; /* Teks rata kanan-kiri */
+  width: 100%;
 }
+
+/* User: Balon diganti warna biru muda, mendukung markdown */
+.msg-row.user { 
+  display: flex; 
+  justify-content: flex-end; 
+  max-width: 85%; 
+  margin-left: auto; 
+}
+.user .bubble {
+  background: var(--blue-light); /* Tukar warna dengan AI sebelumnya */
+  color: var(--text);
+  padding: 14px 20px; 
+  border-radius: 24px; 
+  border-bottom-right-radius: 8px;
+  box-shadow: 0 6px 16px rgba(138,234,245,.2);
+  font-size: 15px; 
+  line-height: 1.5;
+  text-align: left; /* Rata kiri untuk user agar rapi */
+}
+
+/* ─── DITAMBAHKAN: Jendela Kode & Action AI ─── */
+.code-window { 
+  background: #1e2a44; border-radius: 12px; margin: 12px 0; 
+  overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid #2a7a9e;
+}
+.code-header { 
+  display: flex; justify-content: space-between; align-items: center; 
+  background: rgba(0,0,0,0.35); padding: 8px 14px; color: #c8eaf5; 
+  font-size: 12px; font-family: 'DM Sans', sans-serif; 
+}
+.copy-code-btn { 
+  background: none; border: none; color: #c8eaf5; cursor: pointer; 
+  display: flex; align-items: center; gap: 6px; font-size: 12px; transition: .2s;
+}
+.copy-code-btn:hover { color: white; transform: scale(1.05); }
+.code-window pre { 
+  margin: 0; padding: 14px; overflow-x: auto; /* Kunci agar bisa scroll kanan-kiri */
+  color: #e2e8f0; font-family: ui-monospace, monospace; font-size: 13.5px; 
+}
+
+/* Tombol Copy & Sync di bawah jawaban AI */
+.msg-actions { 
+  display: flex; gap: 14px; margin-top: 8px; color: var(--text-muted); 
+  align-items: center; width: 100%;
+}
+.msg-actions button { 
+  background: none; border: none; color: inherit; cursor: pointer; 
+  font-size: 15px; transition: .2s; 
+}
+.msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
 
 /* BROWSING BUTTON & STATUS */
 #browsingBtn { padding: 8px; border-radius: 50%; font-size: 18px; border: none; cursor: pointer; transition: all .2s; background: transparent; color: #7a8aa8; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
@@ -303,8 +353,8 @@ body::before {
   .topbar { padding: 15px 20px; flex-wrap: wrap; }
   .chat-area { padding: 20px 16px; }
   .input-area { padding: 15px; }
-  
-  .msg-row.assistant, .msg-row.user { max-width: 90%; }
+  .msg-row.assistant { max-width: 100%; padding-right: 2x; }
+  .msg-row.user { max-width: 90%; }
   .session-actions { opacity: 1; }
 }
 
@@ -352,10 +402,81 @@ body::before {
 }
 .bubble pre code { background: transparent; padding: 0; }
 
+
+
+/* ─── SOURCE AREA (BAWAH JAWABAN AI) ─── */
+.sources-container {
+  margin-top: 15px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--blue-light);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.source-label { font-size: 12px; font-weight: 700; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.source-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-item {
+  background: #fff; border: 1px solid var(--blue-light); padding: 6px 12px; 
+  border-radius: 12px; font-size: 13px; color: var(--blue-dark);
+  text-decoration: none; display: flex; align-items: center; gap: 6px;
+  transition: .2s; box-shadow: var(--shadow-sm);
+}
+.source-item:hover { background: var(--blue-light); transform: translateY(-2px); }
+.source-img { width: 100%; max-width: 200px; border-radius: 12px; margin-top: 8px; border: 2px solid var(--blue-light); }
+
+/* ─── ACTION UNTUK USER ─── */
+.user-actions {
+  display: flex; justify-content: flex-end; margin-top: 6px; color: var(--text-muted);
+}
+.user-actions button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; opacity: 0.6; transition: .2s; }
+.user-actions button:hover { opacity: 1; color: var(--blue-dark); }
+
+/* ─── UI VERSION INDICATOR < 1/1 > ─── */
+.version-tag {
+  font-size: 11px; background: var(--blue-light); color: var(--blue-dark);
+  padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 10px;
+}
+
+/* ─── CUSTOM MODAL (HAPUS SESI) ─── */
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100dvh;
+  background: rgba(30, 42, 68, 0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 99999; opacity: 0; pointer-events: none; transition: .3s;
+}
+.modal-overlay.active { opacity: 1; pointer-events: auto; }
+.modal-box {
+  background: #fff; padding: 24px 32px; border-radius: 24px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2); text-align: center;
+  transform: translateY(20px); transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 320px; width: 90%; border: 2px solid var(--blue-light);
+}
+.modal-overlay.active .modal-box { transform: translateY(0); }
+.modal-title { font-size: 18px; font-weight: 700; color: #e74c3c; margin-bottom: 8px; }
+.modal-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
+.modal-actions { display: flex; gap: 12px; justify-content: center; }
+.btn-cancel, .btn-confirm {
+  padding: 10px 20px; border-radius: 99px; border: none; font-weight: 600; cursor: pointer; transition: .2s;
+}
+.btn-cancel { background: #f1f5f9; color: var(--text); }
+.btn-cancel:hover { background: #e2e8f0; }
+.btn-confirm { background: #e74c3c; color: white; }
+.btn-confirm:hover { background: #c0392b; transform: scale(1.05); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal-box">
+    <div class="modal-title">Hapus Obrolan?</div>
+    <div class="modal-desc">Obrolan ini akan dihapus secara permanen dan tidak bisa dikembalikan.</div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeDeleteModal()">Batal</button>
+      <button class="btn-confirm" id="confirmDeleteBtn">Ya, Hapus</button>
+    </div>
+  </div>
+</div>
+
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
@@ -554,7 +675,10 @@ item.innerHTML = `
         <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
       </div>
       <div class="session-actions">
-        <button class="action-btn" title="Edit Judul" onclick="event.stopImmediatePropagation();renameSession('${s.id}', '${escHtml(s.title || '')}')">✏️</button>
+        <button class="action-btn" title="Edit Judul" 
+  data-sid="${s.id}" 
+  data-title="${escHtml(s.title || '')}"
+  onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
         <button class="action-btn" title="Hapus Obrolan" onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
       </div>
     `;
@@ -563,14 +687,35 @@ item.innerHTML = `
   });
 }
 
-async function deleteSession(id) {
-  if (!confirm('Hapus obrolan ini permanen?')) return;
-  const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-  if (res.ok) {
-    if (currentSessionId === id) newChat();
-    loadSessions();
-  }
+// UBAH TOTAL FUNGSI INI:
+let sessionToDelete = null;
+
+function deleteSession(id) {
+  sessionToDelete = id;
+  document.getElementById('deleteModal').classList.add('active');
 }
+
+function closeDeleteModal() {
+  sessionToDelete = null;
+  document.getElementById('deleteModal').classList.remove('active');
+}
+
+// Event listener untuk tombol Ya, Hapus
+document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+  if (!sessionToDelete) return;
+  const id = sessionToDelete;
+  closeDeleteModal(); // Tutup modal duluan biar mulus
+
+  try {
+    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      if (currentSessionId === id) newChat();
+      loadSessions();
+    }
+  } catch (e) {
+    console.error("Gagal hapus:", e);
+  }
+});
 
 // ─── CHAT ───
 async function loadSession(id) {
@@ -606,23 +751,186 @@ function newChat() {
 
 
 
-function appendMessage(role, content, timestamp = null, isError = false) {
+function appendMessage(role, content, timestamp = null, metadata = null) {
   const area = document.getElementById('chatArea');
   const time = timestamp 
     ? new Date(timestamp).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})
     : new Date().toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'});
 
-  let html = role === 'assistant' 
-   // UBAH BAGIAN IMG SRC MENJADI INI:
-    ? `<div class="msg-row assistant"><div class="avatar" style="background:transparent;"><img src="/ayaka.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;"></div><div style="flex:1"><div class="bubble">${formatContent(content)}</div><div style="font-size:11px;margin-top:6px;opacity:.65;">${time}</div></div></div>`
-    : `<div class="msg-row user"><div style="flex:1;text-align:right"><div class="bubble">${escHtml(content)}</div><div style="font-size:11px;margin-top:6px;opacity:.65;">${time}</div></div></div>`;
+  let html = '';
+  
+  if (role === 'assistant') {
+    // Generate HTML untuk Sumber jika ada metadata
+    let sourcesHtml = '';
+    if (metadata && metadata.sources && metadata.sources.length > 0) {
+      sourcesHtml = `
+      <div class="sources-container">
+        <div class="source-label"><i class="fas fa-search"></i> Referensi Terpercaya</div>
+        <div class="source-grid">
+          ${metadata.sources.map(s => `<a href="${s.link}" target="_blank" class="source-item"><i class="fas fa-link"></i> ${s.title}</a>`).join('')}
+        </div>
+        ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Search Result">` : ''}
+      </div>`;
+    }
+
+    html = `
+    <div class="msg-row assistant">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
+          <img src="/ayaka.gif" alt="Ayaka">
+        </div>
+        <div style="font-weight:700; font-size:15px; color:var(--blue-dark); font-family:'Cormorant Garamond', serif;">AAi <span class="version-tag">V.1</span></div>
+      </div>
+      <div class="bubble">${formatContent(content)}</div>
+      ${sourcesHtml}
+      <div class="msg-actions">
+         <button title="Copy Jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+         <button title="Ulangi Jawaban" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+         <span style="font-size:11px; opacity:.65; margin-left:auto;">${time}</span>
+      </div>
+    </div>`;
+  } else {
+    // User Bubble dengan tombol Copy
+    html = `
+    <div class="msg-row user" data-raw="${encodeURIComponent(content)}">
+      <div style="flex:1; width:100%;">
+        <div class="bubble">${formatContent(content)}</div>
+        <div class="user-actions">
+           <span style="font-size:11px; opacity:.65; margin-right:auto;">${time}</span>
+           <button title="Copy Pesan" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
+        </div>
+      </div>
+    </div>`;
+  }
 
   area.insertAdjacentHTML('beforeend', html);
   scrollBottom();
 }
 
+// Fungsi Copy khusus User
+function copyUserMsg(btn) {
+  const bubble = btn.closest('.user').querySelector('.bubble');
+  navigator.clipboard.writeText(bubble.innerText);
+  const icon = btn.querySelector('i');
+  icon.className = 'fas fa-check';
+  setTimeout(() => icon.className = 'far fa-copy', 2000);
+}
+
+// ─── FUNGSI ACTION AI ───
+function copyFullAI(btn) {
+  // Ambil isi teks dari bubble tepat di atas tombol ini
+  const bubble = btn.closest('.assistant').querySelector('.bubble');
+  navigator.clipboard.writeText(bubble.innerText);
+  
+  const icon = btn.querySelector('i');
+  icon.className = 'fas fa-check';
+  icon.style.color = '#5ab4d4';
+  setTimeout(() => {
+    icon.className = 'far fa-copy';
+    icon.style.color = 'inherit';
+  }, 2000);
+}
+
+function regenerateAI(btn) {
+  const aiRow = btn.closest('.msg-row.assistant');
+  let current = aiRow.previousElementSibling;
+  let rawUserText = '';
+  
+  while (current) {
+    if (current.classList.contains('user')) {
+      rawUserText = decodeURIComponent(current.getAttribute('data-raw'));
+      break;
+    }
+    current = current.previousElementSibling;
+  }
+
+  if (rawUserText) {
+    const icon = btn.querySelector('i');
+    icon.classList.add('fa-spin');
+    
+    // Hapus AI yang lama saja, JANGAN panggil sendMessage(rawUserText) biasa
+    aiRow.remove(); 
+    
+    // Panggil fungsi kirim pesan tapi versi "DIAM" (tanpa append user bubble lagi)
+    executeRegenerate(rawUserText);
+  }
+}
+
+// Fungsi khusus Regenerate agar tidak menduplikasi bubble user
+async function executeRegenerate(text) {
+  const area = document.getElementById('chatArea');
+  const typingId = 'typing_' + Date.now();
+  
+  // Langsung munculin Ayaka mikir tanpa nambahin bubble user lagi
+  area.insertAdjacentHTML('beforeend', `
+    <div class="msg-row assistant" id="${typingId}">
+      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;"><img src="/ayaka.gif" alt="Ayaka"></div>
+      <div class="typing-indicator">
+        <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+        <span style="margin-left:12px;font-size:13.5px;">AAi meramu ulang jawaban...</span>
+      </div>
+    </div>`);
+  scrollBottom();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        session_id: currentSessionId,
+        user_id: currentUser.id,
+        persona_name: currentPersona,
+        browsing_mode: isBrowsingMode 
+      })
+    });
+
+    document.getElementById(typingId)?.remove();
+    const data = await res.json();
+    
+    // Kirim metadata (sources) ke appendMessage jika ada
+    appendMessage('assistant', data.reply, null, data.metadata); 
+  } catch (e) {
+    document.getElementById(typingId)?.remove();
+    appendMessage('assistant', `⚠️ Gagal memuat ulang: ${e.message}`);
+  }
+}
+
+// ─── KUSTOMISASI MARKED.JS UNTUK WINDOW KODE ───
+const renderer = new marked.Renderer();
+renderer.code = function(code, language) {
+  const lang = language || 'code';
+  // Amankan kode dari error string (kompatibilitas marked versi baru)
+  const text = typeof code === 'string' ? code : code.text; 
+  return `<div class="code-window">
+            <div class="code-header">
+              <span style="text-transform:uppercase; font-weight:600; letter-spacing:0.5px;">${lang}</span>
+              <button class="copy-code-btn" onclick="copyCodeWindow(this)">
+                <i class="fas fa-copy"></i> Copy
+              </button>
+            </div>
+            <pre><code>${escHtml(text)}</code></pre>
+          </div>`;
+};
+marked.setOptions({ renderer: renderer });
+
+// Fungsi Copy khusus untuk Window Kode
+function copyCodeWindow(btn) {
+  const pre = btn.closest('.code-window').querySelector('pre');
+  navigator.clipboard.writeText(pre.textContent);
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+  btn.style.color = '#fff';
+  setTimeout(() => {
+    btn.innerHTML = originalHtml;
+    btn.style.color = '#c8eaf5';
+  }, 2000);
+}
+
 function formatContent(text) {
-  // 1. Biarkan marked.js menerjemahkan **bold**, ## heading, dan ```code```
+  // ANTI-BUG: Kalau teks kosong/error, jangan panggil marked.js!
+  if (!text) return "<em style='color:#e74c3c;'>⚠️ Sistem merespons dengan data kosong.</em>";
+  
   let html = marked.parse(text);
   
   // 2. (Opsional) Tetap pertahankan custom card untuk "Sumber" agar tetap cantik
@@ -631,13 +939,6 @@ function formatContent(text) {
   return html;
 }
 
-function copyCode(btn) {
-  const code = btn.parentElement.textContent.replace('Copy','').trim();
-  navigator.clipboard.writeText(code);
-  const original = btn.textContent;
-  btn.textContent = '✓';
-  setTimeout(() => btn.textContent = original, 1800);
-}
 
 function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
