@@ -43,24 +43,29 @@ body::before {
 
 /* ── EDIT PESAN USER ── */
 .edit-textarea {
-  width: 100%; min-height: 140px; max-height: 420px;
-  border: 1.5px solid var(--blue-mid); border-radius: 12px;
+  width: 100%; min-height: 90px; max-height: 300px;
+  border: 1.5px solid var(--blue-mid); border-radius: 16px;
   padding: 14px 18px; font-size: 15px; font-family: inherit;
   resize: vertical; outline: none; background: #fff;
-  color: var(--text); line-height: 1.5;
+  color: var(--text); line-height: 1.6;
+  box-shadow: var(--shadow-sm);
 }
 .edit-actions {
-  display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end;
+  display: flex; gap: 10px; margin-top: 10px; justify-content: flex-end;
 }
 .btn-edit-cancel {
-  background: #f1f5f9; border: none; padding: 6px 16px;
+  background: #f1f5f9; border: none; padding: 8px 18px;
   border-radius: 12px; cursor: pointer; font-size: 13px; color: var(--text);
+  transition: .2s;
 }
+.btn-edit-cancel:hover { background: #e2e8f0; }
 .btn-edit-save {
   background: linear-gradient(135deg, var(--blue-mid), #b38fd4);
-  border: none; padding: 6px 16px; border-radius: 12px;
+  border: none; padding: 8px 18px; border-radius: 12px;
   cursor: pointer; font-size: 13px; color: white; font-weight: 600;
+  transition: .2s;
 }
+.btn-edit-save:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(90,180,212,.3); }
 
 /* ── SIDEBAR ── */
 .sidebar {
@@ -214,30 +219,36 @@ body::before {
 .bubble table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
 .bubble th, .bubble td { border: 1px solid var(--blue-light); padding: 8px; text-align: left; }
 
-/* ── CODE WINDOW ── */
+/* ── CODE WINDOW (VISUAL SEPARATION & DARKER) ── */
 .code-window {
-  background: #1e2a44; border-radius: 12px; margin: 8px 0;
-  overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid #2a7a9e;
+  background: #0d1117; border-radius: 12px; margin: 16px 0;
+  overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.35); border: 1px solid #30363d;
+  position: relative;
 }
+.code-window::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, #58a6ff, #bc8cff);
+}
+.bubble p + .code-window, .bubble .code-window + p { margin-top: 12px; }
 .code-header {
   display: flex; justify-content: space-between; align-items: center;
-  background: rgba(0,0,0,.35); padding: 8px 14px; color: #c8eaf5;
-  font-size: 12px;
+  background: #161b22; padding: 8px 14px; color: #8b949e;
+  font-size: 12px; border-bottom: 1px solid #30363d;
 }
 .code-header-actions { display: flex; gap: 12px; align-items: center; }
 .code-window pre {
   margin: 0; padding: 14px;
   overflow-x: auto; overflow-y: auto; max-height: 50vh;
-  color: #e2e8f0; font-family: ui-monospace, monospace;
+  color: #c9d1d9; font-family: ui-monospace, monospace;
   font-size: 13.5px; white-space: pre;
   transition: all .3s ease;
 }
 .code-window pre.minimized { display: none; }
 .copy-code-btn {
-  background: none; border: none; color: #c8eaf5; cursor: pointer;
+  background: none; border: none; color: #8b949e; cursor: pointer;
   display: flex; align-items: center; gap: 6px; font-size: 12px; transition: .2s;
 }
-.copy-code-btn:hover { color: white; transform: scale(1.05); }
+.copy-code-btn:hover { color: #58a6ff; transform: scale(1.05); }
 
 /* ── STREAMING CURSOR ── */
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
@@ -274,13 +285,16 @@ body::before {
 }
 .msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
 .user-actions {
-  display: flex; justify-content: flex-end; margin-top: 6px; color: var(--text-muted);
+  display: flex; justify-content: flex-end; align-items: center;
+  margin-top: 8px; gap: 16px; color: var(--text-muted);
+  padding-right: 4px;
 }
 .user-actions button {
   background: none; border: none; color: inherit;
-  cursor: pointer; font-size: 14px; opacity: .6; transition: .2s;
+  cursor: pointer; font-size: 14px; opacity: .6; transition: all .2s ease;
+  padding: 6px 8px; border-radius: 8px;
 }
-.user-actions button:hover { opacity: 1; color: var(--blue-dark); }
+.user-actions button:hover { opacity: 1; color: var(--blue-dark); background: rgba(138,234,245,.15); transform: scale(1.05); }
 
 /* ── VERSION TAG ── */
 .version-tag {
@@ -341,6 +355,53 @@ body::before {
   align-self: flex-start; margin-top: 2px;
 }
 .input-wrap.code-mode .code-mode-badge { display: flex; align-items: center; gap: 4px; }
+
+/* ── UPLOAD BUTTON & PREVIEW ── */
+.upload-container { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; padding-bottom: 4px; }
+.upload-btn { width: 36px; height: 36px; border-radius: 50%; background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: .2s; font-size: 18px; }
+.upload-btn:hover { color: var(--blue-mid); transform: scale(1.1); }
+/* ✅ CONTAINER PREVIEW DI ATAS TEXTAREA */
+.file-preview-container {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  padding: 12px 16px 8px; max-width: 100%;
+  min-height: 0; 
+  transition: opacity 0.3s ease, transform 0.3s ease, padding 0.3s ease;
+}
+.file-preview-container:empty { display: none; padding: 0; }
+.file-preview-container.fading-out {
+  opacity: 0; transform: translateY(-8px); pointer-events: none;
+}
+
+/* ✅ KARTU PREVIEW (LEBIH BESAR & "NGGAK PELIT") */
+.file-preview-item {
+  position: relative; background: #fff;
+  border: 2px solid var(--blue-light); border-radius: 16px;
+  padding: 8px; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; align-items: center;
+  width: 140px; height: 140px; overflow: hidden;
+  transition: transform .2s, box-shadow .2s;
+}
+.file-preview-item:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+
+.file-preview-item img {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: 10px; flex: 1;
+}
+.file-preview-item .file-icon {
+  font-size: 32px; color: var(--blue-mid); margin: auto;
+}
+.file-preview-item .file-name {
+  font-size: 11px; color: var(--text-muted); text-align: center;
+  margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+}
+.file-preview-item .remove-file {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; background: #e74c3c; color: #fff;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 14px; font-weight: bold;
+  box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: .2s;
+}
+.file-preview-item .remove-file:hover { transform: scale(1.15); background: #c0392b; }
 
 #messageInput {
   flex: 1; min-width: 0;
@@ -492,22 +553,32 @@ body::before {
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
-    <div class="input-wrap" id="inputWrap">
-      <span class="code-mode-badge"><i class="fas fa-code" style="font-size:10px;"></i> CODE</span>
-      <textarea id="messageInput" rows="1"
-        placeholder="Ketik pesan…"
-        onkeydown="handleKey(event)"
-        oninput="autoResize(this); detectCodeMode(this);"
-        onpaste="setTimeout(() => detectCodeMode(this), 10);"></textarea>
-      <div class="settings-wrapper">
-        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Persona">
-          <i class="fas fa-sliders-h"></i>
-        </button>
-        <div class="settings-menu" id="settingsMenu"></div>
-      </div>
-      <button class="send-btn" id="sendBtn" onclick="handleSend()">▶</button>
+  <!-- ✅ PREVIEW GAMBAR/FILE DI ATAS TEXTAREA -->
+  <div id="filePreview" class="file-preview-container"></div>
+
+  <div class="input-wrap" id="inputWrap">
+    <div class="upload-container">
+      <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip" style="display:none;">
+      <button class="upload-btn" onclick="document.getElementById('fileInput').click()" title="Lampirkan File/Gambar">
+        <i class="fas fa-paperclip"></i>
+      </button>
     </div>
+
+    <span class="code-mode-badge"><i class="fas fa-code" style="font-size:10px;"></i> CODE</span>
+    <textarea id="messageInput" rows="1"
+      placeholder="Ketik pesan…"
+      onkeydown="handleKey(event)"
+      oninput="autoResize(this); detectCodeMode(this);"
+      onpaste="setTimeout(() => detectCodeMode(this), 10);"></textarea>
+    <div class="settings-wrapper">
+      <button class="settings-btn" onclick="toggleSettingsMenu()" title="Persona">
+        <i class="fas fa-sliders-h"></i>
+      </button>
+      <div class="settings-menu" id="settingsMenu"></div>
+    </div>
+    <button class="send-btn" id="sendBtn" onclick="handleSend()">▶</button>
   </div>
+</div>
 </main>
 
 <script>
@@ -526,7 +597,7 @@ let activeVersionMap = {};
 let currentUtterance = null;
 let isSpeaking       = false;
 let abortController  = null;
-let isGenerating     = false;   // ← baru: cegah kirim saat streaming
+let selectedFiles    = [];
 
 // ── Inisialisasi suara TTS ──
 if ('speechSynthesis' in window) {
@@ -539,17 +610,14 @@ function logDebug(msg, color = '#2a7a9e') {
 }
 
 // ══════════════════════════════════════════
-// TOMBOL SEND / STOP + DISABLE INPUT
+// TOMBOL SEND / STOP
 // ══════════════════════════════════════════
 function setSendBtn(mode) {
   const btn = document.getElementById('sendBtn');
-  const inp = document.getElementById('messageInput');
   if (mode === 'stop') {
     btn.innerHTML = '⏹';
     btn.title = 'Hentikan';
     btn.classList.add('stop-mode');
-    inp.disabled = true;
-    inp.style.opacity = '0.7';
     btn.onclick = () => {
       if (abortController) abortController.abort();
     };
@@ -557,14 +625,12 @@ function setSendBtn(mode) {
     btn.innerHTML = '▶';
     btn.title = 'Kirim';
     btn.classList.remove('stop-mode');
-    inp.disabled = false;
-    inp.style.opacity = '1';
     btn.onclick = handleSend;
   }
 }
 
 // ══════════════════════════════════════════
-// TTS
+// TTS (Text-to-Speech)
 // ══════════════════════════════════════════
 function speakText(btn, text) {
   if (isSpeaking) {
@@ -599,19 +665,24 @@ function speakText(btn, text) {
 }
 
 // ══════════════════════════════════════════
-// DETEKSI CODE MODE (diperbaiki: tidak false-positive HTML)
+// DETEKSI CODE MODE (FIX: Bisa keluar dengan Enter/teks biasa)
 // ══════════════════════════════════════════
 function detectCodeMode(textarea) {
   const val = textarea.value.trim();
   const wrap = document.getElementById('inputWrap');
+  const lines = val.split('\n');
+  const lastLine = lines[lines.length - 1].trim();
 
-  const looksLikeCode = /function |const |let |var |class |=>|import |export|def |print\(|async |await|SELECT |INSERT|UPDATE|FROM/i.test(val) ||
-                        val.includes('```');
+  // Cek apakah ada pola kode
+  const hasCodePattern = /function |const |let |var |class |=>|import |export|def |print\(|async |await|SELECT |INSERT|UPDATE|FROM|```/i.test(val);
+  
+  // Jika baris terakhir kosong atau berisi teks percakapan biasa, matikan code mode
+  const isEndingWithNormalText = lastLine === '' || /^[a-z\s.,!?'"()\-]+$/i.test(lastLine);
 
-  if (looksLikeCode) {
+  if (hasCodePattern && !isEndingWithNormalText) {
     textarea.classList.add('code-mode');
     wrap.classList.add('code-mode');
-    textarea.placeholder = 'Boleh tambah teks penjelasan di atas atau bawah code block…';
+    textarea.placeholder = 'Mode kode aktif…';
   } else {
     textarea.classList.remove('code-mode');
     wrap.classList.remove('code-mode');
@@ -623,9 +694,7 @@ function getMessageText() {
   const inp = document.getElementById('messageInput');
   let text = inp.value.trim();
   if (!text) return '';
-
   if (text.includes('```')) return text;
-
   if (inp.classList.contains('code-mode')) {
     return '```\n' + text + '\n```';
   }
@@ -633,7 +702,7 @@ function getMessageText() {
 }
 
 // ══════════════════════════════════════════
-// HELPER: bubble AI streaming
+// HELPER: buat HTML bubble AI saat streaming
 // ══════════════════════════════════════════
 function buildStreamBubbleHTML(streamId, timeStr) {
   return `
@@ -666,7 +735,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
 }
 
 // ══════════════════════════════════════════
-// STREAM SSE
+// HELPER: proses stream SSE
 // ══════════════════════════════════════════
 async function processStream(response, streamId, onDone) {
   const bubbleEl  = document.getElementById(`bubble_${streamId}`);
@@ -720,12 +789,11 @@ async function processStream(response, streamId, onDone) {
 // ══════════════════════════════════════════
 // KIRIM PESAN BARU
 // ══════════════════════════════════════════
-async function sendMessage(text) {
-  if (isGenerating) return;
+async function sendMessage(text, files = []) {
   const area = document.getElementById('chatArea');
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
 
-  appendMessage('user', text);
+  appendMessage('user', text, null, { files: files });
   scrollBottom();
 
   const streamId = 'stream_' + Date.now();
@@ -735,7 +803,6 @@ async function sendMessage(text) {
 
   setSendBtn('stop');
   abortController = new AbortController();
-  isGenerating = true;
 
   try {
     const res = await fetch('/api/chat', {
@@ -746,7 +813,8 @@ async function sendMessage(text) {
         message: text,
         session_id: currentSessionId,
         user_id: currentUser.id,
-        persona_name: currentPersona
+        persona_name: currentPersona,
+        files: files
       })
     });
 
@@ -765,14 +833,15 @@ async function sendMessage(text) {
           await loadSessions();
           const s = sessions.find(s => s.id === currentSessionId);
           if (s) document.getElementById('topbarTitle').textContent = s.title;
-        }, 800);   // ← dipercepat + cegah race
+        }, 2500);
       }
       const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
       if (userRows.length > 0)
         userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
+      const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
-        parent_id: null, created_at: new Date().toISOString()
+        parent_id: lastAI?.id || null, created_at: new Date().toISOString()
       });
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
@@ -780,7 +849,7 @@ async function sendMessage(text) {
       });
     });
 
-  } catch (e) {
+    } catch (e) {
     console.error('❌ SendMessage Error:', e);
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
@@ -788,6 +857,7 @@ async function sendMessage(text) {
       const errorMsg = e.message.includes('Provider returned error') 
         ? '⚠️ Provider error – cek koneksi / API key' 
         : e.message;
+      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -800,7 +870,6 @@ async function sendMessage(text) {
     if (actionsEl) actionsEl.style.display = 'flex';
   } finally {
     setSendBtn('send');
-    isGenerating = false;
   }
 }
 
@@ -830,7 +899,6 @@ function regenerateAI(btn) {
 }
 
 async function executeRegenerate(text, userMessageId = null) {
-  if (isGenerating) return;
   const area     = document.getElementById('chatArea');
   const streamId = 'regen_' + Date.now();
   const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -839,7 +907,6 @@ async function executeRegenerate(text, userMessageId = null) {
 
   setSendBtn('stop');
   abortController = new AbortController();
-  isGenerating = true;
 
   try {
     const res = await fetch('/api/chat', {
@@ -871,7 +938,7 @@ async function executeRegenerate(text, userMessageId = null) {
       renderMessageTree();
     });
 
-  } catch (e) {
+    } catch (e) {
     console.error('❌ Regenerate Error:', e);
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
@@ -879,6 +946,7 @@ async function executeRegenerate(text, userMessageId = null) {
       const errorMsg = e.message.includes('Provider returned error') 
         ? '⚠️ Provider error – cek koneksi / API key' 
         : e.message;
+      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -891,12 +959,11 @@ async function executeRegenerate(text, userMessageId = null) {
     if (actionsEl) actionsEl.style.display = 'flex';
   } finally {
     setSendBtn('send');
-    isGenerating = false;
   }
 }
 
 // ══════════════════════════════════════════
-// RETRY ERROR
+// TOMBOL "COBA LAGI"
 // ══════════════════════════════════════════
 function retryLastMessage(btn) {
   const aiRow = btn.closest('.msg-row.assistant');
@@ -916,7 +983,7 @@ function retryLastMessage(btn) {
 }
 
 // ══════════════════════════════════════════
-// EDIT PESAN USER (textarea lebih besar)
+// EDIT PESAN USER
 // ══════════════════════════════════════════
 function editUserMsg(btn) {
   const row    = btn.closest('.msg-row.user');
@@ -925,7 +992,6 @@ function editUserMsg(btn) {
   const msgId  = row.dataset.id || ('edit_' + Date.now());
 
   bubble.dataset.originalHtml = bubble.innerHTML;
-
   bubble.innerHTML = `
     <textarea class="edit-textarea" id="edt_${msgId}">${escHtml(raw)}</textarea>
     <div class="edit-actions">
@@ -970,12 +1036,9 @@ async function saveEdit(btn, msgId) {
         persona_name: currentPersona
       })
     });
-
     if (!res.ok) throw new Error('Gagal update');
-
     const msg = currentMessages.find(m => m.id === msgId);
     if (msg) msg.content = newText;
-
     renderMessageTree();
     executeRegenerate(newText, msgId);
   } catch (e) {
@@ -985,10 +1048,9 @@ async function saveEdit(btn, msgId) {
 }
 
 // ══════════════════════════════════════════
-// BRANCHED MESSAGE
+// KIRIM PESAN DARI EDIT (branched)
 // ══════════════════════════════════════════
 async function sendMessageBranched(text, parentId = null) {
-  if (isGenerating) return;
   const area     = document.getElementById('chatArea');
   appendMessage('user', text);
   scrollBottom();
@@ -1000,7 +1062,6 @@ async function sendMessageBranched(text, parentId = null) {
 
   setSendBtn('stop');
   abortController = new AbortController();
-  isGenerating = true;
 
   try {
     const res = await fetch('/api/chat', {
@@ -1035,7 +1096,7 @@ async function sendMessageBranched(text, parentId = null) {
       if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
     });
 
-  } catch (e) {
+    } catch (e) {
     console.error('❌ Branched Message Error:', e);
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
@@ -1043,6 +1104,7 @@ async function sendMessageBranched(text, parentId = null) {
       const errorMsg = e.message.includes('Provider returned error') 
         ? '⚠️ Provider error – cek koneksi / API key' 
         : e.message;
+      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -1055,12 +1117,11 @@ async function sendMessageBranched(text, parentId = null) {
     if (actionsEl) actionsEl.style.display = 'flex';
   } finally {
     setSendBtn('send');
-    isGenerating = false;
   }
 }
 
 // ══════════════════════════════════════════
-// SESSIONS (title pendek 1-3 kata sudah di-back-end)
+// SESSIONS
 // ══════════════════════════════════════════
 async function loadSessions() {
   try {
@@ -1204,7 +1265,7 @@ function switchVersion(id) {
 function renderMessageTree() {
   const area   = document.getElementById('chatArea');
   const branch = buildActiveBranch();
-  if (!branch.length) return;
+  if (!branch.length) { logDebug('Branch kosong, skip render', '#e67e22'); return; }
   area.innerHTML = '';
   branch.forEach(m => {
     const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
@@ -1273,11 +1334,34 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       </div>
     </div>`;
 
-  } else {
+      } else {
+    let filesHtml = '';
+    if (metadata && metadata.files && Array.isArray(metadata.files) && metadata.files.length > 0) {
+      filesHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">`;
+      metadata.files.forEach(f => {
+        const isImage = f.type && f.type.startsWith('image/');
+        const name = f.name || 'file';
+        
+        if (isImage && f.base64) {
+          // Escape base64 agar tidak pecah di HTML
+          const safeSrc = f.base64.replace(/"/g, '&quot;');
+          filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
+        } else {
+          const icon = f.type?.includes('word') ? '📝' : f.type?.includes('sheet') ? '📊' : f.type?.includes('pdf') ? '📕' : '📄';
+          filesHtml += `<div style="display:flex;align-items:center;gap:5px;background:#fff;padding:5px 8px;border-radius:8px;font-size:12px;border:1px solid var(--blue-light);color:var(--text);">
+            <span style="font-size:16px;">${icon}</span>
+            <span style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
+          </div>`;
+        }
+      });
+      filesHtml += `</div>`;
+    }
+
     html = `
     <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
       <div style="flex:1;width:100%;">
         <div class="bubble">${formatContent(content)}</div>
+        ${filesHtml}
         <div class="user-actions">
           <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
           <button title="Edit" onclick="editUserMsg(this)"><i class="fas fa-pen"></i></button>
@@ -1393,7 +1477,7 @@ document.addEventListener('click', e => {
 });
 
 // ══════════════════════════════════════════
-// INPUT
+// INPUT & UPLOAD HANDLER
 // ══════════════════════════════════════════
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -1402,17 +1486,118 @@ function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
 }
-function handleSend() {
-  if (isGenerating) return;
-  const inp  = document.getElementById('messageInput');
-  const text = getMessageText();
-  if (!text) return;
-  inp.value = '';
-  autoResize(inp);
-  inp.classList.remove('code-mode');
-  document.getElementById('inputWrap').classList.remove('code-mode');
-  sendMessage(text);
+
+// ← File Upload Logic
+document.getElementById('fileInput').addEventListener('change', function(e) {
+  const files = Array.from(e.target.files);
+  files.forEach(file => {
+    if (!selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
+      selectedFiles.push(file);
+    }
+  });
+  renderFilePreview();
+  this.value = '';
+});
+
+// ✅ RENDER PREVIEW (TARGET CONTAINER BARU + STRUKTUR LEBIH BESAR)
+function renderFilePreview() {
+  const container = document.getElementById('filePreview');
+  container.innerHTML = '';
+  selectedFiles.forEach((file, index) => {
+    const div = document.createElement('div');
+    div.className = 'file-preview-item';
+    const isImage = file.type.startsWith('image/');
+
+    div.innerHTML = `
+      ${isImage 
+        ? `<img src="${URL.createObjectURL(file)}" alt="preview">` 
+        : `<i class="fas fa-file-alt file-icon"></i>`
+      }
+      <div class="file-name">${file.name}</div>
+      <span class="remove-file" onclick="removeFile(${index})">×</span>
+    `;
+    container.appendChild(div);
+  });
 }
+
+function removeFile(index) {
+  const file = selectedFiles[index];
+  if (file && file.type.startsWith('image/')) {
+    const img = document.querySelectorAll('.file-preview-item img')[index];
+    if (img) URL.revokeObjectURL(img.src);
+  }
+  selectedFiles.splice(index, 1);
+  renderFilePreview();
+}
+
+// ✅ HELPER: File ke Base64
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+  });
+}
+
+// ✅ HELPER: File ke Base64 (aman & async)
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+  });
+}
+
+// ✅ GANTI handleSend() LAMA
+async function handleSend() {
+  const inp = document.getElementById('messageInput');
+  const text = inp.value.trim();
+  if (!text && selectedFiles.length === 0) return;
+
+  const sendBtn = document.getElementById('sendBtn');
+  const originalHTML = sendBtn.innerHTML;
+  sendBtn.disabled = true;
+  sendBtn.innerHTML = '⏳';
+
+  try {
+    const oversized = selectedFiles.find(f => f.size > 2 * 1024 * 1024);
+    if (oversized) throw new Error(`File "${oversized.name}" >2MB. Kompres dulu ya.`);
+
+    const filesPayload = await Promise.all(selectedFiles.map(async f => ({
+      name: f.name, type: f.type, base64: await fileToBase64(f)
+    })));
+
+    // Reset input teks
+    inp.value = ''; autoResize(inp);
+    inp.classList.remove('code-mode');
+    document.getElementById('inputWrap').classList.remove('code-mode');
+
+    // Fade-out preview halus
+    const previewContainer = document.getElementById('filePreview');
+    previewContainer.classList.add('fading-out');
+
+    // Kirim pesan (UI append + streaming)
+    sendMessage(text, filesPayload);
+
+    // Bersihkan state setelah animasi selesai
+    setTimeout(() => {
+      selectedFiles = [];
+      renderFilePreview();
+      previewContainer.classList.remove('fading-out');
+    }, 300);
+
+  } catch (err) {
+    console.error('❌ Gagal kirim:', err);
+    alert(err.message || 'Terjadi kesalahan.');
+    document.getElementById('filePreview').classList.remove('fading-out');
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.innerHTML = originalHTML;
+  }
+}
+
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 document.addEventListener('click', e => {
   if (window.innerWidth > 768) return;

@@ -1,5 +1,8 @@
 export const maxDuration = 60;
+import * as XLSX from 'xlsx';
+import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { createClient } from '@supabase/supabase-js';
+import mammoth from 'mammoth';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -21,7 +24,7 @@ function calculateAge(dob) {
 function getModelConfig(personaList) {
   const persona = personaList[0];
   const configs = {
-    'Coding':          { temperature: 0.2, max_tokens: 32000, top_p: 0.85 },
+    'Coding':          { temperature: 0.0, max_tokens: 32000, top_p: 0.85 },
     'Kritikus Brutal': { temperature: 0.3, max_tokens: 4000,  top_p: 0.85 },
     'Santai':          { temperature: 0.8, max_tokens: 2000,  top_p: 0.95 },
     'Rosalia':         { temperature: 0.95, max_tokens: 2000, top_p: 0.98 },
@@ -29,6 +32,24 @@ function getModelConfig(personaList) {
   };
   return configs[persona] || configs['Auto'];
 }
+
+// ✅ HELPER: Upload Base64 ke Supabase Storage
+async function uploadFileToStorage(base64String, fileName, mimeType) {
+  const base64 = base64String.split(',')[1];
+  const buffer = Buffer.from(base64, 'base64');
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const filePath = `uploads/${Date.now()}-${safeName}`;
+  
+  const { error } = await supabase.storage
+    .from('aai-files')
+    .upload(filePath, buffer, { contentType: mimeType, upsert: false });
+  if (error) throw new Error(`Gagal upload: ${error.message}`);
+  
+  const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
+  return publicUrl;
+}
+
+
 
 export default async function handler(req, res) {
 
@@ -55,10 +76,11 @@ export default async function handler(req, res) {
 
   // ── POST: Kirim pesan + streaming ──
   try {
-    const {
+        const {
       message, session_id, user_id, username,
       persona_name = 'Auto', parent_id = null, user_message_id = null,
-      edit_message_id = null   // ← BARU
+      edit_message_id = null,
+      files = [] // ← Terima array file dari frontend
     } = req.body;
 
     const userMessage = message?.trim();
@@ -84,6 +106,57 @@ export default async function handler(req, res) {
       console.log(`✅ Pesan ${edit_message_id} berhasil di-update & AI lama dihapus`);
     }
 
+        // ✅ PROSES FILE + EKSTRAK TEKS (TXT, XLSX, DOCX, GAMBAR)
+    let fileContext = '';
+    if (files && files.length > 0) {
+      console.log(`[Files] Menerima ${files.length} file.`);
+      const uploadedUrls = [];
+      const textContents = [];
+
+      for (const f of files) {
+        if (!f.base64) continue;
+        try {
+          const url = await uploadFileToStorage(f.base64, f.name, f.type);
+          uploadedUrls.push(url);
+
+          const base64Data = f.base64.split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+
+          // 1. Excel (.xlsx, .xls)
+          if (f.type.includes('sheet') || f.name.match(/\.xlsx?$/i)) {
+            const workbook = XLSX.read(buffer, { type: 'buffer' });
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const csv = XLSX.utils.sheet_to_csv(sheet);
+            textContents.push(`📊 ${f.name} (Sheet: ${sheetName}):\n${csv}`);
+          }
+          // 2. Word (.docx)
+          else if (f.type.includes('word') || f.name.match(/\.docx$/i)) {
+            const result = await mammoth.extractRawText({ buffer });
+            textContents.push(`📝 ${f.name}:\n${result.value}`);
+          }
+          // 3. Teks biasa (.txt)
+          else if (f.type === 'text/plain' || f.name.toLowerCase().endsWith('.txt')) {
+            textContents.push(`📄 ${f.name}:\n${buffer.toString('utf-8')}`);
+          }
+          // 4. Gambar (URL saja, model vision nanti bisa baca)
+          else if (f.type.startsWith('image/')) {
+            textContents.push(`🖼️ ${f.name}: ${url}`);
+          }
+        } catch (e) {
+          console.error(`⚠️ Gagal ekstrak ${f.name}:`, e.message);
+        }
+      }
+
+      if (uploadedUrls.length > 0) {
+        fileContext += `\n\n📎 File yang dilampirkan (URL):\n${uploadedUrls.map((u, i) => `${i+1}. ${u}`).join('\n')}`;
+      }
+      if (textContents.length > 0) {
+        fileContext += `\n\n📝 KONTEN FILE (WAJIB DIBACA & DIJAWAB):\n${textContents.join('\n\n---\n\n')}`;
+      }
+    }
+
+    
     // 1. User & Person
     let userQuery = supabase.from('users').select('id, person_id');
     if (user_id) userQuery = userQuery.eq('id', user_id);
@@ -146,7 +219,7 @@ export default async function handler(req, res) {
       .from('ai_personas').select('name, system_prompt').in('name', personaList);
     const combinedSystem = personasData?.map(p => `=== GAYA: ${p.name} ===\n${p.system_prompt}`).join('\n\n') || '';
 
-    // 5. System prompt (sama)
+    // 5. System prompt 
     const systemPrompt = {
       role: "system",
       content: `Kamu adalah AAi, AI keluarga yang cerdas dan ramah.
@@ -159,6 +232,8 @@ Relasi:\n${relationContext}
 
 Memori permanen:\n${memoryText}
 
+${fileContext}
+
 Persona aktif: ${personaList.join(' + ')}
 ${combinedSystem}
 
@@ -166,7 +241,16 @@ ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji, respons panjang dan detail.
 - Bantu pekerjaan konsep sulit, excel, coding, dll.
 - Jangan gunakan panggilan gw, lu, gue, lo. Utamakan nama atau "kamu".
-- Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.`
+- Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.
+- Jika ada URL gambar/file di atas, sebutkan bahwa file berhasil diterima dan berikan link jika relevan.
+- Jika user melampirkan file/teks, WAJIB konfirmasi dulu: "File [nama] berhasil dibaca. Berikut ringkasannya:" sebelum menjawab pertanyaan utama.
+- Jika user minta buat file, WAJIB gunakan format: [FILE_START:nama_file.ext] (isi konten) [FILE_END]. Gunakan .txt untuk teks, .xlsb untuk tabel (pisahkan kolom dengan tanda #, BUKAN koma), .docx untuk dokumen.
+- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download.
+- Jangan abaikan konten lampiran. Gunakan sebagai konteks utama jika relevan.
+- Jika user minta macro/VBA, WAJIB buat 2 file terpisah:
+  1. [FILE_START:data_nama.xlsb] (data tabel, pisah kolom dengan #) [FILE_END]
+  2. [FILE_START:macro_nama.bas] (kode VBA lengkap, tanpa markdown) [FILE_END]
+- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download + instruksi singkat: "Alt+F11 → File → Import Module → pilih .bas → Run".`
     };
 
     // Buat sesi baru jika belum ada
@@ -217,13 +301,20 @@ ATURAN PENTING:
         'X-Title': 'AAi Keluarga'
       },
       body: JSON.stringify({
-        model: MAIN_MODEL,
-        messages: [systemPrompt, ...chatHistory, { role: "user", content: userMessage }],
-        stream: true,
-        temperature: modelConfig.temperature,
-        max_tokens: modelConfig.max_tokens,
-        top_p: modelConfig.top_p
-      })
+  model: MAIN_MODEL,
+  messages: [
+    systemPrompt,
+    ...chatHistory,
+    {
+      role: "user",
+      content: `${userMessage}${fileContext ? `\n\n📎 LAMPIRAN FILE:\n${fileContext}` : ''}`
+    }
+  ],
+  stream: true,
+  temperature: modelConfig.temperature,
+  max_tokens: modelConfig.max_tokens,
+  top_p: modelConfig.top_p
+})
     });
 
     console.log(`[OpenRouter] Status response: ${aiResponse.status} ${aiResponse.statusText}`);
@@ -278,7 +369,67 @@ ATURAN PENTING:
     }
 
     // Simpan AI response ke DB
+        // ✅ AUTO GENERATE FILE (TXT, XLSB, BAS, DOCX)
     if (fullReply.trim()) {
+      const fileRegex = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
+      let match;
+      while ((match = fileRegex.exec(fullReply)) !== null) {
+        const filename = match[1].trim();
+        let content = match[2].trim();
+        const ext = filename.split('.').pop().toLowerCase();
+
+        let buffer;
+        try {
+          if (ext === 'txt') {
+            buffer = Buffer.from(content, 'utf-8');
+          } 
+          else if (ext === 'bas' || ext === 'vba') {
+            // Macro VBA → plain text, siap import ke Excel
+            buffer = Buffer.from(content, 'utf-8');
+          } 
+          else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
+            const rows = content.split('\n').map(row => row.split('#').map(c => c.trim()));
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Data');
+            buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
+          } 
+          else if (ext === 'docx') {
+            const paragraphs = content.split('\n').map(line =>
+              new Paragraph({ children: [new TextRun({ text: line, font: 'Arial', size: 24 })] })
+            );
+            const doc = new Document({ sections: [{ children: paragraphs }] });
+            buffer = await Packer.toBuffer(doc);
+          } else {
+            buffer = Buffer.from(content, 'utf-8');
+          }
+
+          const filePath = `generations/${Date.now()}-${filename}`;
+          const mimeMap = {
+            'xlsb': 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+            'bas': 'text/plain',
+            'vba': 'text/plain',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          };
+
+          const { error } = await supabase.storage.from('aai-files').upload(filePath, buffer, {
+            contentType: mimeMap[ext] || 'text/plain',
+            upsert: false
+          });
+
+          if (!error) {
+            const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
+            fullReply = fullReply.replace(match[0], `📥 **[Download ${filename}](${publicUrl})**`);
+          } else {
+            fullReply = fullReply.replace(match[0], `⚠️ Gagal upload: ${error.message}`);
+          }
+        } catch (e) {
+          console.error(`⚠️ Gagal generate ${filename}:`, e.message);
+          fullReply = fullReply.replace(match[0], `⚠️ Error: ${e.message}`);
+        }
+      }
+
+      // Simpan respons bersih ke DB
       const { data: aiMsgData } = await supabase.from('messages').insert({
         session_id: currentSessionId,
         role: 'assistant',
