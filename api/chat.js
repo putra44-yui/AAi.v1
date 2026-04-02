@@ -1,3 +1,4 @@
+export const maxDuration = 60;
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -16,115 +17,73 @@ function calculateAge(dob) {
   if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
   return age;
 }
-// ── KONFIGURASI DINAMIS PER PERSONA ──
+
 function getModelConfig(personaList) {
-  const persona = personaList[0]; // persona utama
-
+  const persona = personaList[0];
   const configs = {
-    'Coding': {
-      temperature: 0.2,   // presisi tinggi, minim kreatifitas liar
-      max_tokens: 12000,  // butuh ruang panjang buat kode detail
-      top_p: 0.85
-    },
-    'Kritikus Brutal': {
-      temperature: 0.3,   // tajam dan konsisten, tidak ngawur
-      max_tokens: 8000,
-      top_p: 0.85
-    },
-    'Santai': {
-      temperature: 0.8,   // lebih santai, variatif, natural
-      max_tokens: 4000,
-      top_p: 0.95
-    },
-    'Rosalia': {
-      temperature: 0.95,  // ekspresif, hangat, penuh perasaan
-      max_tokens: 3000,
-      top_p: 0.98
-    },
-    'Auto': {
-      temperature: 0.7,
-      max_tokens: 6000,
-      top_p: 0.9
-    }
+    'Coding':          { temperature: 0.2, max_tokens: 32000, top_p: 0.85 },
+    'Kritikus Brutal': { temperature: 0.3, max_tokens: 9000,  top_p: 0.85 },
+    'Santai':          { temperature: 0.8, max_tokens: 4000,  top_p: 0.95 },
+    'Rosalia':         { temperature: 0.95, max_tokens: 5000, top_p: 0.98 },
+    'Auto':            { temperature: 0.7, max_tokens: 6000,  top_p: 0.9  }
   };
-
   return configs[persona] || configs['Auto'];
 }
 
 export default async function handler(req, res) {
-  // ─────────────────────────────────────────────────────────────
-  // GET: Load riwayat percakapan untuk session tertentu
-  // ─────────────────────────────────────────────────────────────
+
+  // ── GET: Load riwayat ──
   if (req.method === 'GET') {
     const { session_id } = req.query;
-    if (!session_id) return res.status(400).json({ error: 'session_id wajib dikirim' });
-
+    if (!session_id) return res.status(400).json({ error: 'session_id wajib' });
     try {
       const { data: messages, error } = await supabase
         .from('messages')
         .select('id, role, content, parent_id, created_at')
         .eq('session_id', session_id)
         .order('created_at', { ascending: true });
-
       if (error) throw error;
-
-      return res.status(200).json({
-        success: true,
-        messages: messages || [],
-        session_id
-      });
+      return res.status(200).json({ success: true, messages: messages || [], session_id });
     } catch (err) {
-      console.error("❌ Gagal load history:", err.message);
       return res.status(500).json({ error: err.message });
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // POST: Kirim pesan baru, panggil AI, simpan ke DB
-  // ─────────────────────────────────────────────────────────────
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Cuma terima GET & POST bos!' });
+    return res.status(405).json({ error: 'Cuma terima GET & POST!' });
   }
 
-  console.log("=== AAi REQUEST ===");
-
+  // ── POST: Kirim pesan + streaming ──
   try {
     const {
-      message,
-      session_id,
-      user_id,
-      username,
-      persona_name = 'Auto',
-      parent_id = null,
-      user_message_id = null
+      message, session_id, user_id, username,
+      persona_name = 'Auto', parent_id = null, user_message_id = null
     } = req.body;
 
     const userMessage = message?.trim();
     if (!userMessage) throw new Error("Pesan tidak boleh kosong");
 
-    // ── 1. USER & PERSON ──
+    // 1. User & Person
     let userQuery = supabase.from('users').select('id, person_id');
     if (user_id) userQuery = userQuery.eq('id', user_id);
     else if (username) userQuery = userQuery.eq('username', username);
-    else throw new Error("user_id atau username wajib dikirim");
+    else throw new Error("user_id atau username wajib");
 
     const { data: user, error: userErr } = await userQuery.single();
-    if (userErr || !user || !user.person_id) throw new Error("User atau person belum terhubung!");
+    if (userErr || !user?.person_id) throw new Error("User atau person belum terhubung!");
 
     const { data: person } = await supabase
-      .from('persons')
-      .select('name, date_of_birth, role')
-      .eq('id', user.person_id)
-      .single();
+      .from('persons').select('name, date_of_birth, role')
+      .eq('id', user.person_id).single();
 
-    const currentAge = person?.date_of_birth ? calculateAge(person.date_of_birth) : '?';
+    const currentAge = calculateAge(person?.date_of_birth);
 
-    // ── 2. FAMILY CONTEXT ──
+    // 2. Family context
     const { data: allPersons } = await supabase.from('persons').select('name, date_of_birth, role');
     const familyContext = (allPersons || []).map(p => {
-      const age = p.date_of_birth ? calculateAge(p.date_of_birth) : '?';
-      const dobStr = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : 'tidak diketahui';
-      return `- ${p.name} (${p.role}, ${age} tahun, lahir ${dobStr})`;
+      const age = calculateAge(p.date_of_birth);
+      const dob = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : 'tidak diketahui';
+      return `- ${p.name} (${p.role}, ${age} tahun, lahir ${dob})`;
     }).join('\n');
 
     const { data: relations } = await supabase
@@ -135,81 +94,49 @@ export default async function handler(req, res) {
       .join('\n') || 'Belum ada relasi.';
 
     const { data: memories } = await supabase
-      .from('person_memory')
-      .select('key, value')
-      .eq('person_id', user.person_id);
-    const memoryText = memories?.map(m => `${m.key}: ${m.value}`).join('\n') || 'Tidak ada memori permanen.';
+      .from('person_memory').select('key, value').eq('person_id', user.person_id);
+    const memoryText = memories?.map(m => `${m.key}: ${m.value}`).join('\n') || 'Tidak ada memori.';
 
-    // ── 3. CHAT HISTORY (CONTEXT UNTUK AI) ──
-    let chatHistory = [];
+    // 3. Chat history — semua, tanpa limit
     const apiKey = process.env.OPENROUTER_API_KEY;
-
-    const currentSessMessages = session_id
-      ? (await supabase
-          .from('messages')
-          .select('role, content, created_at')
-          .eq('session_id', session_id)
-          .order('created_at', { ascending: true })
-          .limit(40)
-        ).data || []
+    const chatHistory = session_id
+      ? ((await supabase.from('messages').select('role, content')
+          .eq('session_id', session_id).order('created_at', { ascending: true })).data || [])
       : [];
 
-    // Ambil 20 pesan terakhir buat context AI
-    chatHistory = currentSessMessages.slice(-20);
-    console.log(`📚 Context AI: ${chatHistory.length} pesan`);
-
- // ── 4. AUTO PERSONA ──
-let targetPersona = persona_name;
-const msgLower = userMessage.toLowerCase();
-
-if (targetPersona === 'Auto') {
-  // 1. Pemicu Kritikus Brutal (Minta roasting, opini, ATAU lagi curhat/sedih biar dikasih tamparan realita!)
-  if (/kritik|brutal|roasting|jelek|bodoh|hina|review|menurutmu|sedih|curhat|nangis|galau|kecewa|capek|lelah|stres|pusing|depresi|hancur/i.test(msgLower)) {
-    targetPersona = 'Kritikus Brutal';
-  }
-  // 2. Pemicu Coding (Pertanyaan teknis murni)
-  else if (/kode|bug|function|html|css|javascript|js|python|sql|error|fix|api|backend|frontend|react|next|node|database|query|deploy|git|loop|array|object|fetch|async|await|import|export|class|component|hook|state|props|null|undefined|syntax|compile|excel|rumus|build|install|npm|yarn|vercel|server|endpoint|route|request|response|json/i.test(msgLower)) {
-    targetPersona = 'Coding';
-  } 
-  // 3. Pemicu Keluarga/Bucin
-  else if (/sayang|cinta|mawar|istri/i.test(msgLower)) {
-    targetPersona = 'Rosalia';
-  } 
-  // 4. Mode Normal (Default)
-  else {
-    targetPersona = 'Santai';
-  }
-}
-
-// Logika blending (Opsional)
-let personaList = [targetPersona];
-if (/sayang|cinta/i.test(msgLower) && targetPersona !== 'Rosalia') {
-  personaList = ['Santai', 'Rosalia'];
-}
-
-
+    // 4. Persona
+    let targetPersona = persona_name;
+    const msgLower = userMessage.toLowerCase();
+    if (targetPersona === 'Auto') {
+      if (/kritik|brutal|roasting|sedih|curhat|nangis|galau|kecewa|capek|stres/i.test(msgLower))
+        targetPersona = 'Kritikus Brutal';
+      else if (/kode|bug|function|html|css|javascript|js|python|sql|error|fix|api|backend|frontend|react|next|node|database|query|deploy|git|loop|array|object|fetch|async|await|import|export|class|component|hook|state|props|syntax|compile|excel|rumus|build|install|npm|yarn|vercel|server|endpoint|route|request|response|json/i.test(msgLower))
+        targetPersona = 'Coding';
+      else if (/sayang|cinta|mawar|istri/i.test(msgLower))
+        targetPersona = 'Rosalia';
+      else
+        targetPersona = 'Santai';
+    }
+    let personaList = [targetPersona];
+    if (/sayang|cinta/i.test(msgLower) && targetPersona !== 'Rosalia')
+      personaList = ['Santai', 'Rosalia'];
 
     const { data: personasData } = await supabase
-      .from('ai_personas')
-      .select('name, system_prompt')
-      .in('name', personaList);
+      .from('ai_personas').select('name, system_prompt').in('name', personaList);
     const combinedSystem = personasData?.map(p => `=== GAYA: ${p.name} ===\n${p.system_prompt}`).join('\n\n') || '';
 
-    // ── 5. SYSTEM PROMPT ──
+    // 5. System prompt
     const systemPrompt = {
       role: "system",
       content: `Kamu adalah AAi, AI keluarga yang cerdas dan ramah.
 
 Current speaker: ${person?.name} (${person?.role}, ${currentAge} tahun)
 
-Keluarga:
-${familyContext}
+Keluarga:\n${familyContext}
 
-Relasi:
-${relationContext}
+Relasi:\n${relationContext}
 
-Memori permanen:
-${memoryText}
+Memori permanen:\n${memoryText}
 
 Persona aktif: ${personaList.join(' + ')}
 ${combinedSystem}
@@ -220,139 +147,155 @@ ATURAN PENTING:
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.`
     };
 
-    // ── 6. PANGGIL AI ──
-    const messagesPayload = [
-      systemPrompt,
-      ...chatHistory,
-      { role: "user", content: userMessage }
-    ];
+    // ── SETUP DB SEBELUM STREAMING ──
 
-    const modelConfig = getModelConfig(personaList);
-console.log(`🎛️ Persona: ${personaList[0]} | temp: ${modelConfig.temperature} | tokens: ${modelConfig.max_tokens}`);
-
-const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-    'HTTP-Referer': 'http://localhost:3000',
-    'X-Title': 'AAi Keluarga'
-  },
-  body: JSON.stringify({
-    model: MAIN_MODEL,
-    messages: messagesPayload,
-    temperature: modelConfig.temperature,  // ✅ dinamis
-    max_tokens: modelConfig.max_tokens,    // ✅ dinamis
-    top_p: modelConfig.top_p              // ✅ dinamis
-  })
-});
-
-    const aiData = await aiResponse.json();
-    if (!aiResponse.ok || aiData.error) {
-      console.error("❌ OPENROUTER ERROR:", aiData.error);
-      throw new Error(aiData.error?.message || "Error dari OpenRouter API");
-    }
-
-    const aiReply = aiData.choices?.[0]?.message?.content;
-    if (!aiReply) throw new Error("AI mengembalikan respons kosong");
-
-    console.log(`✅ AI reply length: ${aiReply.length} chars`);
-
-    // ── 7. SIMPAN KE DATABASE ──
+    // Buat sesi jika belum ada
     let currentSessionId = session_id;
-
-    // Buat sesi baru kalau belum ada
     if (!currentSessionId) {
-      let newTitle = userMessage.substring(0, 40);
-      try {
-        const titleRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: MAIN_MODEL,
-            messages: [{ role: "user", content: `Buatkan judul singkat (maks 3-4 kata) tanpa tanda kutip, tanpa titik di akhir, untuk pesan: "${userMessage}"` }],
-            temperature: 0.3,
-            max_tokens: 20
-          })
-        });
-        const titleData = await titleRes.json();
-        if (titleData.choices?.[0]?.message?.content) {
-          newTitle = titleData.choices[0].message.content.replace(/["'.]/g, '').trim();
-        }
-      } catch (err) {
-        console.warn("⚠️ Gagal buat judul, pakai fallback:", err.message);
-      }
-
+      // Judul cepat dari 40 karakter pertama, update async setelah streaming
+      const quickTitle = userMessage.substring(0, 40);
       const { data: newSession, error: sesErr } = await supabase
-        .from('sessions')
-        .insert({ user_id: user.id, title: newTitle })
-        .select()
-        .single();
+        .from('sessions').insert({ user_id: user.id, title: quickTitle }).select().single();
       if (sesErr) throw new Error("Gagal buat sesi: " + sesErr.message);
       currentSessionId = newSession.id;
+
+      // Generate judul AI secara async (tidak tunggu)
+      generateTitle(apiKey, userMessage, currentSessionId);
     }
 
-    // Tentukan parent_id yang bener buat rantai percakapan
+    // Tentukan parent_id
     let effectiveParentId = parent_id;
     if (!effectiveParentId && !user_message_id) {
-      const { data: lastMsg } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('session_id', currentSessionId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: lastMsg } = await supabase.from('messages').select('id')
+        .eq('session_id', currentSessionId).order('created_at', { ascending: false })
+        .limit(1).maybeSingle();
       effectiveParentId = lastMsg?.id || null;
     }
 
     // Simpan pesan user
     let finalUserMessageId = user_message_id;
     if (!finalUserMessageId) {
-      const { data: userMsgData, error: userMsgErr } = await supabase
-        .from('messages')
-        .insert({
-          session_id: currentSessionId,
-          role: 'user',
-          content: userMessage,
-          parent_id: effectiveParentId
-        })
-        .select()
-        .single();
+      const { data: userMsgData, error: userMsgErr } = await supabase.from('messages').insert({
+        session_id: currentSessionId, role: 'user',
+        content: userMessage, parent_id: effectiveParentId
+      }).select().single();
       if (userMsgErr) throw new Error("Gagal simpan pesan user: " + userMsgErr.message);
       finalUserMessageId = userMsgData.id;
     }
 
-    // Simpan pesan AI
-    const { data: aiMsgData, error: aiMsgErr } = await supabase
-      .from('messages')
-      .insert({
-        session_id: currentSessionId,
-        role: 'assistant',
-        content: aiReply,
-        parent_id: finalUserMessageId
+    // ── MULAI STREAMING ──
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // penting buat Nginx/Vercel
+
+    const modelConfig = getModelConfig(personaList);
+    console.log(`🎛️ ${personaList[0]} | temp:${modelConfig.temperature} | tokens:${modelConfig.max_tokens}`);
+
+    const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://aai.family',
+        'X-Title': 'AAi Keluarga'
+      },
+      body: JSON.stringify({
+        model: MAIN_MODEL,
+        messages: [systemPrompt, ...chatHistory, { role: "user", content: userMessage }],
+        stream: true,
+        temperature: modelConfig.temperature,
+        max_tokens: modelConfig.max_tokens,
+        top_p: modelConfig.top_p
       })
-      .select()
-      .single();
-    if (aiMsgErr) throw new Error("Gagal simpan pesan AI: " + aiMsgErr.message);
+    });
+
+    if (!aiResponse.ok) {
+      const errData = await aiResponse.json();
+      res.write(`data: ${JSON.stringify({ error: errData.error?.message || 'API Error' })}\n\n`);
+      return res.end();
+    }
+
+    // Baca stream dari OpenRouter
+    const reader = aiResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let fullReply = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // simpan baris tidak lengkap
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          const token = parsed.choices?.[0]?.delta?.content || '';
+          if (token) {
+            fullReply += token;
+            res.write(`data: ${JSON.stringify({ token })}\n\n`);
+          }
+        } catch {}
+      }
+    }
+
+    // Simpan balasan AI ke DB
+    const { data: aiMsgData, error: aiMsgErr } = await supabase.from('messages').insert({
+      session_id: currentSessionId,
+      role: 'assistant',
+      content: fullReply,
+      parent_id: finalUserMessageId
+    }).select().single();
+    if (aiMsgErr) console.error("Gagal simpan AI:", aiMsgErr.message);
 
     // Update timestamp sesi
-    await supabase
-      .from('sessions')
+    await supabase.from('sessions')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', currentSessionId);
 
-    console.log("✅ AAi selesai, session:", currentSessionId);
-
-    res.status(200).json({
-      success: true,
-      reply: aiReply,
+    // Kirim event selesai
+    res.write(`data: ${JSON.stringify({
+      done: true,
       session_id: currentSessionId,
-      message_id: aiMsgData.id,
+      message_id: aiMsgData?.id,
       user_message_id: finalUserMessageId
-    });
+    })}\n\n`);
+    res.end();
+    console.log(`✅ Streaming selesai, session: ${currentSessionId}`);
 
   } catch (error) {
-    console.error("=== SERVER ERROR ===", error.message);
-    res.status(500).json({ error: error.message });
+    console.error("=== ERROR ===", error.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: error.message });
+    }
+    res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+    res.end();
   }
+}
+
+// Generate judul AI async (tidak blokir streaming)
+async function generateTitle(apiKey, userMessage, sessionId) {
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MAIN_MODEL,
+        messages: [{ role: "user", content: `Buatkan judul singkat (maks 4 kata) tanpa tanda kutip, tanpa titik, untuk pesan: "${userMessage}"` }],
+        temperature: 0.3, max_tokens: 20
+      })
+    });
+    const d = await r.json();
+    const title = d.choices?.[0]?.message?.content?.replace(/["'.]/g, '').trim();
+    if (title) {
+      const supabase2 = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+      await supabase2.from('sessions').update({ title }).eq('id', sessionId);
+    }
+  } catch {}
 }

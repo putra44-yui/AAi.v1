@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>AAi</title>
 <link rel="icon" type="image/gif" href="/ayaka.gif">
-
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <style>
@@ -13,9 +12,6 @@
   --blue-light:  #c8eaf5;
   --blue-mid:    #5ab4d4;
   --blue-dark:   #2a7a9e;
-  --pink-soft:   #f9c4d8;
-  --purple-soft: #d2b3e6;
-  --white:       #ffffff;
   --off-white:   #f8fbff;
   --text:        #1e2a44;
   --text-muted:  #7a8aa8;
@@ -24,12 +20,8 @@
   --shadow-md:   0 10px 30px rgba(138,234,245,.22);
 }
 
-* { box-sizing: border-box; margin:0; padding:0; }
-
-html, body {
-  max-width: 100%;
-  overflow-x: hidden;
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { max-width: 100%; overflow-x: hidden; }
 
 body {
   font-family: 'DM Sans', sans-serif;
@@ -38,294 +30,18 @@ body {
   height: 100dvh;
   display: flex;
   overflow: hidden;
-  position: relative;
 }
 
 body::before {
   content: '';
   position: fixed; inset: 0; z-index: -1;
-  background: radial-gradient(ellipse 80% 60% at 15% 25%, rgba(138,234,245,.18) 0%, transparent 60%),
-              radial-gradient(ellipse 60% 70% at 85% 75%, rgba(210,179,230,.14) 0%, transparent 70%);
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 25%, rgba(138,234,245,.18) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 70% at 85% 75%, rgba(210,179,230,.14) 0%, transparent 70%);
   pointer-events: none;
 }
 
-.msg-row.assistant, .msg-row.user {
-  max-width: 750px;
-}
-
-.session-actions { display: flex; gap: 8px; opacity: 0; transition: .2s; }
-.session-item:hover .session-actions { opacity: 1; }
-.action-btn { background: none; border: none; font-size: 16px; cursor: pointer; transition: transform .2s; }
-.action-btn:hover { transform: scale(1.2); }
-
-.logo { display:flex; align-items:center; gap:14px; text-decoration:none; }
-.logo-icon {
-  width: 100px; height: 100px; border-radius: 16px;
-  background: transparent;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 28px;
-  animation: logoBreath 4s ease-in-out infinite;
-}
-.logo-name {
-  font-family: 'Cormorant Garamond', serif; 
-  font-size: 32px; font-weight: 700;
-  background: linear-gradient(120deg, #5ab4d4, #d2b3e6);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.new-chat-btn {
-  width: 100%; padding: 14px 20px; margin-top: 20px;
-  background: linear-gradient(135deg, var(--blue-mid), #b38fd4);
-  color: white; border: none; border-radius: 20px;
-  font-size: 15px; font-weight: 600; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  box-shadow: var(--shadow-md);
-  transition: all .3s ease;
-}
-.new-chat-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(90,180,212,.4); }
-
-.main { flex: 1; display: flex; flex-direction: column; min-width: 0; width: 100%; }
-.topbar {
-  padding: 18px 28px;
-  background: rgba(255,255,255,.92);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(138,234,245,.25);
-  display: flex; align-items: center; gap: 16px;
-  z-index: 20;
-}
-.hamburger { display: none; font-size: 32px; cursor: pointer; color: var(--blue-dark); }
-
-.chat-area {
-  flex: 1; padding: 32px 32px 24px;
-  display: flex; flex-direction: column; gap: 28px;
-  background: var(--off-white);
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-}
-
-.msg-row.assistant { 
-  display: flex; 
-  flex-direction: column;
-  align-items: flex-start; 
-  gap: 8px; 
-  max-width: 100%;
-}
-.assistant .avatar {
-  width: 38px; height: 38px;
-  border-radius: 50%;
-  background: transparent; 
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.assistant .avatar img { width: 100%; height: 100%; object-fit: contain; }
-.assistant .bubble {
-  background: transparent;
-  color: var(--text);
-  padding: 4px 0;
-  border: none; box-shadow: none;
-  font-size: 15.5px; 
-  line-height: 1.6;
-  text-align: left;
-  width: 100%;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.assistant .bubble pre {
-  background: #1e2a44;
-  color: #c8eaf5;
-  padding: 14px 16px;
-  border-radius: 12px;
-  overflow-x: auto;
-  margin: 10px 0;
-  font-family: ui-monospace, monospace;
-  font-size: 13.5px;
-  line-height: 1.5;
-  max-width: 100%;
-}
-
-.assistant .bubble code {
-  font-family: ui-monospace, monospace;
-  background: rgba(42, 122, 158, 0.12);
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-size: 13.5px;
-  color: var(--blue-dark);
-}
-
-.assistant .bubble pre code {
-  background: transparent;
-  padding: 0;
-  color: inherit;
-}
-
-.assistant .bubble ul, .assistant .bubble ol {
-  margin-left: 24px;
-  margin-bottom: 10px;
-}
-.assistant .bubble table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 10px 0;
-  font-size: 14px;
-}
-.assistant .bubble th, .assistant .bubble td {
-  border: 1px solid var(--blue-light);
-  padding: 8px;
-  text-align: left;
-}
-
-.msg-row.user { 
-  display: flex; 
-  justify-content: flex-end; 
-  max-width: 85%; 
-  margin-left: auto; 
-}
-.user .bubble {
-  background: var(--blue-light);
-  color: var(--text);
-  padding: 14px 20px; 
-  border-radius: 24px; 
-  border-bottom-right-radius: 8px;
-  box-shadow: 0 6px 16px rgba(138,234,245,.2);
-  font-size: 15px; 
-  line-height: 1.5;
-  text-align: left;
-}
-
-.code-window { 
-  background: #1e2a44; border-radius: 12px; margin: 12px 0; 
-  overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid #2a7a9e;
-}
-.code-header { 
-  display: flex; justify-content: space-between; align-items: center; 
-  background: rgba(0,0,0,0.35); padding: 8px 14px; color: #c8eaf5; 
-  font-size: 12px; font-family: 'DM Sans', sans-serif; 
-}
-.copy-code-btn { 
-  background: none; border: none; color: #c8eaf5; cursor: pointer; 
-  display: flex; align-items: center; gap: 6px; font-size: 12px; transition: .2s;
-}
-.copy-code-btn:hover { color: white; transform: scale(1.05); }
-.code-window pre { 
-  margin: 0; padding: 14px; overflow-x: auto;
-  color: #e2e8f0; font-family: ui-monospace, monospace; font-size: 13.5px; 
-}
-
-.msg-actions { 
-  display: flex; gap: 14px; margin-top: 8px; color: var(--text-muted); 
-  align-items: center; width: 100%;
-}
-.msg-actions button { 
-  background: none; border: none; color: inherit; cursor: pointer; 
-  font-size: 15px; transition: .2s; 
-}
-.msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
-
-.send-btn { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, var(--blue-mid), #b38fd4); color: white; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer;}
-
-.typing-indicator {
-  display: flex; align-items: center; gap: 6px; padding: 12px 20px;
-  background: #c8eaf5; border-radius: 9999px; width: fit-content; box-shadow: var(--shadow-sm);
-}
-.typing-dot { width: 8px; height: 8px; background: #2a7a9e; border-radius: 50%; animation: typingPulse 1.4s infinite ease-in-out; }
-.typing-dot:nth-child(2) { animation-delay: .2s; }
-.typing-dot:nth-child(3) { animation-delay: .4s; }
-@keyframes typingPulse { 0%, 100% { transform: scale(0.6); opacity: .4; } 50% { transform: scale(1); opacity: 1; } }
-
-.source-card, .code-card { background: #fff; border: 2px solid #c8eaf5; border-radius: 18px; padding: 14px 18px; margin-top: 10px; font-size: 14px; box-shadow: var(--shadow-sm); }
-.code-card { background: #1e2a44; color: #c8eaf5; font-family: ui-monospace, monospace; position: relative; overflow-x: auto; }
-.copy-btn { position: absolute; top: 12px; right: 12px; background: #5ab4d4; color: white; border: none; padding: 4px 12px; border-radius: 9999px; font-size: 12px; cursor: pointer; }
-
-.session-item { padding: 14px 20px; margin: 4px 8px; border-radius: 18px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all .3s ease; }
-.session-item:hover { background: rgba(138,234,245,.15); }
-.session-item.active { background: rgba(138,234,245,.25); font-weight: 500; }
-.session-item .delete-btn { opacity: 0; transition: .2s; font-size: 18px; color: #e74c3c; }
-.session-item:hover .delete-btn { opacity: 1; }
-
-.input-area { 
-  padding: 12px 20px 20px;
-  background: rgba(255,255,255,.95); backdrop-filter: blur(20px); border-top: 1px solid rgba(138,234,245,.25); 
-}
-
-.input-wrap { 
-  display: flex; 
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px; 
-  background: #ffffff; 
-  border: 2px solid var(--blue-light); 
-  padding: 8px 16px; 
-  border-radius: 32px;
-  box-shadow: var(--shadow-md); 
-  width: 100%; 
-}
-
-#messageInput { 
-  flex: 1;
-  min-width: 0;
-  border: none; 
-  background: transparent; 
-  font-size: 15px; 
-  outline: none; 
-  resize: none; 
-  max-height: 120px; 
-  line-height: 1.5; 
-  padding: 8px 0; 
-}
-
-.send-btn { 
-  flex-shrink: 0;
-  width: 42px; 
-  height: 42px; 
-  border-radius: 50%; 
-  background: linear-gradient(135deg, var(--blue-mid), #b38fd4); 
-  color: white; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  border: none; 
-  cursor: pointer; 
-  box-shadow: 0 4px 12px rgba(90,180,212,.3);
-  transition: transform .2s ease;
-}
-.send-btn:hover { transform: scale(1.1); }
-
-.settings-wrapper { position: relative; flex-shrink: 0; }
-.settings-btn { 
-  background: transparent; border: none; color: var(--text-muted); 
-  font-size: 20px; cursor: pointer; padding: 8px; border-radius: 8px;
-  display: flex; align-items: center; justify-content: center; transition: .2s;
-}
-.settings-btn:hover { color: var(--blue-dark); transform: scale(1.1); }
-.settings-menu {
-  position: absolute; bottom: 120%; left: 0;
-  background: #ffffff; border: 2px solid var(--blue-light); border-radius: 16px;
-  box-shadow: var(--shadow-md); padding: 8px 0; width: 200px;
-  display: none; flex-direction: column; z-index: 100;
-  transform: translateY(10px); opacity: 0; transition: all 0.2s ease;
-}
-.settings-menu.show { display: flex; transform: translateY(0); opacity: 1; }
-.settings-header { 
-  padding: 6px 16px; font-size: 11px; font-weight: 700; 
-  color: var(--blue-dark); text-transform: uppercase; letter-spacing: 0.5px; 
-}
-.settings-item {
-  padding: 8px 16px; font-size: 14px; color: var(--text); background: none; border: none;
-  text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
-  transition: background 0.2s;
-}
-.settings-item:hover { background: var(--off-white); }
-.settings-item.active { color: var(--blue-dark); font-weight: 600; }
-.settings-item i.check { color: #5ab4d4; opacity: 0; transition: 0.2s; }
-.settings-item.active i.check { opacity: 1; }
-.settings-divider { height: 1px; background: rgba(138,234,245,.3); margin: 6px 0; }
-
+/* ── SIDEBAR ── */
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -344,119 +60,333 @@ body::before {
   padding: 12px 8px;
 }
 
-@media (max-width: 768px) {
-  body::before { display: none; }
-  body { background: var(--off-white); }
-  
-  .hamburger { display: block; color: var(--blue-dark); z-index: 50; padding-right: 10px; }
-
-  .sidebar {
-    position: fixed;
-    top: 0; left: 0;
-    z-index: 9999;
-    transform: translateX(-100%);
-    box-shadow: none;
-  }
-
-  .sidebar.open { 
-    transform: translateX(0); 
-    box-shadow: 10px 0 30px rgba(0,0,0,0.3); 
-  }
-
-  .main { width: 100%; height: 100dvh; margin: 0; }
-  .topbar { padding: 15px 20px; flex-wrap: wrap; }
-  .chat-area { padding: 20px 16px; }
-  .input-area { padding: 15px; }
-  .msg-row.assistant { max-width: 100%; padding-right: 2x; }
-  .msg-row.user { max-width: 90%; }
-  .session-actions { opacity: 1; }
+.logo { display: flex; align-items: center; gap: 14px; text-decoration: none; }
+.logo-icon {
+  width: 100px; height: 100px; border-radius: 16px;
+  background: transparent;
+  display: flex; align-items: center; justify-content: center;
 }
+.logo-name {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 32px; font-weight: 700;
+  background: linear-gradient(120deg, #5ab4d4, #d2b3e6);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.new-chat-btn {
+  width: 100%; padding: 14px 20px; margin-top: 20px;
+  background: linear-gradient(135deg, var(--blue-mid), #b38fd4);
+  color: white; border: none; border-radius: 20px;
+  font-size: 15px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  box-shadow: var(--shadow-md);
+  transition: all .3s ease;
+}
+.new-chat-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(90,180,212,.4); }
+
+.session-item {
+  padding: 8px 14px; margin: 2px 8px; border-radius: 14px;
+  display: flex; align-items: center; gap: 12px;
+  cursor: pointer; transition: all .3s ease;
+}
+.session-item:hover { background: rgba(138,234,245,.15); }
+.session-item.active { background: rgba(138,234,245,.25); font-weight: 500; }
+.session-actions { display: flex; gap: 8px; opacity: 0; transition: .2s; }
+.session-item:hover .session-actions { opacity: 1; }
+.action-btn { background: none; border: none; font-size: 16px; cursor: pointer; transition: transform .2s; }
+.action-btn:hover { transform: scale(1.2); }
 
 .user-card {
-  flex-shrink: 0;         
+  flex-shrink: 0;
   padding: 16px 20px;
   border-top: 1px solid rgba(138,234,245,.25);
-  display: flex; 
-  align-items: center; 
-  justify-content: space-between;
-  background: #ffffff;   
+  display: flex; align-items: center; justify-content: space-between;
+  background: #ffffff;
 }
 .user-info { display: flex; align-items: center; gap: 10px; }
-.user-avatar-mini { width: 36px; height: 36px; border-radius: 50%; background: #c8eaf5; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.user-avatar-mini {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: #c8eaf5;
+  display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
 .logout-btn { background: none; border: none; font-size: 20px; cursor: pointer; transition: transform .2s; color: #e74c3c; }
 .logout-btn:hover { transform: scale(1.15); }
 
-.bubble h1, .bubble h2, .bubble h3 { 
-  margin-top: 12px; 
-  margin-bottom: 8px; 
-  font-size: 1.1em; 
-  color: var(--blue-dark); 
+/* ── MAIN ── */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; width: 100%; }
+
+.topbar {
+  padding: 18px 28px;
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(138,234,245,.25);
+  display: flex; align-items: center; gap: 16px;
+  z-index: 20;
 }
-.bubble p { margin-bottom: 8px; }
+.hamburger { display: none; font-size: 32px; cursor: pointer; color: var(--blue-dark); }
+
+/* ── CHAT AREA ── */
+.chat-area {
+  flex: 1; padding: 32px 32px 24px;
+  display: flex; flex-direction: column; gap: 16px; 
+  overflow-y: auto; overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+/* ── MESSAGES ── */
+.msg-row.assistant {
+  display: flex; flex-direction: column;
+  align-items: flex-start; gap: 8px;
+  max-width: 100%; 
+}
+.assistant .avatar {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: transparent;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.assistant .avatar img { width: 100%; height: 100%; object-fit: contain; }
+
+.assistant .bubble {
+  background: transparent; color: var(--text);
+  padding: 4px 0; border: none; box-shadow: none;
+  font-size: 15px; line-height: 1.6;
+  width: 100%; overflow-wrap: anywhere; word-break: break-word;
+  text-align: justify; 
+}
+
+.msg-row.user {
+  display: flex; justify-content: flex-end;
+  max-width: 85%; margin-left: auto;
+}
+.user .bubble {
+  background: var(--blue-light); color: var(--text);
+  padding: 14px 20px;
+  border-radius: 24px; border-bottom-right-radius: 8px;
+  box-shadow: 0 6px 16px rgba(138,234,245,.2);
+  font-size: 15px; line-height: 1.5;
+}
+
+/* ── BUBBLE MARKDOWN ── */
+.bubble h1, .bubble h2, .bubble h3 {
+  margin: 12px 0 8px; font-size: 1.1em; color: var(--blue-dark);
+}
+.bubble p { margin-bottom: 6px; }
 .bubble p:last-child { margin-bottom: 0; }
-.bubble ul, .bubble ol { margin-left: 20px; margin-bottom: 8px; }
-.bubble pre {
-  background: #1e2a44;
-  color: #c8eaf5;
-  padding: 12px;
-  border-radius: 8px;
-  overflow-x: auto;
-  margin: 8px 0;
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  line-height: 1.4;
-  max-width: 100%;
-}
+.bubble ul, .bubble ol { margin-left: 20px; margin-bottom: 6px; }
+.bubble li { margin-bottom: 4px; }
+.bubble li p { margin-bottom: 0; display: inline; }
 .bubble code {
   font-family: ui-monospace, monospace;
-  background: rgba(0,0,0,0.1);
-  padding: 2px 4px;
-  border-radius: 4px;
-  font-size: 13.5px;
+  background: rgba(42,122,158,.12);
+  padding: 2px 6px; border-radius: 6px;
+  font-size: 13.5px; color: var(--blue-dark);
 }
-.bubble pre code { background: transparent; word-break: break-word; padding: 0; }
+.bubble pre {
+  background: #1e2a44; color: #c8eaf5;
+  padding: 12px; border-radius: 8px;
+  overflow-x: auto; margin: 8px 0;
+  font-family: ui-monospace, monospace;
+  font-size: 13px; line-height: 1.4; max-width: 100%;
+}
+.bubble pre code { background: transparent; padding: 0; color: inherit; }
+.bubble table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+.bubble th, .bubble td { border: 1px solid var(--blue-light); padding: 8px; text-align: left; }
 
-.sources-container {
-  margin-top: 15px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--blue-light);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* ── CODE WINDOW ── */
+.code-window {
+  background: #1e2a44; border-radius: 12px; margin: 8px 0;
+  overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid #2a7a9e;
 }
-.source-label { font-size: 12px; font-weight: 700; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.code-header {
+  display: flex; justify-content: space-between; align-items: center;
+  background: rgba(0,0,0,.35); padding: 8px 14px; color: #c8eaf5;
+  font-size: 12px;
+}
+.code-header-actions { display: flex; gap: 12px; align-items: center; }
+.code-window pre {
+  margin: 0; padding: 14px;
+  overflow-x: auto; overflow-y: auto; max-height: 50vh;
+  color: #e2e8f0; font-family: ui-monospace, monospace;
+  font-size: 13.5px; white-space: pre;
+  transition: all .3s ease;
+}
+.code-window pre.minimized { display: none; }
+.copy-code-btn {
+  background: none; border: none; color: #c8eaf5; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; font-size: 12px; transition: .2s;
+}
+.copy-code-btn:hover { color: white; transform: scale(1.05); }
+
+/* ── STREAMING CURSOR ── */
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.stream-cursor::after {
+  content: '▌';
+  color: var(--blue-mid);
+  animation: blink 0.7s infinite;
+  font-size: 14px;
+  margin-left: 1px;
+}
+
+/* ── TYPING INDICATOR ── */
+.typing-indicator {
+  display: flex; align-items: center; gap: 6px; padding: 12px 20px;
+  background: #c8eaf5; border-radius: 9999px; width: fit-content;
+  box-shadow: var(--shadow-sm);
+}
+.typing-dot {
+  width: 8px; height: 8px; background: #2a7a9e; border-radius: 50%;
+  animation: typingPulse 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: .2s; }
+.typing-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes typingPulse { 0%,100% { transform: scale(.6); opacity: .4; } 50% { transform: scale(1); opacity: 1; } }
+
+/* ── MSG ACTIONS ── */
+.msg-actions {
+  display: flex; gap: 14px; margin-top: 8px;
+  color: var(--text-muted); align-items: center; width: 100%;
+}
+.msg-actions button {
+  background: none; border: none; color: inherit;
+  cursor: pointer; font-size: 15px; transition: .2s;
+}
+.msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
+.user-actions {
+  display: flex; justify-content: flex-end; margin-top: 6px; color: var(--text-muted);
+}
+.user-actions button {
+  background: none; border: none; color: inherit;
+  cursor: pointer; font-size: 14px; opacity: .6; transition: .2s;
+}
+.user-actions button:hover { opacity: 1; color: var(--blue-dark); }
+
+/* ── VERSION TAG ── */
+.version-tag {
+  font-size: 11px; background: var(--blue-light); color: var(--blue-dark);
+  padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 10px;
+}
+
+/* ── SOURCES ── */
+.sources-container {
+  margin-top: 15px; padding-top: 12px;
+  border-top: 1px dashed var(--blue-light);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.source-label { font-size: 12px; font-weight: 700; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 1px; }
 .source-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .source-item {
-  background: #fff; border: 1px solid var(--blue-light); padding: 6px 12px; 
+  background: #fff; border: 1px solid var(--blue-light); padding: 6px 12px;
   border-radius: 12px; font-size: 13px; color: var(--blue-dark);
   text-decoration: none; display: flex; align-items: center; gap: 6px;
   transition: .2s; box-shadow: var(--shadow-sm);
 }
 .source-item:hover { background: var(--blue-light); transform: translateY(-2px); }
 .source-img { width: 100%; max-width: 200px; border-radius: 12px; margin-top: 8px; border: 2px solid var(--blue-light); }
-
-.user-actions {
-  display: flex; justify-content: flex-end; margin-top: 6px; color: var(--text-muted);
-}
-.user-actions button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; opacity: 0.6; transition: .2s; }
-.user-actions button:hover { opacity: 1; color: var(--blue-dark); }
-
-.version-tag {
-  font-size: 11px; background: var(--blue-light); color: var(--blue-dark);
-  padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 10px;
+.source-card {
+  background: #fff; border: 2px solid #c8eaf5;
+  border-radius: 18px; padding: 14px 18px; margin-top: 10px;
+  font-size: 14px; box-shadow: var(--shadow-sm);
 }
 
+/* ── INPUT AREA ── */
+.input-area {
+  padding: 12px 20px 20px;
+  background: rgba(255,255,255,.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(138,234,245,.25);
+}
+.input-wrap {
+  display: flex; flex-direction: row;
+  align-items: center; gap: 12px;
+  background: #ffffff; border: 2px solid var(--blue-light);
+  padding: 8px 16px; border-radius: 32px;
+  box-shadow: var(--shadow-md);
+  transition: background .3s, border-color .3s;
+}
+.input-wrap.code-mode {
+  background: #1a2540;
+  border-color: var(--blue-mid);
+  border-radius: 16px;
+  align-items: flex-start;
+  padding: 12px 16px;
+}
+.code-mode-badge {
+  display: none;
+  font-size: 11px; font-weight: 700;
+  color: var(--blue-mid); font-family: ui-monospace, monospace;
+  padding: 2px 8px; background: rgba(90,180,212,.15);
+  border-radius: 8px; white-space: nowrap;
+  align-self: flex-start; margin-top: 2px;
+}
+.input-wrap.code-mode .code-mode-badge { display: flex; align-items: center; gap: 4px; }
+
+#messageInput {
+  flex: 1; min-width: 0;
+  border: none; background: transparent;
+  font-size: 15px; outline: none; resize: none;
+  max-height: 120px; line-height: 1.5; padding: 8px 0;
+  color: var(--text);
+  transition: font-family .2s, color .2s, font-size .2s;
+}
+#messageInput.code-mode {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: #c8eaf5;
+  max-height: 200px;
+}
+
+.send-btn {
+  flex-shrink: 0; width: 42px; height: 42px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue-mid), #b38fd4);
+  color: white; display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(90,180,212,.3);
+  transition: transform .2s ease;
+}
+.send-btn:hover { transform: scale(1.1); }
+
+/* ── SETTINGS ── */
+.settings-wrapper { position: relative; flex-shrink: 0; }
+.settings-btn {
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 20px; cursor: pointer; padding: 8px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; transition: .2s;
+}
+.settings-btn:hover { color: var(--blue-dark); transform: scale(1.1); }
+.settings-menu {
+  position: absolute; bottom: 120%; left: 0;
+  background: #ffffff; border: 2px solid var(--blue-light);
+  border-radius: 16px; box-shadow: var(--shadow-md);
+  padding: 8px 0; width: 200px;
+  display: none; flex-direction: column; z-index: 100;
+  transform: translateY(10px); opacity: 0; transition: all .2s ease;
+}
+.settings-menu.show { display: flex; transform: translateY(0); opacity: 1; }
+.settings-header { padding: 6px 16px; font-size: 11px; font-weight: 700; color: var(--blue-dark); text-transform: uppercase; letter-spacing: .5px; }
+.settings-item {
+  padding: 8px 16px; font-size: 14px; color: var(--text);
+  background: none; border: none; text-align: left;
+  cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+  transition: background .2s;
+}
+.settings-item:hover { background: var(--off-white); }
+.settings-item.active { color: var(--blue-dark); font-weight: 600; }
+.settings-item i.check { color: #5ab4d4; opacity: 0; transition: .2s; }
+.settings-item.active i.check { opacity: 1; }
+
+/* ── DELETE MODAL ── */
 .modal-overlay {
   position: fixed; top: 0; left: 0; width: 100%; height: 100dvh;
-  background: rgba(30, 42, 68, 0.6); backdrop-filter: blur(4px);
+  background: rgba(30,42,68,.6); backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   z-index: 99999; opacity: 0; pointer-events: none; transition: .3s;
 }
 .modal-overlay.active { opacity: 1; pointer-events: auto; }
 .modal-box {
   background: #fff; padding: 24px 32px; border-radius: 24px;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.2); text-align: center;
-  transform: translateY(20px); transition: .3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 10px 40px rgba(0,0,0,.2); text-align: center;
+  transform: translateY(20px); transition: .3s cubic-bezier(.4,0,.2,1);
   max-width: 320px; width: 90%; border: 2px solid var(--blue-light);
 }
 .modal-overlay.active .modal-box { transform: translateY(0); }
@@ -464,22 +394,37 @@ body::before {
 .modal-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 24px; }
 .modal-actions { display: flex; gap: 12px; justify-content: center; }
 .btn-cancel, .btn-confirm {
-  padding: 10px 20px; border-radius: 99px; border: none; font-weight: 600; cursor: pointer; transition: .2s;
+  padding: 10px 20px; border-radius: 99px; border: none;
+  font-weight: 600; cursor: pointer; transition: .2s;
 }
 .btn-cancel { background: #f1f5f9; color: var(--text); }
 .btn-cancel:hover { background: #e2e8f0; }
 .btn-confirm { background: #e74c3c; color: white; }
 .btn-confirm:hover { background: #c0392b; transform: scale(1.05); }
 
-.chunk-label {
-  font-size: 12px; color: var(--text-muted); font-weight: 600;
-  margin: 8px 0 4px; display: inline-block;
-  border-bottom: 1px dashed var(--blue-light); padding-bottom: 2px;
+/* ── MOBILE ── */
+@media (max-width: 768px) {
+  body::before { display: none; }
+  .hamburger { display: block; z-index: 50; padding-right: 10px; }
+  .sidebar {
+    position: fixed; top: 0; left: 0;
+    z-index: 9999; transform: translateX(-100%); box-shadow: none;
+  }
+  .sidebar.open { transform: translateX(0); box-shadow: 10px 0 30px rgba(0,0,0,.3); }
+  .main { width: 100%; height: 100dvh; }
+  .topbar { padding: 15px 20px; flex-wrap: wrap; }
+  .chat-area { padding: 20px 16px; }
+  .input-area { padding: 15px; }
+  .msg-row.assistant { max-width: 100%; }
+  .msg-row.user { max-width: 90%; }
+  .session-actions { opacity: 1; }
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+
+<!-- Modal Hapus -->
 <div class="modal-overlay" id="deleteModal">
   <div class="modal-box">
     <div class="modal-title">Hapus Obrolan?</div>
@@ -503,9 +448,7 @@ body::before {
       <span style="font-size:18px;">✦</span> Obrolan Baru
     </button>
   </div>
-
-  <div id="sessionList" style="flex:1;overflow-y:auto;padding:12px 8px;"></div>
-  
+  <div id="sessionList"></div>
   <div class="user-card">
     <div class="user-info">
       <div class="user-avatar-mini">👤</div>
@@ -514,24 +457,26 @@ body::before {
         <span style="font-size:11px;color:var(--text-muted);">Keluarga</span>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()" title="Keluar dari AAi">
-      <i class="fas fa-sign-out-alt"></i>
-    </button>
+    <button class="logout-btn" onclick="logout()" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
   </div>
 </aside>
 
 <main class="main">
   <div class="topbar">
     <span class="hamburger" onclick="toggleSidebar()">☰</span>
-    <span class="topbar-title" id="topbarTitle" style="font-size:22px;font-weight:600;">AAi — Keluarga Cerdas</span>
+    <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi — Keluarga Cerdas</span>
   </div>
-
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
-    <div class="input-wrap">
-      <textarea id="messageInput" rows="1" placeholder="Ketik pesan…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+    <div class="input-wrap" id="inputWrap">
+      <span class="code-mode-badge"><i class="fas fa-code" style="font-size:10px;"></i> CODE</span>
+      <textarea id="messageInput" rows="1"
+        placeholder="Ketik pesan…"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this); detectCodeMode(this);"
+        onpaste="setTimeout(() => detectCodeMode(this), 10);"></textarea>
       <div class="settings-wrapper">
-        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Pengaturan">
+        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Persona">
           <i class="fas fa-sliders-h"></i>
         </button>
         <div class="settings-menu" id="settingsMenu"></div>
@@ -540,97 +485,129 @@ body::before {
     </div>
   </div>
 </main>
+
 <script>
-// ─── STATE ───
+// ── STATE ──
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
 if (!currentUser.id) window.location.href = '/login';
+if (currentUser.username) document.getElementById('cardUsername').textContent = currentUser.username;
 
-let sessions = [];
+let sessions       = [];
 let currentSessionId = null;
 let currentPersona = localStorage.getItem('aai_persona') || 'Auto';
-let currentMessages = []; 
-let activeMessageIds = new Set();
+let currentMessages  = [];
 let activeVersionMap = {};
 let currentUtterance = null;
-let isSpeaking = false;
+let isSpeaking       = false;
 
-// ─── DEBUG HELPER ───
-function logDebug(msg, color = '#2a7a9e') {
-  console.log(`%c[AAi Debug] ${msg}`, `color:${color};font-weight:bold`);
+if ('speechSynthesis' in window) {
+  speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+  speechSynthesis.getVoices(); 
 }
 
+
+function logDebug(msg, color = '#2a7a9e') {
+  console.log(`%c[AAi] ${msg}`, `color:${color};font-weight:bold`);
+}
+
+// ── TTS ──
 function speakText(btn, text) {
   if (isSpeaking) {
     speechSynthesis.cancel();
     isSpeaking = false;
     document.querySelectorAll('.tts-btn i').forEach(i => {
-      i.className = 'fas fa-volume-up';
-      i.style.color = 'inherit';
+      i.className = 'fas fa-volume-up'; i.style.color = 'inherit';
     });
     return;
   }
- 
-  const cleanText = text
+  const clean = text
     .replace(/```[\s\S]*?```/g, 'blok kode')
     .replace(/`[^`]+`/g, '')
     .replace(/[#*_~>\[\]]/g, '')
     .replace(/https?:\/\/\S+/g, 'tautan')
     .trim();
- 
-  currentUtterance = new SpeechSynthesisUtterance(cleanText);
-  currentUtterance.lang = 'id-ID';
-  currentUtterance.rate = 1.0;
-  currentUtterance.pitch = 1.1;
- 
+currentUtterance = new SpeechSynthesisUtterance(clean);
+  currentUtterance.lang = 'id-ID'; 
+  currentUtterance.rate = 0.95; 
+  currentUtterance.pitch = 1.3; 
+
   const voices = speechSynthesis.getVoices();
-  const idVoice = voices.find(v => v.lang.startsWith('id')) || voices.find(v => v.lang.startsWith('en'));
-  if (idVoice) currentUtterance.voice = idVoice;
- 
+  const v = voices.find(v => v.lang.startsWith('id') && (v.name.includes('Google') || v.name.includes('Gadis') || v.name.toLowerCase().includes('female'))) 
+         || voices.find(v => v.lang.startsWith('id')) 
+         || voices.find(v => v.lang.startsWith('en'));
+         
+  if (v) currentUtterance.voice = v;
   const icon = btn.querySelector('i');
-  icon.className = 'fas fa-stop-circle';
-  icon.style.color = '#e74c3c';
-  isSpeaking = true;
- 
-  currentUtterance.onend = () => {
-    isSpeaking = false;
-    icon.className = 'fas fa-volume-up';
-    icon.style.color = 'inherit';
+  icon.className = 'fas fa-stop-circle'; icon.style.color = '#e74c3c'; isSpeaking = true;
+  currentUtterance.onend = currentUtterance.onerror = () => {
+    isSpeaking = false; icon.className = 'fas fa-volume-up'; icon.style.color = 'inherit';
   };
-  currentUtterance.onerror = () => {
-    isSpeaking = false;
-    icon.className = 'fas fa-volume-up';
-    icon.style.color = 'inherit';
-  };
- 
   speechSynthesis.speak(currentUtterance);
 }
 
+// ── CODE MODE TEXTAREA ──
+function detectCodeMode(textarea) {
+  const val = textarea.value;
+  const wrap = document.getElementById('inputWrap');
+  const isCode =
+    val.startsWith('```') ||
+    (val.split('\n').length > 2 &&
+     /function|const |let |var |import |export |class |def |<html|<div|SELECT |INSERT |=>/i.test(val));
+
+  if (isCode) {
+    textarea.classList.add('code-mode');
+    wrap.classList.add('code-mode');
+    textarea.placeholder = 'Paste atau ketik kode di sini…';
+  } else {
+    textarea.classList.remove('code-mode');
+    wrap.classList.remove('code-mode');
+    textarea.placeholder = 'Ketik pesan… (ketik ``` untuk mode kode)';
+  }
+}
+
+// Bungkus otomatis dengan ``` saat kirim jika code-mode
+function getMessageText() {
+  const inp = document.getElementById('messageInput');
+  const text = inp.value.trim();
+  if (!text) return '';
+  const isCode = inp.classList.contains('code-mode');
+  if (isCode && !text.startsWith('```')) {
+    return '```\n' + text + '\n```';
+  }
+  return text;
+}
+
+// ── STREAMING SEND ──
 async function sendMessage(text) {
   const area = document.getElementById('chatArea');
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
 
-  // Tampilkan user bubble langsung (optimistic)
+  appendMessage('user', text);
+  scrollBottom();
+
+  // Buat bubble AI untuk streaming
+  const streamId = 'stream_' + Date.now();
+  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   area.insertAdjacentHTML('beforeend', `
-    <div class="msg-row user" data-raw="${encodeURIComponent(text)}" data-id="">
-      <div style="flex:1;width:100%;">
-        <div class="bubble">${formatContent(text)}</div>
-        <div class="user-actions">
-          <span style="font-size:11px;opacity:.65;margin-right:auto;">
-            ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-          </span>
+    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
+          <img src="/ayaka.gif" alt="Ayaka">
+        </div>
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
+          AAi <span class="version-tag">V.1</span>
         </div>
       </div>
-    </div>`);
-
-  const typingId = 'typing_' + Date.now();
-  area.insertAdjacentHTML('beforeend', `
-    <div class="msg-row assistant" id="${typingId}">
-      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;background:transparent;">
-        <img src="/ayaka.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
+      <div class="bubble stream-cursor" id="bubble_${streamId}">
+        <span style="color:var(--text-muted);font-size:14px;">⏳ Menyambung...</span>
       </div>
-      <div class="typing-indicator">
-        <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-        <span style="margin-left:12px;font-size:13.5px;">AAi berpikir…</span>
+      <div class="msg-actions" id="actions_${streamId}" style="display:none;">
+        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
+          <i class="fas fa-volume-up"></i>
+        </button>
+        <span style="font-size:11px;opacity:.65;">${timeStr}</span>
       </div>
     </div>`);
   scrollBottom();
@@ -647,532 +624,110 @@ async function sendMessage(text) {
       })
     });
 
-    document.getElementById(typingId)?.remove();
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Server error');
-
-    // ✅ Set session ID dulu sebelum apapun
-    if (data.session_id && !currentSessionId) {
-      currentSessionId = data.session_id;
-      localStorage.setItem('aai_last_session', currentSessionId);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Server error');
     }
 
-    // ✅ Tentukan parent chain yang benar
-    const lastAssistant = [...currentMessages].reverse().find(m => m.role === 'assistant');
-    const parentForUser = lastAssistant ? lastAssistant.id : null;
+    const bubbleEl   = document.getElementById(`bubble_${streamId}`);
+    const actionsEl  = document.getElementById(`actions_${streamId}`);
+    const streamRow  = document.getElementById(streamId);
+    const reader     = res.body.getReader();
+    const decoder    = new TextDecoder();
+    let fullText     = '';
+    let buffer       = '';
+    let firstToken   = true;
 
-    // ✅ Push ke state dulu
-    currentMessages.push({
-      id: data.user_message_id,
-      role: 'user',
-      content: text,
-      parent_id: parentForUser,
-      created_at: new Date().toISOString()
-    });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    currentMessages.push({
-      id: data.message_id,
-      role: 'assistant',
-      content: data.reply,
-      parent_id: data.user_message_id,
-      created_at: new Date().toISOString()
-    });
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // baris tidak lengkap, simpan
 
-    // ✅ Render SEMUA dari state, bukan mix append + state
-    renderMessageTree();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        try {
+          const parsed = JSON.parse(raw);
 
-    // ✅ Load sessions di background (non-blocking)
-    loadSessions();
+          // Error dari server
+          if (parsed.error) throw new Error(parsed.error);
+
+          // Token masuk
+          if (parsed.token) {
+            if (firstToken) {
+              bubbleEl.innerHTML = '';   // hapus "⏳ Menyambung..."
+              firstToken = false;
+            }
+            fullText += parsed.token;
+            bubbleEl.innerHTML = formatContent(fullText);
+            bubbleEl.classList.add('stream-cursor');
+            scrollBottom();
+          }
+
+          // Streaming selesai
+          if (parsed.done) {
+            bubbleEl.classList.remove('stream-cursor');
+            actionsEl.style.display = 'flex';
+
+            // Update data attr
+            streamRow.setAttribute('data-id', parsed.message_id || '');
+            streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+
+            // Update user bubble id
+            const userRows = area.querySelectorAll('.msg-row.user');
+            if (userRows.length > 0)
+              userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
+
+            // Set session
+            if (parsed.session_id && !currentSessionId) {
+              currentSessionId = parsed.session_id;
+              localStorage.setItem('aai_last_session', currentSessionId);
+              loadSessions(); // non-blocking
+            }
+
+            // Push state
+            const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
+            currentMessages.push({
+              id: parsed.user_message_id, role: 'user', content: text,
+              parent_id: lastAI?.id || null, created_at: new Date().toISOString()
+            });
+            currentMessages.push({
+              id: parsed.message_id, role: 'assistant', content: fullText,
+              parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+            });
+
+            scrollBottom();
+          }
+        } catch (e) {
+          if (e.message && !e.message.includes('JSON')) throw e;
+        }
+      }
+    }
 
   } catch (e) {
-    document.getElementById(typingId)?.remove();
-    // Hapus optimistic user bubble kalau gagal
-    const userBubbles = area.querySelectorAll('.msg-row.user');
-    const last = userBubbles[userBubbles.length - 1];
-    if (last && !last.getAttribute('data-id')) last.remove();
-    appendMessage('assistant', `⚠️ ${e.message}`);
+    const bubbleEl = document.getElementById(`bubble_${streamId}`);
+    if (bubbleEl) {
+      bubbleEl.classList.remove('stream-cursor');
+      bubbleEl.innerHTML = `<span style="color:#e74c3c;">⚠️ ${e.message}</span>`;
+    }
+    document.getElementById(`actions_${streamId}`)?.style && (document.getElementById(`actions_${streamId}`).style.display = 'flex');
   }
 }
 
-
-
-async function renameSession(id, oldTitle) {
-  const newTitle = prompt("Masukkan judul baru untuk obrolan ini:", oldTitle);
-  if (!newTitle || newTitle.trim() === "" || newTitle === oldTitle) return;
-
-  const sessionIndex = sessions.findIndex(s => s.id === id);
-  if (sessionIndex !== -1) {
-    sessions[sessionIndex].title = newTitle.trim();
+// ── SESSIONS ──
+async function loadSessions() {
+  try {
+    const res = await fetch(`/api/sessions?user_id=${currentUser.id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    sessions = Array.isArray(data) ? data : (data.sessions || []);
     renderSidebar();
-    if (currentSessionId === id) document.getElementById('topbarTitle').textContent = newTitle.trim();
-  }
-
-  try {
-    const res = await fetch(`/api/sessions/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newTitle.trim() })
-    });
-    if (!res.ok) throw new Error("Gagal update ke server");
   } catch (e) {
-    console.error("Error rename:", e);
-    loadSessions();
-  }
-}
-
-function renderSidebar() {
-  const container = document.getElementById('sessionList');
-  container.innerHTML = '';
-
-  if (!sessions.length) {
-    container.innerHTML = `<p style="padding:24px;text-align:center;color:var(--text-muted);font-size:14px;">Belum ada obrolan.<br>Mulai yang baru di atas 👆</p>`;
-    return;
-  }
-
-  sessions.forEach(s => {
-    const item = document.createElement('div');
-    item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
-    item.innerHTML = `
-      <div style="flex:1;display:flex;align-items:center;gap:12px;overflow:hidden;">
-        <div style="width:9px;height:9px;background:#5ab4d4;border-radius:50%;flex-shrink:0;"></div>
-        <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
-      </div>
-      <div class="session-actions">
-        <button class="action-btn" title="Edit Judul" 
-          data-sid="${s.id}" 
-          data-title="${escHtml(s.title || '')}"
-          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
-        <button class="action-btn" title="Hapus Obrolan" onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
-      </div>
-    `;
-    item.onclick = (e) => { if (e.target.tagName !== 'BUTTON') loadSession(s.id); };
-    container.appendChild(item);
-  });
-}
-
-let sessionToDelete = null;
-
-function deleteSession(id) {
-  sessionToDelete = id;
-  document.getElementById('deleteModal').classList.add('active');
-}
-
-function closeDeleteModal() {
-  sessionToDelete = null;
-  document.getElementById('deleteModal').classList.remove('active');
-}
-
-document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
-  if (!sessionToDelete) return;
-  const id = sessionToDelete;
-  closeDeleteModal();
-
-  try {
-    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      if (currentSessionId === id) newChat();
-      loadSessions();
-    }
-  } catch (e) {
-    console.error("Gagal hapus:", e);
-  }
-});
-
-
-function newChat() {
-  currentSessionId = null;
-  localStorage.removeItem('aai_last_session'); // Hapus jejak sesi lama
-  
-  currentMessages = [];
-  activeMessageIds = new Set();
-  activeVersionMap = {};
-  
-  const area = document.getElementById('chatArea');
-  area.innerHTML = `
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
-      <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite; background:transparent;">
-        <img src="/ayaka1.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
-      </div>
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${currentUser.username}! 👋</h2>
-      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
-    </div>`;
-  document.getElementById('topbarTitle').textContent = 'AAi';
-  renderSidebar();
-}
-
-function buildActiveBranch() {
-  if (currentMessages.length === 0) return [];
-
-  // Cari root: parent_id null ATAU tidak ada di daftar id
-  const allIds = new Set(currentMessages.map(m => m.id));
-  let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
-  
-  if (!current) {
-    // Fallback: urutkan by created_at, ambil yang paling awal
-    current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
-  }
-  if (!current) return [];
-
-  const branch = [current];
-
-  while (true) {
-    const children = currentMessages.filter(m => m.parent_id === current.id);
-    if (children.length === 0) break;
-
-    const selectedId = activeVersionMap[current.id];
-    const selected = selectedId
-      ? children.find(c => c.id === selectedId)
-      : children[children.length - 1];
-
-    current = selected || children[children.length - 1];
-    branch.push(current);
-  }
-
-  activeMessageIds = new Set(branch.map(m => m.id));
-  return branch;
-}
-
-function switchVersion(id) {
-  const msg = currentMessages.find(m => m.id === id);
-  if (!msg || !msg.parent_id) return;
-  activeVersionMap[msg.parent_id] = id;
-  renderMessageTree();
-  scrollBottom();
-}
-
-function renderMessageTree() {
-  const area = document.getElementById('chatArea');
-  area.innerHTML = '';
-  
-  const activeBranch = buildActiveBranch();
-  
-  activeBranch.forEach(m => {
-    const siblings = currentMessages.filter(sib => sib.parent_id === m.parent_id && sib.role === m.role);
-    const currentIndex = siblings.findIndex(sib => sib.id === m.id);
-    
-    appendMessage(m.role, m.content, m.created_at, null, m.id, {
-      total: siblings.length,
-      current: currentIndex + 1,
-      siblings: siblings.map(s => s.id)
-    });
-  });
-  
-  scrollBottom();
-}
-
-function renderChunkedAssistant(fullText, metadata, messageId, versionInfo = null) {
-  appendMessage('assistant', fullText, null, metadata, messageId, versionInfo);
-  requestAnimationFrame(() => scrollBottom());
-}
-
-function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
-  const area = document.getElementById('chatArea');
-  const time = timestamp
-    ? new Date(timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-    : new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
- 
-  let html = '';
- 
-  if (role === 'assistant') {
-    let sourcesHtml = '';
-    if (metadata && metadata.sources && metadata.sources.length > 0) {
-      sourcesHtml = `
-        <div class="sources-container">
-          <div class="source-label"><i class="fas fa-search"></i> Referensi</div>
-          <div class="source-grid">
-            ${metadata.sources.map(s => `<a href="${s.link}" target="_blank" class="source-item"><i class="fas fa-link"></i> ${s.title}</a>`).join('')}
-          </div>
-          ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Search Result">` : ''}
-        </div>`;
-    }
- 
-    let versionHtml = `<span class="version-tag">V.1</span>`;
-    if (versionInfo && versionInfo.total > 1) {
-      const prevId = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
-      const nextId = versionInfo.current < versionInfo.total ? versionInfo.siblings[versionInfo.current] : null;
-      versionHtml = `
-        <span class="version-tag" style="display:flex;align-items:center;gap:6px;background:#e2e8f0;color:var(--text);padding:2px 8px;border-radius:12px;">
-          <button style="border:none;background:none;cursor:${prevId ? 'pointer' : 'default'};opacity:${prevId ? '1' : '0.3'};padding:0 4px;" ${prevId ? `onclick="switchVersion('${prevId}')"` : ''}>◀</button>
-          <span>${versionInfo.current} / ${versionInfo.total}</span>
-          <button style="border:none;background:none;cursor:${nextId ? 'pointer' : 'default'};opacity:${nextId ? '1' : '0.3'};padding:0 4px;" ${nextId ? `onclick="switchVersion('${nextId}')"` : ''}>▶</button>
-        </span>`;
-    }
- 
-   html = `
-    <div class="msg-row assistant" data-id="${messageId || ''}" data-plain-text="${encodeURIComponent(content)}">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-          <img src="/ayaka.gif" alt="Ayaka">
-        </div>
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi ${versionHtml}</div>
-      </div>
-      <div class="bubble">${formatContent(content)}</div>
-      ${sourcesHtml}
-      <div class="msg-actions">
-        <button title="Copy Jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi Jawaban" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan Jawaban" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
-          <i class="fas fa-volume-up"></i>
-        </button>
-        <span style="font-size:11px;opacity:.65;margin-left:auto;">${time}</span>
-      </div>
-    </div>`;
-  } else {
-    html = `
-    <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId || ''}">
-      <div style="flex:1;width:100%;">
-        <div class="bubble">${formatContent(content)}</div>
-        <div class="user-actions">
-          <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
-          <button title="Copy Pesan" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
-        </div>
-      </div>
-    </div>`;
-  }
- 
-  area.insertAdjacentHTML('beforeend', html);
-  scrollBottom();
-}
-
-function copyUserMsg(btn) {
-  const bubble = btn.closest('.user').querySelector('.bubble');
-  navigator.clipboard.writeText(bubble.innerText);
-  const icon = btn.querySelector('i');
-  icon.className = 'fas fa-check';
-  setTimeout(() => icon.className = 'far fa-copy', 2000);
-}
-
-function copyFullAI(btn) {
-  const bubble = btn.closest('.assistant').querySelector('.bubble');
-  navigator.clipboard.writeText(bubble.innerText);
-  
-  const icon = btn.querySelector('i');
-  icon.className = 'fas fa-check';
-  icon.style.color = '#5ab4d4';
-  setTimeout(() => {
-    icon.className = 'far fa-copy';
-    icon.style.color = 'inherit';
-  }, 2000);
-}
-
-function regenerateAI(btn) {
-  const aiRow = btn.closest('.msg-row.assistant');
-  const aiMessageId = aiRow.getAttribute('data-id');
- 
-  let current = aiRow.previousElementSibling;
-  let rawUserText = '';
-  let userMessageId = null;
- 
-  while (current) {
-    if (current.classList.contains('user')) {
-      rawUserText = decodeURIComponent(current.getAttribute('data-raw'));
-      userMessageId = current.getAttribute('data-id') || null;
-      break;
-    }
-    current = current.previousElementSibling;
-  }
- 
-  if (!userMessageId && aiMessageId) {
-    const aiMsg = currentMessages.find(m => m.id === aiMessageId);
-    userMessageId = aiMsg?.parent_id || null;
-    if (!rawUserText) {
-      const userMsg = currentMessages.find(m => m.id === userMessageId);
-      rawUserText = userMsg?.content || '';
-    }
-  }
- 
-  if (rawUserText) {
-    executeRegenerate(rawUserText, userMessageId);
-  }
-}
-
-async function executeRegenerate(text, userMessageId = null) {
-  const area = document.getElementById('chatArea');
-  const typingId = 'typing_' + Date.now();
- 
-  area.insertAdjacentHTML('beforeend', `
-    <div class="msg-row assistant" id="${typingId}">
-      <div class="avatar" style="animation:stickerFloat 1.8s ease-in-out infinite;">
-        <img src="/ayaka.gif" alt="Ayaka">
-      </div>
-      <div class="typing-indicator">
-        <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-        <span style="margin-left:12px;font-size:13.5px;">AAi meramu ulang jawaban...</span>
-      </div>
-    </div>`);
-  scrollBottom();
- 
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text,
-        session_id: currentSessionId,
-        user_id: currentUser.id,
-        persona_name: currentPersona,
-        user_message_id: userMessageId
-      })
-    });
- 
-    document.getElementById(typingId)?.remove();
-    const data = await res.json();
- 
-    if (!res.ok) throw new Error(data.error || 'Server error');
- 
-    currentMessages.push({
-      id: data.message_id,
-      role: 'assistant',
-      content: data.reply,
-      parent_id: userMessageId,
-      created_at: new Date().toISOString()
-    });
- 
-    if (userMessageId) {
-      activeVersionMap[userMessageId] = data.message_id;
-    }
- 
-    renderMessageTree();
- 
-  } catch (e) {
-    document.getElementById(typingId)?.remove();
-    appendMessage('assistant', `⚠️ Regenerate gagal: ${e.message}`);
-  }
-}
-
-// ─── MARKED.JS RENDERER ───
-const renderer = new marked.Renderer();
-renderer.code = function(code, language) {
-  const lang = language || 'code';
-  const text = typeof code === 'string' ? code : code.text; 
-  return `<div class="code-window">
-            <div class="code-header">
-              <span style="text-transform:uppercase; font-weight:600; letter-spacing:0.5px;">${lang}</span>
-              <button class="copy-code-btn" onclick="copyCodeWindow(this)">
-                <i class="fas fa-copy"></i> Copy
-              </button>
-            </div>
-            <pre><code>${escHtml(text)}</code></pre>
-          </div>`;
-};
-marked.setOptions({ renderer: renderer });
-
-function copyCodeWindow(btn) {
-  const pre = btn.closest('.code-window').querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent);
-  const originalHtml = btn.innerHTML;
-  btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-  btn.style.color = '#fff';
-  setTimeout(() => {
-    btn.innerHTML = originalHtml;
-    btn.style.color = '#c8eaf5';
-  }, 2000);
-}
-
-function formatContent(text) {
-  if (!text) return "<em style='color:#e74c3c;'>⚠️ Sistem merespons dengan data kosong.</em>";
-  let html = marked.parse(text);
-  html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi, `<div class="source-card">🌐 <a href="$1" target="_blank" style="color:#2a7a9e">$1</a></div>`);
-  return html;
-}
-
-function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function scrollBottom() {
-  const area = document.getElementById('chatArea');
-  area.scrollTop = area.scrollHeight;
-}
-
-// ─── SETTINGS MENU (PERSONA ONLY) ───
-function toggleSettingsMenu() {
-  const menu = document.getElementById('settingsMenu');
-  menu.classList.toggle('show');
-  if (menu.classList.contains('show')) {
-    renderSettingsMenu();
-  }
-}
-
-function renderSettingsMenu() {
-  const menu = document.getElementById('settingsMenu');
-  const personas = [
-    { val: 'Auto',           label: '✨ Auto' },
-    { val: 'Santai',         label: '😌 Santai' },
-    { val: 'Coding',         label: '💻 Coding Expert' },  // ← tambah ini
-    { val: 'Kritikus Brutal',label: '🔥 Kritikus' },
-    { val: 'Rosalia',        label: '🌹 Rosalia' }
-  ];
-
-
-  let html = `<div class="settings-header">Persona AI</div>`;
-
-  personas.forEach(p => {
-    const isActive = currentPersona === p.val;
-    html += `
-      <button class="settings-item ${isActive ? 'active' : ''}" onclick="selectPersonaUI('${p.val}')">
-        <span>${p.label}</span>
-        <i class="fas fa-check check"></i>
-      </button>
-    `;
-  });
-
-  menu.innerHTML = html;
-}
-
-function selectPersonaUI(val) {
-  currentPersona = val;
-  localStorage.setItem('aai_persona', val);
-  renderSettingsMenu();
-}
-
-document.addEventListener('click', function(e) {
-  const wrapper = document.querySelector('.settings-wrapper');
-  if (wrapper && !wrapper.contains(e.target)) {
-    document.getElementById('settingsMenu').classList.remove('show');
-  }
-});
-
-function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    handleSend();
-  }
-}
-
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-}
-
-function handleSend() {
-  const inp = document.getElementById('messageInput');
-  const text = inp.value.trim();
-  if (!text) return;
-  inp.value = '';
-  autoResize(inp);
-  sendMessage(text);
-}
-
-function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  sidebar.classList.toggle('open');
-}
-
-document.addEventListener('click', function(e) {
-  if (window.innerWidth <= 768) {
-    const sidebar = document.getElementById('sidebar');
-    const hamburger = document.querySelector('.hamburger');
-    if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target)) {
-      sidebar.classList.remove('open');
-    }
-  }
-});
-
-function logout() {
-  if (confirm("Yakin mau keluar, Bos?")) {
-    localStorage.removeItem('aai_user');
-    window.location.href = '/login';
+    logDebug(`Gagal load sessions: ${e.message}`, '#e74c3c');
+    sessions = []; renderSidebar();
   }
 }
 
@@ -1183,20 +738,17 @@ async function loadSession(id) {
   const session = sessions.find(s => s.id === id);
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
 
-  currentMessages = [];
-  activeMessageIds = new Set();
+  currentMessages  = [];
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
-    <div style="padding:40px;text-align:center;color:var(--text-muted);">
+    <div style="padding:60px;text-align:center;color:var(--text-muted);">
       <i class="fas fa-spinner fa-spin" style="font-size:28px;"></i>
       <p style="margin-top:12px;">Memuat percakapan...</p>
     </div>`;
 
   try {
-    // ✅ Pakai /api/messages, bukan /api/chat
     const res = await fetch(`/api/messages?session_id=${id}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
     const data = await res.json();
 
     if (data.success && Array.isArray(data.messages)) {
@@ -1206,50 +758,448 @@ async function loadSession(id) {
       throw new Error("Format data tidak valid");
     }
 
-    if (window.innerWidth <= 768) {
+    if (window.innerWidth <= 768)
       document.getElementById('sidebar').classList.remove('open');
-    }
     renderSidebar();
 
   } catch (e) {
     logDebug(`Error load session: ${e.message}`, '#e74c3c');
-    document.getElementById('chatArea').innerHTML = `
-      <div style="padding:40px;text-align:center;color:#e74c3c;">
-        ⚠️ Gagal memuat riwayat: ${e.message}
+    document.getElementById('chatArea').innerHTML =
+      `<div style="padding:40px;text-align:center;color:#e74c3c;">⚠️ Gagal memuat: ${e.message}</div>`;
+  }
+}
+
+function renderSidebar() {
+  const container = document.getElementById('sessionList');
+  container.innerHTML = '';
+  if (!sessions.length) {
+    container.innerHTML = `<p style="padding:24px;text-align:center;color:var(--text-muted);font-size:14px;">Belum ada obrolan.<br>Mulai yang baru di atas 👆</p>`;
+    return;
+  }
+  sessions.forEach(s => {
+    const item = document.createElement('div');
+    item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
+    item.innerHTML = `
+      <div style="flex:1;display:flex;align-items:center;gap:12px;overflow:hidden;">
+        <div style="width:9px;height:9px;background:#5ab4d4;border-radius:50%;flex-shrink:0;"></div>
+        <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
+      </div>
+      <div class="session-actions">
+        <button class="action-btn" title="Edit"
+          data-sid="${s.id}" data-title="${escHtml(s.title || '')}"
+          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
+        <button class="action-btn" title="Hapus"
+          onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
       </div>`;
-  }
+    item.onclick = (e) => { if (e.target.tagName !== 'BUTTON') loadSession(s.id); };
+    container.appendChild(item);
+  });
 }
 
-
-// ─── LOAD ALL SESSIONS ───
-async function loadSessions() {
+async function renameSession(id, oldTitle) {
+  const newTitle = prompt("Judul baru:", oldTitle);
+  if (!newTitle?.trim() || newTitle === oldTitle) return;
+  const idx = sessions.findIndex(s => s.id === id);
+  if (idx !== -1) { sessions[idx].title = newTitle.trim(); renderSidebar(); }
+  if (currentSessionId === id) document.getElementById('topbarTitle').textContent = newTitle.trim();
   try {
-    const res = await fetch(`/api/sessions?user_id=${currentUser.id}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    sessions = Array.isArray(data) ? data : (data.sessions || []);
-    renderSidebar();
+    await fetch(`/api/sessions/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle.trim() })
+    });
+  } catch { loadSessions(); }
+}
+
+let sessionToDelete = null;
+function deleteSession(id) { sessionToDelete = id; document.getElementById('deleteModal').classList.add('active'); }
+function closeDeleteModal() { sessionToDelete = null; document.getElementById('deleteModal').classList.remove('active'); }
+
+document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+  if (!sessionToDelete) return;
+  const id = sessionToDelete; closeDeleteModal();
+  try {
+    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+    if (res.ok) { if (currentSessionId === id) newChat(); loadSessions(); }
+  } catch (e) { console.error("Gagal hapus:", e); }
+});
+
+function newChat() {
+  currentSessionId = null;
+  localStorage.removeItem('aai_last_session');
+  currentMessages  = [];
+  activeVersionMap = {};
+  const area = document.getElementById('chatArea');
+  area.innerHTML = `
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
+      <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite;background:transparent;">
+        <img src="/ayaka1.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
+      </div>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${currentUser.username}! 👋</h2>
+      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
+    </div>`;
+  document.getElementById('topbarTitle').textContent = 'AAi';
+  renderSidebar();
+}
+
+// ── MESSAGE TREE ──
+function buildActiveBranch() {
+  if (!currentMessages.length) return [];
+  const allIds = new Set(currentMessages.map(m => m.id));
+  let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
+  if (!current) {
+    current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  }
+  if (!current) return [];
+
+  const branch = [current];
+  while (true) {
+    const children = currentMessages.filter(m => m.parent_id === current.id);
+    if (!children.length) break;
+    const selectedId = activeVersionMap[current.id];
+    current = (selectedId && children.find(c => c.id === selectedId)) || children[children.length - 1];
+    branch.push(current);
+  }
+  return branch;
+}
+
+function switchVersion(id) {
+  const msg = currentMessages.find(m => m.id === id);
+  if (!msg?.parent_id) return;
+  activeVersionMap[msg.parent_id] = id;
+  renderMessageTree(); scrollBottom();
+}
+
+function renderMessageTree() {
+  const area = document.getElementById('chatArea');
+  const branch = buildActiveBranch();
+  if (!branch.length) { logDebug('Branch kosong, skip render', '#e67e22'); return; }
+  area.innerHTML = '';
+  branch.forEach(m => {
+    const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
+    const idx = siblings.findIndex(s => s.id === m.id);
+    appendMessage(m.role, m.content, m.created_at, null, m.id, {
+      total: siblings.length, current: idx + 1, siblings: siblings.map(s => s.id)
+    });
+  });
+  scrollBottom();
+}
+
+// ── REGENERATE ──
+function regenerateAI(btn) {
+  const aiRow = btn.closest('.msg-row.assistant');
+  const aiMsgId = aiRow.getAttribute('data-id');
+  let rawUser = '', userMsgId = null;
+  let el = aiRow.previousElementSibling;
+  while (el) {
+    if (el.classList.contains('user')) {
+      rawUser = decodeURIComponent(el.getAttribute('data-raw') || '');
+      userMsgId = el.getAttribute('data-id') || null;
+      break;
+    }
+    el = el.previousElementSibling;
+  }
+  if (!userMsgId && aiMsgId) {
+    const aiMsg = currentMessages.find(m => m.id === aiMsgId);
+    userMsgId = aiMsg?.parent_id || null;
+    if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
+  }
+  if (rawUser) executeRegenerate(rawUser, userMsgId);
+}
+
+async function executeRegenerate(text, userMessageId = null) {
+  const area = document.getElementById('chatArea');
+  const streamId = 'regen_' + Date.now();
+  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  area.insertAdjacentHTML('beforeend', `
+    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
+          <img src="/ayaka.gif" alt="Ayaka">
+        </div>
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi <span class="version-tag">V.1</span></div>
+      </div>
+      <div class="bubble stream-cursor" id="bubble_${streamId}">
+        <span style="color:var(--text-muted);">⏳ Meramu ulang...</span>
+      </div>
+      <div class="msg-actions" id="actions_${streamId}" style="display:none;">
+        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
+          <i class="fas fa-volume-up"></i>
+        </button>
+        <span style="font-size:11px;opacity:.65;">${timeStr}</span>
+      </div>
+    </div>`);
+  scrollBottom();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text, session_id: currentSessionId,
+        user_id: currentUser.id, persona_name: currentPersona,
+        user_message_id: userMessageId
+      })
+    });
+
+    const bubbleEl  = document.getElementById(`bubble_${streamId}`);
+    const actionsEl = document.getElementById(`actions_${streamId}`);
+    const streamRow = document.getElementById(streamId);
+    const reader    = res.body.getReader();
+    const decoder   = new TextDecoder();
+    let fullText = '', buffer = '', first = true;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n'); buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6).trim());
+          if (parsed.token) {
+            if (first) { bubbleEl.innerHTML = ''; first = false; }
+            fullText += parsed.token;
+            bubbleEl.innerHTML = formatContent(fullText);
+            bubbleEl.classList.add('stream-cursor');
+            scrollBottom();
+          }
+          if (parsed.done) {
+            bubbleEl.classList.remove('stream-cursor');
+            actionsEl.style.display = 'flex';
+            streamRow.setAttribute('data-id', parsed.message_id || '');
+            streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+            currentMessages.push({
+              id: parsed.message_id, role: 'assistant', content: fullText,
+              parent_id: userMessageId, created_at: new Date().toISOString()
+            });
+            if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
+            renderMessageTree();
+          }
+        } catch {}
+      }
+    }
   } catch (e) {
-    logDebug(`Gagal load sessions: ${e.message}`, '#e74c3c');
-    sessions = [];
-    renderSidebar();
+    const b = document.getElementById(`bubble_${streamId}`);
+    if (b) { b.classList.remove('stream-cursor'); b.innerHTML = `<span style="color:#e74c3c;">⚠️ ${e.message}</span>`; }
   }
 }
 
+// ── APPEND MESSAGE ──
+function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
+  const area = document.getElementById('chatArea');
+  const time = timestamp
+    ? new Date(timestamp).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })
+    : new Date().toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
 
+  let html = '';
+
+  if (role === 'assistant') {
+    let sourcesHtml = '';
+    if (metadata?.sources?.length) {
+      sourcesHtml = `
+        <div class="sources-container">
+          <div class="source-label"><i class="fas fa-search"></i> Referensi</div>
+          <div class="source-grid">
+            ${metadata.sources.map(s => `<a href="${s.link}" target="_blank" class="source-item"><i class="fas fa-link"></i> ${s.title}</a>`).join('')}
+          </div>
+          ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Referensi">` : ''}
+        </div>`;
+    }
+
+    let versionHtml = `<span class="version-tag">V.1</span>`;
+    if (versionInfo?.total > 1) {
+      const prev = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
+      const next = versionInfo.current < versionInfo.total ? versionInfo.siblings[versionInfo.current] : null;
+      versionHtml = `
+        <span class="version-tag" style="display:flex;align-items:center;gap:6px;background:#e2e8f0;color:var(--text);padding:2px 8px;border-radius:12px;">
+          <button style="border:none;background:none;cursor:${prev?'pointer':'default'};opacity:${prev?'1':'0.3'};padding:0 4px;"
+            ${prev?`onclick="switchVersion('${prev}')"`:''}">◀</button>
+          <span>${versionInfo.current} / ${versionInfo.total}</span>
+          <button style="border:none;background:none;cursor:${next?'pointer':'default'};opacity:${next?'1':'0.3'};padding:0 4px;"
+            ${next?`onclick="switchVersion('${next}')"`:''}">▶</button>
+        </span>`;
+    }
+
+    html = `
+    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
+          <img src="/ayaka.gif" alt="Ayaka">
+        </div>
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi ${versionHtml}</div>
+      </div>
+      <div class="bubble">${formatContent(content)}</div>
+      ${sourcesHtml}
+      <div class="msg-actions">
+        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
+          <i class="fas fa-volume-up"></i>
+        </button>
+        <span style="font-size:11px;opacity:.65;">${time}</span>
+      </div>
+    </div>`;
+  } else {
+    html = `
+    <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
+      <div style="flex:1;width:100%;">
+        <div class="bubble">${formatContent(content)}</div>
+        <div class="user-actions">
+          <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
+          <button title="Copy" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  area.insertAdjacentHTML('beforeend', html);
+  scrollBottom();
+}
+
+// ── COPY ──
+function copyUserMsg(btn) {
+  navigator.clipboard.writeText(btn.closest('.user').querySelector('.bubble').innerText);
+  const i = btn.querySelector('i'); i.className = 'fas fa-check';
+  setTimeout(() => i.className = 'far fa-copy', 2000);
+}
+function copyFullAI(btn) {
+  navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
+  const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
+  setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
+}
+
+// ── MARKED RENDERER ──
+const renderer = new marked.Renderer();
+renderer.code = function(code, language) {
+  const lang = language || 'code';
+  const text = typeof code === 'string' ? code : code.text;
+  return `<div class="code-window">
+    <div class="code-header">
+      <span style="text-transform:uppercase;font-weight:600;letter-spacing:.5px;">${lang}</span>
+      <div class="code-header-actions">
+        <button class="copy-code-btn" onclick="toggleCodeWindow(this)">
+          <i class="fas fa-chevron-up"></i> <span class="btn-text">Minimize</span>
+        </button>
+        <button class="copy-code-btn" onclick="copyCodeWindow(this)">
+          <i class="fas fa-copy"></i> Copy
+        </button>
+      </div>
+    </div>
+    <pre><code>${escHtml(text)}</code></pre>
+  </div>`;
+};
+marked.setOptions({ renderer, breaks: true });
+
+function copyCodeWindow(btn) {
+  const pre = btn.closest('.code-window').querySelector('pre');
+  navigator.clipboard.writeText(pre.textContent);
+  const orig = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-check"></i> Copied!'; btn.style.color = '#fff';
+  setTimeout(() => { btn.innerHTML = orig; btn.style.color = '#c8eaf5'; }, 2000);
+}
+function toggleCodeWindow(btn) {
+  const pre = btn.closest('.code-window').querySelector('pre');
+  const icon = btn.querySelector('i');
+  const span = btn.querySelector('.btn-text');
+  const min = pre.classList.toggle('minimized');
+  icon.className = min ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+  span.textContent = min ? 'Expand' : 'Minimize';
+}
+
+function formatContent(text) {
+  if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
+  let html = marked.parse(text);
+  html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi,
+    `<div class="source-card">🌐 <a href="$1" target="_blank" style="color:#2a7a9e">$1</a></div>`);
+  return html;
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function scrollBottom() {
+  const a = document.getElementById('chatArea'); a.scrollTop = a.scrollHeight;
+}
+
+// ── SETTINGS / PERSONA ──
+function toggleSettingsMenu() {
+  const menu = document.getElementById('settingsMenu');
+  menu.classList.toggle('show');
+  if (menu.classList.contains('show')) renderSettingsMenu();
+}
+function renderSettingsMenu() {
+  const personas = [
+    { val: 'Auto',           label: '✨ Auto' },
+    { val: 'Santai',         label: '😌 Santai' },
+    { val: 'Coding',         label: '💻 Coding Expert' },
+    { val: 'Kritikus Brutal',label: '🔥 Kritikus' },
+    { val: 'Rosalia',        label: '🌹 Rosalia' }
+  ];
+  let html = `<div class="settings-header">Persona AI</div>`;
+  personas.forEach(p => {
+    html += `<button class="settings-item ${currentPersona===p.val?'active':''}" onclick="selectPersonaUI('${p.val}')">
+      <span>${p.label}</span><i class="fas fa-check check"></i>
+    </button>`;
+  });
+  document.getElementById('settingsMenu').innerHTML = html;
+}
+function selectPersonaUI(val) {
+  currentPersona = val; localStorage.setItem('aai_persona', val); renderSettingsMenu();
+}
+
+document.addEventListener('click', e => {
+  const w = document.querySelector('.settings-wrapper');
+  if (w && !w.contains(e.target)) document.getElementById('settingsMenu').classList.remove('show');
+});
+
+// ── INPUT ──
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+}
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+function handleSend() {
+  const inp = document.getElementById('messageInput');
+  const text = getMessageText();
+  if (!text) return;
+  inp.value = '';
+  autoResize(inp);
+  // Reset code mode
+  inp.classList.remove('code-mode');
+  document.getElementById('inputWrap').classList.remove('code-mode');
+  sendMessage(text);
+}
+
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+
+document.addEventListener('click', e => {
+  if (window.innerWidth > 768) return;
+  const sidebar = document.getElementById('sidebar');
+  const hamburger = document.querySelector('.hamburger');
+  if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target))
+    sidebar.classList.remove('open');
+});
+
+function logout() {
+  if (confirm("Yakin mau keluar?")) {
+    localStorage.removeItem('aai_user');
+    window.location.href = '/login';
+  }
+}
+
+// ── INIT ──
 async function initApp() {
   await loadSessions();
-  
-  // Cek apakah user terakhir kali di sesi tertentu
-  const lastSessionId = localStorage.getItem('aai_last_session');
-  if (lastSessionId && sessions.find(s => s.id === lastSessionId)) {
-    loadSession(lastSessionId);
-  } else {
-    newChat();
-  }
+  const last = localStorage.getItem('aai_last_session');
+  if (last && sessions.find(s => s.id === last)) loadSession(last);
+  else newChat();
 }
 
-// Jalankan saat DOM siap
 document.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
