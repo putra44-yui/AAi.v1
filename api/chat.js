@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const MAIN_MODEL = "qwen/qwen3.6-plus-preview:free";
+const MAIN_MODEL = "qwen/qwen3.6-plus:free";
 
 function calculateAge(dob) {
   if (!dob) return '?';
@@ -22,17 +22,17 @@ function getModelConfig(personaList) {
   const persona = personaList[0];
   const configs = {
     'Coding':          { temperature: 0.2, max_tokens: 32000, top_p: 0.85 },
-    'Kritikus Brutal': { temperature: 0.3, max_tokens: 9000,  top_p: 0.85 },
-    'Santai':          { temperature: 0.8, max_tokens: 4000,  top_p: 0.95 },
-    'Rosalia':         { temperature: 0.95, max_tokens: 5000, top_p: 0.98 },
-    'Auto':            { temperature: 0.7, max_tokens: 6000,  top_p: 0.9  }
+    'Kritikus Brutal': { temperature: 0.3, max_tokens: 4000,  top_p: 0.85 },
+    'Santai':          { temperature: 0.8, max_tokens: 2000,  top_p: 0.95 },
+    'Rosalia':         { temperature: 0.95, max_tokens: 2000, top_p: 0.98 },
+    'Auto':            { temperature: 0.7, max_tokens: 5000,  top_p: 0.9  }
   };
   return configs[persona] || configs['Auto'];
 }
 
 export default async function handler(req, res) {
 
-  // ── GET: Load riwayat ──
+  // ── GET: Load riwayat sesi ──
   if (req.method === 'GET') {
     const { session_id } = req.query;
     if (!session_id) return res.status(400).json({ error: 'session_id wajib' });
@@ -43,7 +43,7 @@ export default async function handler(req, res) {
         .eq('session_id', session_id)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      return res.status(200).json({ success: true, messages: messages || [], session_id });
+      return res.status(200).json({ success: true, messages: messages || [] });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -57,11 +57,32 @@ export default async function handler(req, res) {
   try {
     const {
       message, session_id, user_id, username,
-      persona_name = 'Auto', parent_id = null, user_message_id = null
+      persona_name = 'Auto', parent_id = null, user_message_id = null,
+      edit_message_id = null   // ← BARU
     } = req.body;
 
     const userMessage = message?.trim();
-    if (!userMessage) throw new Error("Pesan tidak boleh kosong");
+    if (!userMessage && !edit_message_id) throw new Error("Pesan tidak boleh kosong");
+
+        // ====================== EDIT PESAN (UPDATE) ======================
+    if (edit_message_id) {
+      // Update hanya kolom content (tidak ada updated_at di tabel messages)
+      const { error: updateErr } = await supabase
+        .from('messages')
+        .update({ content: userMessage })
+        .eq('id', edit_message_id);
+
+      if (updateErr) throw new Error("Gagal update pesan user: " + updateErr.message);
+
+      // Hapus semua jawaban AI lama yang sudah tidak relevan
+      await supabase
+        .from('messages')
+        .delete()
+        .eq('parent_id', edit_message_id)
+        .eq('role', 'assistant');
+
+      console.log(`✅ Pesan ${edit_message_id} berhasil di-update & AI lama dihapus`);
+    }
 
     // 1. User & Person
     let userQuery = supabase.from('users').select('id, person_id');
@@ -78,7 +99,7 @@ export default async function handler(req, res) {
 
     const currentAge = calculateAge(person?.date_of_birth);
 
-    // 2. Family context
+    // 2. Family context (sama seperti sebelumnya)
     const { data: allPersons } = await supabase.from('persons').select('name, date_of_birth, role');
     const familyContext = (allPersons || []).map(p => {
       const age = calculateAge(p.date_of_birth);
@@ -97,14 +118,14 @@ export default async function handler(req, res) {
       .from('person_memory').select('key, value').eq('person_id', user.person_id);
     const memoryText = memories?.map(m => `${m.key}: ${m.value}`).join('\n') || 'Tidak ada memori.';
 
-    // 3. Chat history — semua, tanpa limit
+    // 3. Chat history
     const apiKey = process.env.OPENROUTER_API_KEY;
     const chatHistory = session_id
       ? ((await supabase.from('messages').select('role, content')
           .eq('session_id', session_id).order('created_at', { ascending: true })).data || [])
       : [];
 
-    // 4. Persona
+    // 4. Persona (sama)
     let targetPersona = persona_name;
     const msgLower = userMessage.toLowerCase();
     if (targetPersona === 'Auto') {
@@ -125,7 +146,7 @@ export default async function handler(req, res) {
       .from('ai_personas').select('name, system_prompt').in('name', personaList);
     const combinedSystem = personasData?.map(p => `=== GAYA: ${p.name} ===\n${p.system_prompt}`).join('\n\n') || '';
 
-    // 5. System prompt
+    // 5. System prompt (sama)
     const systemPrompt = {
       role: "system",
       content: `Kamu adalah AAi, AI keluarga yang cerdas dan ramah.
@@ -148,50 +169,44 @@ ATURAN PENTING:
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.`
     };
 
-    // ── SETUP DB SEBELUM STREAMING ──
-
-    // Buat sesi jika belum ada
+    // Buat sesi baru jika belum ada
     let currentSessionId = session_id;
     if (!currentSessionId) {
-      // Judul cepat dari 40 karakter pertama, update async setelah streaming
       const quickTitle = userMessage.length > 25 ? userMessage.substring(0, 25) + "..." : userMessage;
-      const { data: newSession, error: sesErr } = await supabase
+      const { data: newSession } = await supabase
         .from('sessions').insert({ user_id: user.id, title: quickTitle }).select().single();
-      if (sesErr) throw new Error("Gagal buat sesi: " + sesErr.message);
       currentSessionId = newSession.id;
-
-      // Generate judul AI secara async (tidak tunggu)
       generateTitle(apiKey, userMessage, currentSessionId);
     }
 
-    // Tentukan parent_id
-    let effectiveParentId = parent_id;
-    if (!effectiveParentId && !user_message_id) {
-      const { data: lastMsg } = await supabase.from('messages').select('id')
-        .eq('session_id', currentSessionId).order('created_at', { ascending: false })
-        .limit(1).maybeSingle();
-      effectiveParentId = lastMsg?.id || null;
-    }
-
-    // Simpan pesan user
+    // Simpan pesan user (kecuali kalau edit)
     let finalUserMessageId = user_message_id;
-    if (!finalUserMessageId) {
-      const { data: userMsgData, error: userMsgErr } = await supabase.from('messages').insert({
+    if (!edit_message_id && !finalUserMessageId) {
+      let effectiveParentId = parent_id;
+      if (!effectiveParentId) {
+        const { data: lastMsg } = await supabase.from('messages').select('id')
+          .eq('session_id', currentSessionId).order('created_at', { ascending: false })
+          .limit(1).maybeSingle();
+        effectiveParentId = lastMsg?.id || null;
+      }
+
+      const { data: userMsgData } = await supabase.from('messages').insert({
         session_id: currentSessionId, role: 'user',
         content: userMessage, parent_id: effectiveParentId
       }).select().single();
-      if (userMsgErr) throw new Error("Gagal simpan pesan user: " + userMsgErr.message);
       finalUserMessageId = userMsgData.id;
     }
 
-    // ── MULAI STREAMING ──
+    // ── STREAMING ──
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // penting buat Nginx/Vercel
+    res.setHeader('X-Accel-Buffering', 'no');
 
     const modelConfig = getModelConfig(personaList);
-    console.log(`🎛️ ${personaList[0]} | temp:${modelConfig.temperature} | tokens:${modelConfig.max_tokens}`);
+
+        // ── OPENROUTER CALL + DETAILED LOGGING ──
+    console.log(`[OpenRouter] Mengirim request ke model: ${MAIN_MODEL}`);
 
     const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: 'POST',
@@ -211,64 +226,81 @@ ATURAN PENTING:
       })
     });
 
+    console.log(`[OpenRouter] Status response: ${aiResponse.status} ${aiResponse.statusText}`);
+
     if (!aiResponse.ok) {
-      const errData = await aiResponse.json();
-      res.write(`data: ${JSON.stringify({ error: errData.error?.message || 'API Error' })}\n\n`);
-      return res.end();
+      let errorDetail = 'Unknown error';
+      try {
+        const errData = await aiResponse.json();
+        errorDetail = JSON.stringify(errData, null, 2);
+        console.error(`[OpenRouter] ERROR DETAIL:`, errData);
+      } catch (e) {
+        errorDetail = await aiResponse.text();
+        console.error(`[OpenRouter] Raw error text:`, errorDetail);
+      }
+
+      res.write(`data: ${JSON.stringify({ error: `Provider returned error - ${aiResponse.status} ${errorDetail}` })}\n\n`);
+      res.end();
+      return;
     }
 
-    // Baca stream dari OpenRouter
     const reader = aiResponse.body.getReader();
     const decoder = new TextDecoder();
     let fullReply = '';
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // simpan baris tidak lengkap
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (raw === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(raw);
-          const token = parsed.choices?.[0]?.delta?.content || '';
-          if (token) {
-            fullReply += token;
-            res.write(`data: ${JSON.stringify({ token })}\n\n`);
-          }
-        } catch {}
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (raw === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(raw);
+            const token = parsed.choices?.[0]?.delta?.content || '';
+            if (token) {
+              fullReply += token;
+              res.write(`data: ${JSON.stringify({ token })}\n\n`);
+              res.flush?.();
+            }
+          } catch {}
+        }
       }
+    } catch (streamErr) {
+      console.error("Stream error:", streamErr.message);
     }
 
-    // Simpan balasan AI ke DB
-    const { data: aiMsgData, error: aiMsgErr } = await supabase.from('messages').insert({
-      session_id: currentSessionId,
-      role: 'assistant',
-      content: fullReply,
-      parent_id: finalUserMessageId
-    }).select().single();
-    if (aiMsgErr) console.error("Gagal simpan AI:", aiMsgErr.message);
+    // Simpan AI response ke DB
+    if (fullReply.trim()) {
+      const { data: aiMsgData } = await supabase.from('messages').insert({
+        session_id: currentSessionId,
+        role: 'assistant',
+        content: fullReply,
+        parent_id: finalUserMessageId || edit_message_id
+      }).select().single();
 
-    // Update timestamp sesi
-    await supabase.from('sessions')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', currentSessionId);
+      await supabase.from('sessions')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', currentSessionId);
 
-    // Kirim event selesai
-    res.write(`data: ${JSON.stringify({
-      done: true,
-      session_id: currentSessionId,
-      message_id: aiMsgData?.id,
-      user_message_id: finalUserMessageId
-    })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        done: true,
+        session_id: currentSessionId,
+        message_id: aiMsgData?.id,
+        user_message_id: finalUserMessageId
+      })}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify({ error: 'Respons kosong dari model.' })}\n\n`);
+    }
+
     res.end();
-    console.log(`✅ Streaming selesai, session: ${currentSessionId}`);
 
   } catch (error) {
     console.error("=== ERROR ===", error.message);
@@ -280,7 +312,7 @@ ATURAN PENTING:
   }
 }
 
-// Generate judul AI async (tidak blokir streaming)
+// Generate judul AI async
 async function generateTitle(apiKey, userMessage, sessionId) {
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -295,8 +327,7 @@ async function generateTitle(apiKey, userMessage, sessionId) {
     const d = await r.json();
     const title = d.choices?.[0]?.message?.content?.replace(/["'.]/g, '').trim();
     if (title) {
-      const supabase2 = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-      await supabase2.from('sessions').update({ title }).eq('id', sessionId);
+      await supabase.from('sessions').update({ title }).eq('id', sessionId);
     }
   } catch {}
 }

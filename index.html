@@ -41,6 +41,27 @@ body::before {
   pointer-events: none;
 }
 
+/* ── EDIT PESAN USER ── */
+.edit-textarea {
+  width: 100%; min-height: 140px; max-height: 420px;
+  border: 1.5px solid var(--blue-mid); border-radius: 12px;
+  padding: 14px 18px; font-size: 15px; font-family: inherit;
+  resize: vertical; outline: none; background: #fff;
+  color: var(--text); line-height: 1.5;
+}
+.edit-actions {
+  display: flex; gap: 8px; margin-top: 8px; justify-content: flex-end;
+}
+.btn-edit-cancel {
+  background: #f1f5f9; border: none; padding: 6px 16px;
+  border-radius: 12px; cursor: pointer; font-size: 13px; color: var(--text);
+}
+.btn-edit-save {
+  background: linear-gradient(135deg, var(--blue-mid), #b38fd4);
+  border: none; padding: 6px 16px; border-radius: 12px;
+  cursor: pointer; font-size: 13px; color: white; font-weight: 600;
+}
+
 /* ── SIDEBAR ── */
 .sidebar {
   display: flex;
@@ -129,7 +150,7 @@ body::before {
 /* ── CHAT AREA ── */
 .chat-area {
   flex: 1; padding: 32px 32px 24px;
-  display: flex; flex-direction: column; gap: 16px; 
+  display: flex; flex-direction: column; gap: 16px;
   overflow-y: auto; overflow-x: hidden;
   scroll-behavior: smooth;
 }
@@ -138,7 +159,7 @@ body::before {
 .msg-row.assistant {
   display: flex; flex-direction: column;
   align-items: flex-start; gap: 8px;
-  max-width: 100%; 
+  max-width: 100%;
 }
 .assistant .avatar {
   width: 38px; height: 38px; border-radius: 50%;
@@ -152,7 +173,7 @@ body::before {
   padding: 4px 0; border: none; box-shadow: none;
   font-size: 15px; line-height: 1.6;
   width: 100%; overflow-wrap: anywhere; word-break: break-word;
-  text-align: justify; 
+  text-align: justify;
 }
 
 .msg-row.user {
@@ -342,9 +363,12 @@ body::before {
   color: white; display: flex; align-items: center; justify-content: center;
   border: none; cursor: pointer;
   box-shadow: 0 4px 12px rgba(90,180,212,.3);
-  transition: transform .2s ease;
+  transition: transform .2s ease, background .2s ease;
 }
 .send-btn:hover { transform: scale(1.1); }
+.send-btn.stop-mode {
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
 
 /* ── SETTINGS ── */
 .settings-wrapper { position: relative; flex-shrink: 0; }
@@ -481,36 +505,67 @@ body::before {
         </button>
         <div class="settings-menu" id="settingsMenu"></div>
       </div>
-      <button class="send-btn" onclick="handleSend()">▶</button>
+      <button class="send-btn" id="sendBtn" onclick="handleSend()">▶</button>
     </div>
   </div>
 </main>
 
 <script>
-// ── STATE ──
+// ══════════════════════════════════════════
+// STATE GLOBAL
+// ══════════════════════════════════════════
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
 if (!currentUser.id) window.location.href = '/login';
 if (currentUser.username) document.getElementById('cardUsername').textContent = currentUser.username;
 
-let sessions       = [];
+let sessions         = [];
 let currentSessionId = null;
-let currentPersona = localStorage.getItem('aai_persona') || 'Auto';
+let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
 let currentMessages  = [];
 let activeVersionMap = {};
 let currentUtterance = null;
 let isSpeaking       = false;
+let abortController  = null;
+let isGenerating     = false;   // ← baru: cegah kirim saat streaming
 
+// ── Inisialisasi suara TTS ──
 if ('speechSynthesis' in window) {
   speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
-  speechSynthesis.getVoices(); 
+  speechSynthesis.getVoices();
 }
-
 
 function logDebug(msg, color = '#2a7a9e') {
   console.log(`%c[AAi] ${msg}`, `color:${color};font-weight:bold`);
 }
 
-// ── TTS ──
+// ══════════════════════════════════════════
+// TOMBOL SEND / STOP + DISABLE INPUT
+// ══════════════════════════════════════════
+function setSendBtn(mode) {
+  const btn = document.getElementById('sendBtn');
+  const inp = document.getElementById('messageInput');
+  if (mode === 'stop') {
+    btn.innerHTML = '⏹';
+    btn.title = 'Hentikan';
+    btn.classList.add('stop-mode');
+    inp.disabled = true;
+    inp.style.opacity = '0.7';
+    btn.onclick = () => {
+      if (abortController) abortController.abort();
+    };
+  } else {
+    btn.innerHTML = '▶';
+    btn.title = 'Kirim';
+    btn.classList.remove('stop-mode');
+    inp.disabled = false;
+    inp.style.opacity = '1';
+    btn.onclick = handleSend;
+  }
+}
+
+// ══════════════════════════════════════════
+// TTS
+// ══════════════════════════════════════════
 function speakText(btn, text) {
   if (isSpeaking) {
     speechSynthesis.cancel();
@@ -526,16 +581,14 @@ function speakText(btn, text) {
     .replace(/[#*_~>\[\]]/g, '')
     .replace(/https?:\/\/\S+/g, 'tautan')
     .trim();
-currentUtterance = new SpeechSynthesisUtterance(clean);
-  currentUtterance.lang = 'id-ID'; 
-  currentUtterance.rate = 0.95; 
-  currentUtterance.pitch = 1.3; 
-
+  currentUtterance = new SpeechSynthesisUtterance(clean);
+  currentUtterance.lang  = 'id-ID';
+  currentUtterance.rate  = 0.95;
+  currentUtterance.pitch = 1.3;
   const voices = speechSynthesis.getVoices();
-  const v = voices.find(v => v.lang.startsWith('id') && (v.name.includes('Google') || v.name.includes('Gadis') || v.name.toLowerCase().includes('female'))) 
-         || voices.find(v => v.lang.startsWith('id')) 
+  const v = voices.find(v => v.lang.startsWith('id') && (v.name.includes('Google') || v.name.includes('Gadis') || v.name.toLowerCase().includes('female')))
+         || voices.find(v => v.lang.startsWith('id'))
          || voices.find(v => v.lang.startsWith('en'));
-         
   if (v) currentUtterance.voice = v;
   const icon = btn.querySelector('i');
   icon.className = 'fas fa-stop-circle'; icon.style.color = '#e74c3c'; isSpeaking = true;
@@ -545,50 +598,45 @@ currentUtterance = new SpeechSynthesisUtterance(clean);
   speechSynthesis.speak(currentUtterance);
 }
 
-// ── CODE MODE TEXTAREA ──
+// ══════════════════════════════════════════
+// DETEKSI CODE MODE (diperbaiki: tidak false-positive HTML)
+// ══════════════════════════════════════════
 function detectCodeMode(textarea) {
-  const val = textarea.value;
+  const val = textarea.value.trim();
   const wrap = document.getElementById('inputWrap');
-  const isCode =
-    val.startsWith('```') ||
-    (val.split('\n').length > 2 &&
-     /function|const |let |var |import |export |class |def |<html|<div|SELECT |INSERT |=>/i.test(val));
 
-  if (isCode) {
+  const looksLikeCode = /function |const |let |var |class |=>|import |export|def |print\(|async |await|SELECT |INSERT|UPDATE|FROM/i.test(val) ||
+                        val.includes('```');
+
+  if (looksLikeCode) {
     textarea.classList.add('code-mode');
     wrap.classList.add('code-mode');
-    textarea.placeholder = 'Paste atau ketik kode di sini…';
+    textarea.placeholder = 'Boleh tambah teks penjelasan di atas atau bawah code block…';
   } else {
     textarea.classList.remove('code-mode');
     wrap.classList.remove('code-mode');
-    textarea.placeholder = 'Ketik pesan… ';
+    textarea.placeholder = 'Ketik pesan…';
   }
 }
 
-// Bungkus otomatis dengan ``` saat kirim jika code-mode
 function getMessageText() {
   const inp = document.getElementById('messageInput');
-  const text = inp.value.trim();
+  let text = inp.value.trim();
   if (!text) return '';
-  const isCode = inp.classList.contains('code-mode');
-  if (isCode && !text.startsWith('```')) {
+
+  if (text.includes('```')) return text;
+
+  if (inp.classList.contains('code-mode')) {
     return '```\n' + text + '\n```';
   }
   return text;
 }
 
-// ── STREAMING SEND ──
-async function sendMessage(text) {
-  const area = document.getElementById('chatArea');
-  if (!area.querySelector('.msg-row')) area.innerHTML = '';
-
-  appendMessage('user', text);
-  scrollBottom();
-
-  // Buat bubble AI untuk streaming
-  const streamId = 'stream_' + Date.now();
-  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  area.insertAdjacentHTML('beforeend', `
+// ══════════════════════════════════════════
+// HELPER: bubble AI streaming
+// ══════════════════════════════════════════
+function buildStreamBubbleHTML(streamId, timeStr) {
+  return `
     <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="">
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
@@ -599,23 +647,101 @@ async function sendMessage(text) {
         </div>
       </div>
       <div class="bubble stream-cursor" id="bubble_${streamId}">
-        <span style="color:var(--text-muted);font-size:14px;">⏳ Menyambung...</span>
+        <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>
       </div>
       <div class="msg-actions" id="actions_${streamId}" style="display:none;">
         <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
         <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
+        <button class="tts-btn" title="Dengarkan"
+          onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
         <span style="font-size:11px;opacity:.65;">${timeStr}</span>
       </div>
-    </div>`);
+    </div>`;
+}
+
+// ══════════════════════════════════════════
+// STREAM SSE
+// ══════════════════════════════════════════
+async function processStream(response, streamId, onDone) {
+  const bubbleEl  = document.getElementById(`bubble_${streamId}`);
+  const actionsEl = document.getElementById(`actions_${streamId}`);
+  const streamRow = document.getElementById(streamId);
+  const reader    = response.body.getReader();
+  const decoder   = new TextDecoder();
+  let fullText  = '';
+  let buffer    = '';
+  let firstToken = true;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') continue;
+
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch { continue; }
+
+      if (parsed.error) throw new Error(parsed.error);
+
+      if (parsed.token) {
+        if (firstToken) { bubbleEl.innerHTML = ''; firstToken = false; }
+        fullText += parsed.token;
+        bubbleEl.innerHTML = formatContent(fullText);
+        bubbleEl.classList.add('stream-cursor');
+        scrollBottom();
+      }
+
+      if (parsed.done) {
+        bubbleEl.classList.remove('stream-cursor');
+        actionsEl.style.display = 'flex';
+        streamRow.setAttribute('data-id', parsed.message_id || '');
+        streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+        onDone(parsed, fullText);
+        scrollBottom();
+      }
+    }
+  }
+}
+
+// ══════════════════════════════════════════
+// KIRIM PESAN BARU
+// ══════════════════════════════════════════
+async function sendMessage(text) {
+  if (isGenerating) return;
+  const area = document.getElementById('chatArea');
+  if (!area.querySelector('.msg-row')) area.innerHTML = '';
+
+  appendMessage('user', text);
   scrollBottom();
+
+  const streamId = 'stream_' + Date.now();
+  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+  scrollBottom();
+
+  setSendBtn('stop');
+  abortController = new AbortController();
+  isGenerating = true;
 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
       body: JSON.stringify({
         message: text,
         session_id: currentSessionId,
@@ -625,108 +751,320 @@ async function sendMessage(text) {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Server error');
+      let errMsg = `Server error ${res.status}`;
+      try { const d = await res.json(); errMsg = d.error || errMsg; }
+      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      throw new Error(errMsg);
     }
 
-    const bubbleEl   = document.getElementById(`bubble_${streamId}`);
-    const actionsEl  = document.getElementById(`actions_${streamId}`);
-    const streamRow  = document.getElementById(streamId);
-    const reader     = res.body.getReader();
-    const decoder    = new TextDecoder();
-    let fullText     = '';
-    let buffer       = '';
-    let firstToken   = true;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop(); // baris tidak lengkap, simpan
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        try {
-          const parsed = JSON.parse(raw);
-
-          // Error dari server
-          if (parsed.error) throw new Error(parsed.error);
-
-          // Token masuk
-          if (parsed.token) {
-            if (firstToken) {
-              bubbleEl.innerHTML = '';   // hapus "⏳ Menyambung..."
-              firstToken = false;
-            }
-            fullText += parsed.token;
-            bubbleEl.innerHTML = formatContent(fullText);
-            bubbleEl.classList.add('stream-cursor');
-            scrollBottom();
-          }
-
-          // Streaming selesai
-          if (parsed.done) {
-            bubbleEl.classList.remove('stream-cursor');
-            actionsEl.style.display = 'flex';
-
-            // Update data attr
-            streamRow.setAttribute('data-id', parsed.message_id || '');
-            streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-
-            // Update user bubble id
-            const userRows = area.querySelectorAll('.msg-row.user');
-            if (userRows.length > 0)
-              userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
-
-            // Set session
- // Set session
-if (parsed.session_id && !currentSessionId) {
-  currentSessionId = parsed.session_id;
-  localStorage.setItem('aai_last_session', currentSessionId);
-  setTimeout(async () => {
-    await loadSessions();
-    const activeSec = sessions.find(s => s.id === currentSessionId);
-    if (activeSec) {
-      document.getElementById('topbarTitle').textContent = activeSec.title;
-    }
-  }, 2500);
-} 
-
-const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
-currentMessages.push({
-  id: parsed.user_message_id, role: 'user', content: text,
-  parent_id: lastAI?.id || null, created_at: new Date().toISOString()
-});
-currentMessages.push({
-  id: parsed.message_id, role: 'assistant', content: fullText,
-  parent_id: parsed.user_message_id, created_at: new Date().toISOString()
-});
-
-scrollBottom();
-          }
-        } catch (e) {
-          if (e.message && !e.message.includes('JSON')) throw e;
-        }
+    await processStream(res, streamId, (parsed, fullText) => {
+      if (parsed.session_id && !currentSessionId) {
+        currentSessionId = parsed.session_id;
+        localStorage.setItem('aai_last_session', currentSessionId);
+        setTimeout(async () => {
+          await loadSessions();
+          const s = sessions.find(s => s.id === currentSessionId);
+          if (s) document.getElementById('topbarTitle').textContent = s.title;
+        }, 800);   // ← dipercepat + cegah race
       }
-    }
+      const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
+      if (userRows.length > 0)
+        userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
+      currentMessages.push({
+        id: parsed.user_message_id, role: 'user', content: text,
+        parent_id: null, created_at: new Date().toISOString()
+      });
+      currentMessages.push({
+        id: parsed.message_id, role: 'assistant', content: fullText,
+        parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+      });
+    });
 
   } catch (e) {
+    console.error('❌ SendMessage Error:', e);
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
       bubbleEl.classList.remove('stream-cursor');
-      bubbleEl.innerHTML = `<span style="color:#e74c3c;">⚠️ ${e.message}</span>`;
+      const errorMsg = e.message.includes('Provider returned error') 
+        ? '⚠️ Provider error – cek koneksi / API key' 
+        : e.message;
+      bubbleEl.innerHTML = `
+        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
+        <button onclick="retryLastMessage(this)"
+          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
+                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
+          🔄 Coba lagi
+        </button>`;
     }
-    document.getElementById(`actions_${streamId}`)?.style && (document.getElementById(`actions_${streamId}`).style.display = 'flex');
+    const actionsEl = document.getElementById(`actions_${streamId}`);
+    if (actionsEl) actionsEl.style.display = 'flex';
+  } finally {
+    setSendBtn('send');
+    isGenerating = false;
   }
 }
 
-// ── SESSIONS ──
+// ══════════════════════════════════════════
+// REGENERATE
+// ══════════════════════════════════════════
+function regenerateAI(btn) {
+  const aiRow   = btn.closest('.msg-row.assistant');
+  const aiMsgId = aiRow.getAttribute('data-id');
+  let rawUser = '', userMsgId = null;
+
+  let el = aiRow.previousElementSibling;
+  while (el) {
+    if (el.classList.contains('user')) {
+      rawUser   = decodeURIComponent(el.getAttribute('data-raw') || '');
+      userMsgId = el.getAttribute('data-id') || null;
+      break;
+    }
+    el = el.previousElementSibling;
+  }
+  if (!userMsgId && aiMsgId) {
+    const aiMsg = currentMessages.find(m => m.id === aiMsgId);
+    userMsgId = aiMsg?.parent_id || null;
+    if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
+  }
+  if (rawUser) executeRegenerate(rawUser, userMsgId);
+}
+
+async function executeRegenerate(text, userMessageId = null) {
+  if (isGenerating) return;
+  const area     = document.getElementById('chatArea');
+  const streamId = 'regen_' + Date.now();
+  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+  scrollBottom();
+
+  setSendBtn('stop');
+  abortController = new AbortController();
+  isGenerating = true;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        message: text,
+        session_id: currentSessionId,
+        user_id: currentUser.id,
+        persona_name: currentPersona,
+        user_message_id: userMessageId
+      })
+    });
+
+    if (!res.ok) {
+      let errMsg = `Server error ${res.status}`;
+      try { const d = await res.json(); errMsg = d.error || errMsg; }
+      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      throw new Error(errMsg);
+    }
+
+    await processStream(res, streamId, (parsed, fullText) => {
+      currentMessages.push({
+        id: parsed.message_id, role: 'assistant', content: fullText,
+        parent_id: userMessageId, created_at: new Date().toISOString()
+      });
+      if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
+      renderMessageTree();
+    });
+
+  } catch (e) {
+    console.error('❌ Regenerate Error:', e);
+    const bubbleEl = document.getElementById(`bubble_${streamId}`);
+    if (bubbleEl) {
+      bubbleEl.classList.remove('stream-cursor');
+      const errorMsg = e.message.includes('Provider returned error') 
+        ? '⚠️ Provider error – cek koneksi / API key' 
+        : e.message;
+      bubbleEl.innerHTML = `
+        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
+        <button onclick="retryLastMessage(this)"
+          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
+                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
+          🔄 Coba lagi
+        </button>`;
+    }
+    const actionsEl = document.getElementById(`actions_${streamId}`);
+    if (actionsEl) actionsEl.style.display = 'flex';
+  } finally {
+    setSendBtn('send');
+    isGenerating = false;
+  }
+}
+
+// ══════════════════════════════════════════
+// RETRY ERROR
+// ══════════════════════════════════════════
+function retryLastMessage(btn) {
+  const aiRow = btn.closest('.msg-row.assistant');
+  let el = aiRow.previousElementSibling;
+  while (el) {
+    if (el.classList.contains('user')) {
+      const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
+      const userMsgId = el.getAttribute('data-id') || null;
+      if (raw) {
+        aiRow.remove();
+        executeRegenerate(raw, userMsgId);
+      }
+      return;
+    }
+    el = el.previousElementSibling;
+  }
+}
+
+// ══════════════════════════════════════════
+// EDIT PESAN USER (textarea lebih besar)
+// ══════════════════════════════════════════
+function editUserMsg(btn) {
+  const row    = btn.closest('.msg-row.user');
+  const bubble = row.querySelector('.bubble');
+  const raw    = decodeURIComponent(row.dataset.raw || bubble.innerText);
+  const msgId  = row.dataset.id || ('edit_' + Date.now());
+
+  bubble.dataset.originalHtml = bubble.innerHTML;
+
+  bubble.innerHTML = `
+    <textarea class="edit-textarea" id="edt_${msgId}">${escHtml(raw)}</textarea>
+    <div class="edit-actions">
+      <button class="btn-edit-cancel" onclick="cancelEdit(this)">Batal</button>
+      <button class="btn-edit-save" onclick="saveEdit(this, '${msgId}')">Kirim ▶</button>
+    </div>`;
+
+  const ta = document.getElementById(`edt_${msgId}`);
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(bubble.querySelector('.btn-edit-save'), msgId); }
+    if (e.key === 'Escape') cancelEdit(bubble.querySelector('.btn-edit-cancel'));
+  });
+}
+
+function cancelEdit(btn) {
+  const bubble = btn.closest('.bubble');
+  bubble.innerHTML = bubble.dataset.originalHtml;
+}
+
+async function saveEdit(btn, msgId) {
+  const bubble = btn.closest('.bubble');
+  const row    = btn.closest('.msg-row.user');
+  if (!row || !bubble) return;
+
+  const newText = bubble.querySelector('textarea').value.trim();
+  if (!newText) return;
+
+  bubble.innerHTML = formatContent(newText);
+  row.setAttribute('data-raw', encodeURIComponent(newText));
+
+  try {
+    const res = await fetch(`/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        edit_message_id: msgId,
+        message: newText,
+        session_id: currentSessionId,
+        user_id: currentUser.id,
+        persona_name: currentPersona
+      })
+    });
+
+    if (!res.ok) throw new Error('Gagal update');
+
+    const msg = currentMessages.find(m => m.id === msgId);
+    if (msg) msg.content = newText;
+
+    renderMessageTree();
+    executeRegenerate(newText, msgId);
+  } catch (e) {
+    alert('Gagal menyimpan perubahan: ' + e.message);
+    renderMessageTree();
+  }
+}
+
+// ══════════════════════════════════════════
+// BRANCHED MESSAGE
+// ══════════════════════════════════════════
+async function sendMessageBranched(text, parentId = null) {
+  if (isGenerating) return;
+  const area     = document.getElementById('chatArea');
+  appendMessage('user', text);
+  scrollBottom();
+
+  const streamId = 'branch_' + Date.now();
+  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+  scrollBottom();
+
+  setSendBtn('stop');
+  abortController = new AbortController();
+  isGenerating = true;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        message: text,
+        session_id: currentSessionId,
+        user_id: currentUser.id,
+        persona_name: currentPersona,
+        parent_id: parentId
+      })
+    });
+
+    if (!res.ok) {
+      let errMsg = `Server error ${res.status}`;
+      try { const d = await res.json(); errMsg = d.error || errMsg; }
+      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      throw new Error(errMsg);
+    }
+
+    await processStream(res, streamId, (parsed, fullText) => {
+      currentMessages.push({
+        id: parsed.user_message_id, role: 'user', content: text,
+        parent_id: parentId, created_at: new Date().toISOString()
+      });
+      currentMessages.push({
+        id: parsed.message_id, role: 'assistant', content: fullText,
+        parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+      });
+      if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
+    });
+
+  } catch (e) {
+    console.error('❌ Branched Message Error:', e);
+    const bubbleEl = document.getElementById(`bubble_${streamId}`);
+    if (bubbleEl) {
+      bubbleEl.classList.remove('stream-cursor');
+      const errorMsg = e.message.includes('Provider returned error') 
+        ? '⚠️ Provider error – cek koneksi / API key' 
+        : e.message;
+      bubbleEl.innerHTML = `
+        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
+        <button onclick="retryLastMessage(this)"
+          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
+                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
+          🔄 Coba lagi
+        </button>`;
+    }
+    const actionsEl = document.getElementById(`actions_${streamId}`);
+    if (actionsEl) actionsEl.style.display = 'flex';
+  } finally {
+    setSendBtn('send');
+    isGenerating = false;
+  }
+}
+
+// ══════════════════════════════════════════
+// SESSIONS (title pendek 1-3 kata sudah di-back-end)
+// ══════════════════════════════════════════
 async function loadSessions() {
   try {
-    const res = await fetch(`/api/sessions?user_id=${currentUser.id}`);
+    const res  = await fetch(`/api/sessions?user_id=${currentUser.id}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     sessions = Array.isArray(data) ? data : (data.sessions || []);
@@ -740,10 +1078,8 @@ async function loadSessions() {
 async function loadSession(id) {
   currentSessionId = id;
   localStorage.setItem('aai_last_session', id);
-
   const session = sessions.find(s => s.id === id);
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
-
   currentMessages  = [];
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
@@ -751,23 +1087,16 @@ async function loadSession(id) {
       <i class="fas fa-spinner fa-spin" style="font-size:28px;"></i>
       <p style="margin-top:12px;">Memuat percakapan...</p>
     </div>`;
-
   try {
-    const res = await fetch(`/api/messages?session_id=${id}`);
+    const res = await fetch(`/api/chat?session_id=${id}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-
     if (data.success && Array.isArray(data.messages)) {
       currentMessages = data.messages;
       renderMessageTree();
-    } else {
-      throw new Error("Format data tidak valid");
-    }
-
-    if (window.innerWidth <= 768)
-      document.getElementById('sidebar').classList.remove('open');
+    } else throw new Error("Format data tidak valid");
+    if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
     renderSidebar();
-
   } catch (e) {
     logDebug(`Error load session: ${e.message}`, '#e74c3c');
     document.getElementById('chatArea').innerHTML =
@@ -819,7 +1148,6 @@ async function renameSession(id, oldTitle) {
 let sessionToDelete = null;
 function deleteSession(id) { sessionToDelete = id; document.getElementById('deleteModal').classList.add('active'); }
 function closeDeleteModal() { sessionToDelete = null; document.getElementById('deleteModal').classList.remove('active'); }
-
 document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
   if (!sessionToDelete) return;
   const id = sessionToDelete; closeDeleteModal();
@@ -834,8 +1162,7 @@ function newChat() {
   localStorage.removeItem('aai_last_session');
   currentMessages  = [];
   activeVersionMap = {};
-  const area = document.getElementById('chatArea');
-  area.innerHTML = `
+  document.getElementById('chatArea').innerHTML = `
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
       <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite;background:transparent;">
         <img src="/ayaka1.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
@@ -847,16 +1174,15 @@ function newChat() {
   renderSidebar();
 }
 
-// ── MESSAGE TREE ──
+// ══════════════════════════════════════════
+// MESSAGE TREE
+// ══════════════════════════════════════════
 function buildActiveBranch() {
   if (!currentMessages.length) return [];
   const allIds = new Set(currentMessages.map(m => m.id));
   let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
-  if (!current) {
-    current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
-  }
+  if (!current) current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
   if (!current) return [];
-
   const branch = [current];
   while (true) {
     const children = currentMessages.filter(m => m.parent_id === current.id);
@@ -876,13 +1202,13 @@ function switchVersion(id) {
 }
 
 function renderMessageTree() {
-  const area = document.getElementById('chatArea');
+  const area   = document.getElementById('chatArea');
   const branch = buildActiveBranch();
-  if (!branch.length) { logDebug('Branch kosong, skip render', '#e67e22'); return; }
+  if (!branch.length) return;
   area.innerHTML = '';
   branch.forEach(m => {
     const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
-    const idx = siblings.findIndex(s => s.id === m.id);
+    const idx      = siblings.findIndex(s => s.id === m.id);
     appendMessage(m.role, m.content, m.created_at, null, m.id, {
       total: siblings.length, current: idx + 1, siblings: siblings.map(s => s.id)
     });
@@ -890,110 +1216,9 @@ function renderMessageTree() {
   scrollBottom();
 }
 
-// ── REGENERATE ──
-function regenerateAI(btn) {
-  const aiRow = btn.closest('.msg-row.assistant');
-  const aiMsgId = aiRow.getAttribute('data-id');
-  let rawUser = '', userMsgId = null;
-  let el = aiRow.previousElementSibling;
-  while (el) {
-    if (el.classList.contains('user')) {
-      rawUser = decodeURIComponent(el.getAttribute('data-raw') || '');
-      userMsgId = el.getAttribute('data-id') || null;
-      break;
-    }
-    el = el.previousElementSibling;
-  }
-  if (!userMsgId && aiMsgId) {
-    const aiMsg = currentMessages.find(m => m.id === aiMsgId);
-    userMsgId = aiMsg?.parent_id || null;
-    if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
-  }
-  if (rawUser) executeRegenerate(rawUser, userMsgId);
-}
-
-async function executeRegenerate(text, userMessageId = null) {
-  const area = document.getElementById('chatArea');
-  const streamId = 'regen_' + Date.now();
-  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  area.insertAdjacentHTML('beforeend', `
-    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-          <img src="/ayaka.gif" alt="Ayaka">
-        </div>
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi <span class="version-tag">V.1</span></div>
-      </div>
-      <div class="bubble stream-cursor" id="bubble_${streamId}">
-        <span style="color:var(--text-muted);">⏳ Meramu ulang...</span>
-      </div>
-      <div class="msg-actions" id="actions_${streamId}" style="display:none;">
-        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
-          <i class="fas fa-volume-up"></i>
-        </button>
-        <span style="font-size:11px;opacity:.65;">${timeStr}</span>
-      </div>
-    </div>`);
-  scrollBottom();
-
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: text, session_id: currentSessionId,
-        user_id: currentUser.id, persona_name: currentPersona,
-        user_message_id: userMessageId
-      })
-    });
-
-    const bubbleEl  = document.getElementById(`bubble_${streamId}`);
-    const actionsEl = document.getElementById(`actions_${streamId}`);
-    const streamRow = document.getElementById(streamId);
-    const reader    = res.body.getReader();
-    const decoder   = new TextDecoder();
-    let fullText = '', buffer = '', first = true;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n'); buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const parsed = JSON.parse(line.slice(6).trim());
-          if (parsed.token) {
-            if (first) { bubbleEl.innerHTML = ''; first = false; }
-            fullText += parsed.token;
-            bubbleEl.innerHTML = formatContent(fullText);
-            bubbleEl.classList.add('stream-cursor');
-            scrollBottom();
-          }
-          if (parsed.done) {
-            bubbleEl.classList.remove('stream-cursor');
-            actionsEl.style.display = 'flex';
-            streamRow.setAttribute('data-id', parsed.message_id || '');
-            streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-            currentMessages.push({
-              id: parsed.message_id, role: 'assistant', content: fullText,
-              parent_id: userMessageId, created_at: new Date().toISOString()
-            });
-            if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
-            renderMessageTree();
-          }
-        } catch {}
-      }
-    }
-  } catch (e) {
-    const b = document.getElementById(`bubble_${streamId}`);
-    if (b) { b.classList.remove('stream-cursor'); b.innerHTML = `<span style="color:#e74c3c;">⚠️ ${e.message}</span>`; }
-  }
-}
-
-// ── APPEND MESSAGE ──
+// ══════════════════════════════════════════
+// APPEND MESSAGE
+// ══════════════════════════════════════════
 function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
   const area = document.getElementById('chatArea');
   const time = timestamp
@@ -1014,7 +1239,6 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
           ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Referensi">` : ''}
         </div>`;
     }
-
     let versionHtml = `<span class="version-tag">V.1</span>`;
     if (versionInfo?.total > 1) {
       const prev = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
@@ -1022,13 +1246,12 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       versionHtml = `
         <span class="version-tag" style="display:flex;align-items:center;gap:6px;background:#e2e8f0;color:var(--text);padding:2px 8px;border-radius:12px;">
           <button style="border:none;background:none;cursor:${prev?'pointer':'default'};opacity:${prev?'1':'0.3'};padding:0 4px;"
-            ${prev?`onclick="switchVersion('${prev}')"`:''}">◀</button>
+            ${prev ? `onclick="switchVersion('${prev}')"` : ''}>◀</button>
           <span>${versionInfo.current} / ${versionInfo.total}</span>
           <button style="border:none;background:none;cursor:${next?'pointer':'default'};opacity:${next?'1':'0.3'};padding:0 4px;"
-            ${next?`onclick="switchVersion('${next}')"`:''}">▶</button>
+            ${next ? `onclick="switchVersion('${next}')"` : ''}>▶</button>
         </span>`;
     }
-
     html = `
     <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -1042,12 +1265,14 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       <div class="msg-actions">
         <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
         <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
+        <button class="tts-btn" title="Dengarkan"
+          onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
         <span style="font-size:11px;opacity:.65;">${time}</span>
       </div>
     </div>`;
+
   } else {
     html = `
     <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
@@ -1055,6 +1280,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         <div class="bubble">${formatContent(content)}</div>
         <div class="user-actions">
           <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
+          <button title="Edit" onclick="editUserMsg(this)"><i class="fas fa-pen"></i></button>
           <button title="Copy" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
         </div>
       </div>
@@ -1065,7 +1291,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
   scrollBottom();
 }
 
-// ── COPY ──
+// ══════════════════════════════════════════
+// COPY
+// ══════════════════════════════════════════
 function copyUserMsg(btn) {
   navigator.clipboard.writeText(btn.closest('.user').querySelector('.bubble').innerText);
   const i = btn.querySelector('i'); i.className = 'fas fa-check';
@@ -1077,7 +1305,9 @@ function copyFullAI(btn) {
   setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
 }
 
-// ── MARKED RENDERER ──
+// ══════════════════════════════════════════
+// MARKED RENDERER
+// ══════════════════════════════════════════
 const renderer = new marked.Renderer();
 renderer.code = function(code, language) {
   const lang = language || 'code';
@@ -1107,11 +1337,11 @@ function copyCodeWindow(btn) {
   setTimeout(() => { btn.innerHTML = orig; btn.style.color = '#c8eaf5'; }, 2000);
 }
 function toggleCodeWindow(btn) {
-  const pre = btn.closest('.code-window').querySelector('pre');
+  const pre  = btn.closest('.code-window').querySelector('pre');
   const icon = btn.querySelector('i');
   const span = btn.querySelector('.btn-text');
-  const min = pre.classList.toggle('minimized');
-  icon.className = min ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
+  const min  = pre.classList.toggle('minimized');
+  icon.className   = min ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
   span.textContent = min ? 'Expand' : 'Minimize';
 }
 
@@ -1130,7 +1360,9 @@ function scrollBottom() {
   const a = document.getElementById('chatArea'); a.scrollTop = a.scrollHeight;
 }
 
-// ── SETTINGS / PERSONA ──
+// ══════════════════════════════════════════
+// SETTINGS / PERSONA
+// ══════════════════════════════════════════
 function toggleSettingsMenu() {
   const menu = document.getElementById('settingsMenu');
   menu.classList.toggle('show');
@@ -1138,11 +1370,11 @@ function toggleSettingsMenu() {
 }
 function renderSettingsMenu() {
   const personas = [
-    { val: 'Auto',           label: '✨ Auto' },
-    { val: 'Santai',         label: '😌 Santai' },
-    { val: 'Coding',         label: '💻 Coding Expert' },
-    { val: 'Kritikus Brutal',label: '🔥 Kritikus' },
-    { val: 'Rosalia',        label: '🌹 Rosalia' }
+    { val: 'Auto',            label: '✨ Auto' },
+    { val: 'Santai',          label: '😌 Santai' },
+    { val: 'Coding',          label: '💻 Coding Expert' },
+    { val: 'Kritikus Brutal', label: '🔥 Kritikus' },
+    { val: 'Rosalia',         label: '🌹 Rosalia' }
   ];
   let html = `<div class="settings-header">Persona AI</div>`;
   personas.forEach(p => {
@@ -1155,13 +1387,14 @@ function renderSettingsMenu() {
 function selectPersonaUI(val) {
   currentPersona = val; localStorage.setItem('aai_persona', val); renderSettingsMenu();
 }
-
 document.addEventListener('click', e => {
   const w = document.querySelector('.settings-wrapper');
   if (w && !w.contains(e.target)) document.getElementById('settingsMenu').classList.remove('show');
 });
 
-// ── INPUT ──
+// ══════════════════════════════════════════
+// INPUT
+// ══════════════════════════════════════════
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
 }
@@ -1170,27 +1403,24 @@ function autoResize(el) {
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
 }
 function handleSend() {
-  const inp = document.getElementById('messageInput');
+  if (isGenerating) return;
+  const inp  = document.getElementById('messageInput');
   const text = getMessageText();
   if (!text) return;
   inp.value = '';
   autoResize(inp);
-  // Reset code mode
   inp.classList.remove('code-mode');
   document.getElementById('inputWrap').classList.remove('code-mode');
   sendMessage(text);
 }
-
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
-
 document.addEventListener('click', e => {
   if (window.innerWidth > 768) return;
-  const sidebar = document.getElementById('sidebar');
+  const sidebar   = document.getElementById('sidebar');
   const hamburger = document.querySelector('.hamburger');
   if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target))
     sidebar.classList.remove('open');
 });
-
 function logout() {
   if (confirm("Yakin mau keluar?")) {
     localStorage.removeItem('aai_user');
@@ -1198,14 +1428,15 @@ function logout() {
   }
 }
 
-// ── INIT ──
+// ══════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════
 async function initApp() {
   await loadSessions();
   const last = localStorage.getItem('aai_last_session');
   if (last && sessions.find(s => s.id === last)) loadSession(last);
   else newChat();
 }
-
 document.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
