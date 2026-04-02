@@ -28,7 +28,7 @@
 
 html, body {
   max-width: 100%;
-  overflow-x: hidden; /* Mencegah layar geser ke samping */
+  overflow-x: hidden;
 }
 
 body {
@@ -37,7 +37,7 @@ body {
   color: var(--text);
   height: 100dvh;
   display: flex;
-  overflow: hidden; /* Mencegah geser atas bawah di luar area chat */
+  overflow: hidden;
   position: relative;
 }
 
@@ -49,12 +49,10 @@ body::before {
   pointer-events: none;
 }
 
-/* Batasi lebar bubble chat di Desktop agar tidak terlalu panjang */
 .msg-row.assistant, .msg-row.user {
   max-width: 750px;
 }
 
-/* Tombol Aksi di Sidebar (Edit & Hapus) */
 .session-actions { display: flex; gap: 8px; opacity: 0; transition: .2s; }
 .session-item:hover .session-actions { opacity: 1; }
 .action-btn { background: none; border: none; font-size: 16px; cursor: pointer; transition: transform .2s; }
@@ -64,7 +62,6 @@ body::before {
 .logo-icon {
   width: 100px; height: 100px; border-radius: 16px;
   background: transparent;
-
   display: flex; align-items: center; justify-content: center;
   font-size: 28px;
   animation: logoBreath 4s ease-in-out infinite;
@@ -74,7 +71,7 @@ body::before {
   font-size: 32px; font-weight: 700;
   background: linear-gradient(120deg, #5ab4d4, #d2b3e6);
   -webkit-background-clip: text;
-  background-clip: text; /* DITAMBAHKAN BARIS INI BIAR VS CODE TIDAK CEREWET */
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -89,7 +86,6 @@ body::before {
 }
 .new-chat-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(90,180,212,.4); }
 
-/* MAIN */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; width: 100%; }
 .topbar {
   padding: 18px 28px;
@@ -106,21 +102,19 @@ body::before {
   display: flex; flex-direction: column; gap: 28px;
   background: var(--off-white);
   overflow-y: auto;
-  overflow-x: hidden; /* Pastikan chat area tidak bikin scroll samping */
+  overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
-/* ─── AVATAR & BUBBLE (DIROMBAK TOTAL) ─── */
-/* AI Assistant: Avatar di atas, tanpa balon, teks justify */
 .msg-row.assistant { 
   display: flex; 
-  flex-direction: column; /* Avatar di atas jawaban */
+  flex-direction: column;
   align-items: flex-start; 
   gap: 8px; 
-  max-width: 100%; /* Memaksimalkan lebar layar */
+  max-width: 100%;
 }
 .assistant .avatar {
-  width: 38px; height: 38px; /* Dikecilkan sedikit biar elegan */
+  width: 38px; height: 38px;
   border-radius: 50%;
   background: transparent; 
   display: flex; align-items: center; justify-content: center;
@@ -128,17 +122,63 @@ body::before {
 }
 .assistant .avatar img { width: 100%; height: 100%; object-fit: contain; }
 .assistant .bubble {
-  background: transparent; /* Balon dibuang */
+  background: transparent;
   color: var(--text);
-  padding: 0; 
+  padding: 4px 0;
   border: none; box-shadow: none;
   font-size: 15.5px; 
-  line-height: 1.5; /* Spasi vertikal dikurangi (dari 1.65) */
-  text-align: justify; /* Teks rata kanan-kiri */
+  line-height: 1.6;
+  text-align: left;
   width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-/* User: Balon diganti warna biru muda, mendukung markdown */
+.assistant .bubble pre {
+  background: #1e2a44;
+  color: #c8eaf5;
+  padding: 14px 16px;
+  border-radius: 12px;
+  overflow-x: auto;
+  margin: 10px 0;
+  font-family: ui-monospace, monospace;
+  font-size: 13.5px;
+  line-height: 1.5;
+  max-width: 100%;
+}
+
+.assistant .bubble code {
+  font-family: ui-monospace, monospace;
+  background: rgba(42, 122, 158, 0.12);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  color: var(--blue-dark);
+}
+
+.assistant .bubble pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.assistant .bubble ul, .assistant .bubble ol {
+  margin-left: 24px;
+  margin-bottom: 10px;
+}
+.assistant .bubble table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 14px;
+}
+.assistant .bubble th, .assistant .bubble td {
+  border: 1px solid var(--blue-light);
+  padding: 8px;
+  text-align: left;
+}
+
 .msg-row.user { 
   display: flex; 
   justify-content: flex-end; 
@@ -146,7 +186,7 @@ body::before {
   margin-left: auto; 
 }
 .user .bubble {
-  background: var(--blue-light); /* Tukar warna dengan AI sebelumnya */
+  background: var(--blue-light);
   color: var(--text);
   padding: 14px 20px; 
   border-radius: 24px; 
@@ -154,10 +194,9 @@ body::before {
   box-shadow: 0 6px 16px rgba(138,234,245,.2);
   font-size: 15px; 
   line-height: 1.5;
-  text-align: left; /* Rata kiri untuk user agar rapi */
+  text-align: left;
 }
 
-/* ─── DITAMBAHKAN: Jendela Kode & Action AI ─── */
 .code-window { 
   background: #1e2a44; border-radius: 12px; margin: 12px 0; 
   overflow: hidden; box-shadow: var(--shadow-sm); border: 1px solid #2a7a9e;
@@ -173,11 +212,10 @@ body::before {
 }
 .copy-code-btn:hover { color: white; transform: scale(1.05); }
 .code-window pre { 
-  margin: 0; padding: 14px; overflow-x: auto; /* Kunci agar bisa scroll kanan-kiri */
+  margin: 0; padding: 14px; overflow-x: auto;
   color: #e2e8f0; font-family: ui-monospace, monospace; font-size: 13.5px; 
 }
 
-/* Tombol Copy & Sync di bawah jawaban AI */
 .msg-actions { 
   display: flex; gap: 14px; margin-top: 8px; color: var(--text-muted); 
   align-items: center; width: 100%;
@@ -188,15 +226,8 @@ body::before {
 }
 .msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
 
-/* BROWSING BUTTON & STATUS */
-#browsingBtn { padding: 8px; border-radius: 50%; font-size: 18px; border: none; cursor: pointer; transition: all .2s; background: transparent; color: #7a8aa8; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
-#browsingBtn.on { background: linear-gradient(135deg, #5ab4d4, #2a7a9e); color: white; box-shadow: 0 4px 10px rgba(42,122,158,.3); }
-
-#personaSelect { padding: 8px 10px; border-radius: 16px; background: #f8fbff; border: 1px solid #c8eaf5; font-size: 13px; font-weight: 500; outline: none; cursor: pointer; color: var(--text); height: 40px; max-width: 120px; }
-
 .send-btn { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; background: linear-gradient(135deg, var(--blue-mid), #b38fd4); color: white; display: flex; align-items: center; justify-content: center; border: none; cursor: pointer;}
 
-/* THINKING ANIMATION */
 .typing-indicator {
   display: flex; align-items: center; gap: 6px; padding: 12px 20px;
   background: #c8eaf5; border-radius: 9999px; width: fit-content; box-shadow: var(--shadow-sm);
@@ -206,43 +237,38 @@ body::before {
 .typing-dot:nth-child(3) { animation-delay: .4s; }
 @keyframes typingPulse { 0%, 100% { transform: scale(0.6); opacity: .4; } 50% { transform: scale(1); opacity: 1; } }
 
-/* CODE & SOURCE */
 .source-card, .code-card { background: #fff; border: 2px solid #c8eaf5; border-radius: 18px; padding: 14px 18px; margin-top: 10px; font-size: 14px; box-shadow: var(--shadow-sm); }
 .code-card { background: #1e2a44; color: #c8eaf5; font-family: ui-monospace, monospace; position: relative; overflow-x: auto; }
 .copy-btn { position: absolute; top: 12px; right: 12px; background: #5ab4d4; color: white; border: none; padding: 4px 12px; border-radius: 9999px; font-size: 12px; cursor: pointer; }
 
-/* SESSION */
 .session-item { padding: 14px 20px; margin: 4px 8px; border-radius: 18px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: all .3s ease; }
 .session-item:hover { background: rgba(138,234,245,.15); }
 .session-item.active { background: rgba(138,234,245,.25); font-weight: 500; }
 .session-item .delete-btn { opacity: 0; transition: .2s; font-size: 18px; color: #e74c3c; }
 .session-item:hover .delete-btn { opacity: 1; }
 
-/* INPUT */
 .input-area { 
-  padding: 12px 20px 20px; /* Padding dikurangi biar input lebih turun/rendah */
+  padding: 12px 20px 20px;
   background: rgba(255,255,255,.95); backdrop-filter: blur(20px); border-top: 1px solid rgba(138,234,245,.25); 
 }
 
-/* ─── PEMBUNGKUS INPUT (KUNCI HORIZONTAL & RATA TENGAH) ─── */
 .input-wrap { 
   display: flex; 
-  flex-direction: row; /* WAJIB: Paksa berbaris ke samping */
-  align-items: center; /* WAJIB: Rata tengah secara vertikal */
+  flex-direction: row;
+  align-items: center;
   justify-content: space-between;
   gap: 12px; 
   background: #ffffff; 
   border: 2px solid var(--blue-light); 
   padding: 8px 16px; 
-  border-radius: 32px; /* Biar ujungnya membulat rapi */
+  border-radius: 32px;
   box-shadow: var(--shadow-md); 
   width: 100%; 
 }
 
-/* ─── TEXTAREA (AREA KETIK) ─── */
 #messageInput { 
-  flex: 1; /* WAJIB: Ambil semua sisa ruang di tengah */
-  min-width: 0; /* WAJIB: Anti-jebol/mencegah dorong elemen lain */
+  flex: 1;
+  min-width: 0;
   border: none; 
   background: transparent; 
   font-size: 15px; 
@@ -253,44 +279,8 @@ body::before {
   padding: 8px 0; 
 }
 
-/* ─── TOMBOL KIRI (BROWSING) ─── */
-#browsingBtn { 
-  flex-shrink: 0; /* Kunci ukuran, jangan menyusut */
-  padding: 0; 
-  border-radius: 50%; 
-  font-size: 18px; 
-  border: none; 
-  cursor: pointer; 
-  transition: all .2s; 
-  background: transparent; 
-  color: #7a8aa8; 
-  width: 40px; 
-  height: 40px; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-}
-#browsingBtn.on { background: linear-gradient(135deg, #5ab4d4, #2a7a9e); color: white; box-shadow: 0 4px 10px rgba(42,122,158,.3); }
-
-/* ─── PILIHAN PERSONA (TENGAH-KANAN) ─── */
-#personaSelect { 
-  flex-shrink: 0; /* Kunci ukuran */
-  padding: 8px 10px; 
-  border-radius: 16px; 
-  background: #f8fbff; 
-  border: 1px solid #c8eaf5; 
-  font-size: 13px; 
-  font-weight: 500; 
-  outline: none; 
-  cursor: pointer; 
-  color: var(--text); 
-  height: 40px; 
-  max-width: 140px; 
-}
-
-/* ─── TOMBOL KIRIM (KANAN) ─── */
 .send-btn { 
-  flex-shrink: 0; /* Kunci ukuran */
+  flex-shrink: 0;
   width: 42px; 
   height: 42px; 
   border-radius: 50%; 
@@ -306,14 +296,13 @@ body::before {
 }
 .send-btn:hover { transform: scale(1.1); }
 
-/* ─── SETTINGS MENU (GABUNGAN BROWSING & PERSONA) ─── */
 .settings-wrapper { position: relative; flex-shrink: 0; }
 .settings-btn { 
   background: transparent; border: none; color: var(--text-muted); 
   font-size: 20px; cursor: pointer; padding: 8px; border-radius: 8px;
   display: flex; align-items: center; justify-content: center; transition: .2s;
 }
-.settings-btn:hover { color: var(--blue-dark); background: var(--bg2); transform: scale(1.1); }
+.settings-btn:hover { color: var(--blue-dark); transform: scale(1.1); }
 .settings-menu {
   position: absolute; bottom: 120%; left: 0;
   background: #ffffff; border: 2px solid var(--blue-light); border-radius: 16px;
@@ -337,8 +326,6 @@ body::before {
 .settings-item.active i.check { opacity: 1; }
 .settings-divider { height: 1px; background: rgba(138,234,245,.3); margin: 6px 0; }
 
-
-/* ─── SIDEBAR UTAMA (BERLAKU UNTUK DESKTOP & DASAR) ─── */
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -348,39 +335,34 @@ body::before {
   border-right: 1px solid rgba(138,234,245,.25);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
-  flex-shrink: 0; /* WAJIB: Biar sidebar gak gepeng kegencet chat */
+  flex-shrink: 0;
 }
 
-/* ─── SESSION LIST (SI PENDORONG CARD) ─── */
 #sessionList {
   flex-grow: 1;
   overflow-y: auto;
   padding: 12px 8px;
 }
 
-/* ─── MEDIA QUERIES (KHUSUS HP) ─── */
 @media (max-width: 768px) {
   body::before { display: none; }
   body { background: var(--off-white); }
   
   .hamburger { display: block; color: var(--blue-dark); z-index: 50; padding-right: 10px; }
 
-  /* Overlay Sidebar Khusus HP (DISEMBUNYIKAN DI KIRI) */
   .sidebar {
     position: fixed;
     top: 0; left: 0;
     z-index: 9999;
-    transform: translateX(-100%); /* WAJIB: Sembunyi ke kiri luar layar */
+    transform: translateX(-100%);
     box-shadow: none;
   }
 
-  /* Saat Hamburger Diklik -> Terbuka */
   .sidebar.open { 
     transform: translateX(0); 
     box-shadow: 10px 0 30px rgba(0,0,0,0.3); 
   }
 
-  /* Main area penyesuaian */
   .main { width: 100%; height: 100dvh; margin: 0; }
   .topbar { padding: 15px 20px; flex-wrap: wrap; }
   .chat-area { padding: 20px 16px; }
@@ -390,7 +372,6 @@ body::before {
   .session-actions { opacity: 1; }
 }
 
-/* ─── USER CARD BAWAH ─── */
 .user-card {
   flex-shrink: 0;         
   padding: 16px 20px;
@@ -405,7 +386,6 @@ body::before {
 .logout-btn { background: none; border: none; font-size: 20px; cursor: pointer; transition: transform .2s; color: #e74c3c; }
 .logout-btn:hover { transform: scale(1.15); }
 
-/* ─── DITAMBAHKAN: CSS Khusus untuk Markdown di dalam Bubble Chat ─── */
 .bubble h1, .bubble h2, .bubble h3 { 
   margin-top: 12px; 
   margin-bottom: 8px; 
@@ -415,28 +395,27 @@ body::before {
 .bubble p { margin-bottom: 8px; }
 .bubble p:last-child { margin-bottom: 0; }
 .bubble ul, .bubble ol { margin-left: 20px; margin-bottom: 8px; }
-.bubble pre { 
-  background: #1e2a44; 
-  color: #c8eaf5; 
-  padding: 12px; 
-  border-radius: 8px; 
-  overflow-x: auto; 
-  margin-top: 8px; 
-  font-family: ui-monospace, monospace; 
+.bubble pre {
+  background: #1e2a44;
+  color: #c8eaf5;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 100%;
+}
+.bubble code {
+  font-family: ui-monospace, monospace;
+  background: rgba(0,0,0,0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
   font-size: 13.5px;
 }
-.bubble code { 
-  font-family: ui-monospace, monospace; 
-  background: rgba(0,0,0,0.1); 
-  padding: 2px 4px; 
-  border-radius: 4px; 
-  font-size: 13.5px;
-}
-.bubble pre code { background: transparent; padding: 0; }
+.bubble pre code { background: transparent; word-break: break-word; padding: 0; }
 
-
-
-/* ─── SOURCE AREA (BAWAH JAWABAN AI) ─── */
 .sources-container {
   margin-top: 15px;
   padding-top: 12px;
@@ -456,20 +435,17 @@ body::before {
 .source-item:hover { background: var(--blue-light); transform: translateY(-2px); }
 .source-img { width: 100%; max-width: 200px; border-radius: 12px; margin-top: 8px; border: 2px solid var(--blue-light); }
 
-/* ─── ACTION UNTUK USER ─── */
 .user-actions {
   display: flex; justify-content: flex-end; margin-top: 6px; color: var(--text-muted);
 }
 .user-actions button { background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; opacity: 0.6; transition: .2s; }
 .user-actions button:hover { opacity: 1; color: var(--blue-dark); }
 
-/* ─── UI VERSION INDICATOR < 1/1 > ─── */
 .version-tag {
   font-size: 11px; background: var(--blue-light); color: var(--blue-dark);
   padding: 2px 8px; border-radius: 10px; font-weight: 600; margin-left: 10px;
 }
 
-/* ─── CUSTOM MODAL (HAPUS SESI) ─── */
 .modal-overlay {
   position: fixed; top: 0; left: 0; width: 100%; height: 100dvh;
   background: rgba(30, 42, 68, 0.6); backdrop-filter: blur(4px);
@@ -495,6 +471,11 @@ body::before {
 .btn-confirm { background: #e74c3c; color: white; }
 .btn-confirm:hover { background: #c0392b; transform: scale(1.05); }
 
+.chunk-label {
+  font-size: 12px; color: var(--text-muted); font-weight: 600;
+  margin: 8px 0 4px; display: inline-block;
+  border-bottom: 1px dashed var(--blue-light); padding-bottom: 2px;
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -509,7 +490,6 @@ body::before {
     </div>
   </div>
 </div>
-
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
@@ -540,30 +520,25 @@ body::before {
   </div>
 </aside>
 
-
 <main class="main">
-  
   <div class="topbar">
     <span class="hamburger" onclick="toggleSidebar()">☰</span>
     <span class="topbar-title" id="topbarTitle" style="font-size:22px;font-weight:600;">AAi — Keluarga Cerdas</span>
   </div>
 
   <div class="chat-area" id="chatArea"></div>
-        <div class="input-area">
+  <div class="input-area">
     <div class="input-wrap">
-      <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" onchange="handleImageSelected(this)">
-  <div class="settings-wrapper">
-        <button type="button" class="settings-btn" onclick="toggleSettingsMenu()" title="Pengaturan AI">
+      <textarea id="messageInput" rows="1" placeholder="Ketik pesan…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <div class="settings-wrapper">
+        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Pengaturan">
           <i class="fas fa-sliders-h"></i>
         </button>
-        <div id="settingsMenu" class="settings-menu">
-          </div>
+        <div class="settings-menu" id="settingsMenu"></div>
       </div>
-      <textarea id="messageInput" rows="1" placeholder="Ketik pesan…" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
       <button class="send-btn" onclick="handleSend()">▶</button>
     </div>
   </div>
-
 </main>
 <script>
 // ─── STATE ───
@@ -573,19 +548,21 @@ if (!currentUser.id) window.location.href = '/login';
 let sessions = [];
 let currentSessionId = null;
 let currentPersona = localStorage.getItem('aai_persona') || 'Auto';
-let isBrowsingMode = localStorage.getItem('aai_browsing_mode') !== 'false'; // default true
 let currentMessages = []; 
 let activeMessageIds = new Set();
 let activeVersionMap = {};
 let currentUtterance = null;
 let isSpeaking = false;
 
+// ─── DEBUG HELPER ───
+function logDebug(msg, color = '#2a7a9e') {
+  console.log(`%c[AAi Debug] ${msg}`, `color:${color};font-weight:bold`);
+}
+
 function speakText(btn, text) {
-  // Kalau lagi ngomong → stop
   if (isSpeaking) {
     speechSynthesis.cancel();
     isSpeaking = false;
-    // Reset semua tombol TTS
     document.querySelectorAll('.tts-btn i').forEach(i => {
       i.className = 'fas fa-volume-up';
       i.style.color = 'inherit';
@@ -593,7 +570,6 @@ function speakText(btn, text) {
     return;
   }
  
-  // Bersihkan markdown dari teks sebelum dibaca
   const cleanText = text
     .replace(/```[\s\S]*?```/g, 'blok kode')
     .replace(/`[^`]+`/g, '')
@@ -606,7 +582,6 @@ function speakText(btn, text) {
   currentUtterance.rate = 1.0;
   currentUtterance.pitch = 1.1;
  
-  // Pilih suara Indonesia kalau ada
   const voices = speechSynthesis.getVoices();
   const idVoice = voices.find(v => v.lang.startsWith('id')) || voices.find(v => v.lang.startsWith('en'));
   if (idVoice) currentUtterance.voice = idVoice;
@@ -629,96 +604,24 @@ function speakText(btn, text) {
  
   speechSynthesis.speak(currentUtterance);
 }
- 
-// ─────────────────────────────────────────────
-// FITUR 1B: IMAGE UPLOAD
-// ─────────────────────────────────────────────
- 
-let pendingImageBase64 = null;
-let pendingImageMime = null;
- 
-function triggerImageUpload() {
-  document.getElementById('imageFileInput').click();
-}
- 
-function handleImageSelected(input) {
-  const file = input.files[0];
-  if (!file) return;
- 
-  // Validasi tipe file
-  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-  if (!allowed.includes(file.type)) {
-    alert('Hanya mendukung JPG, PNG, GIF, WEBP ya!');
-    return;
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    alert('Ukuran gambar maksimal 5MB!');
-    return;
-  }
- 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const base64Full = e.target.result; // "data:image/jpeg;base64,..."
-    pendingImageMime = file.type;
-    pendingImageBase64 = base64Full.split(',')[1]; // Ambil bagian base64 saja
- 
-    // Tampilkan preview
-    showImagePreview(base64Full, file.name);
-  };
-  reader.readAsDataURL(file);
- 
-  // Reset input agar file yang sama bisa dipilih ulang
-  input.value = '';
-}
- 
-function showImagePreview(src, name) {
-  // Hapus preview lama kalau ada
-  document.getElementById('imagePreviewContainer')?.remove();
- 
-  const inputWrapper = document.getElementById('inputBar') || document.querySelector('.input-area');
-  const preview = document.createElement('div');
-  preview.id = 'imagePreviewContainer';
-  preview.style.cssText = `
-    display:flex; align-items:center; gap:10px;
-    padding:8px 14px; background:var(--bg2);
-    border-top:1px solid var(--b); font-size:13px;
-  `;
-  preview.innerHTML = `
-    <img src="${src}" style="height:48px;width:48px;object-fit:cover;border-radius:8px;border:1px solid var(--b);">
-    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">${name}</span>
-    <button onclick="clearImagePreview()" style="border:none;background:none;cursor:pointer;font-size:18px;color:#e74c3c;" title="Hapus gambar">✕</button>
-  `;
-  inputWrapper.insertAdjacentElement('beforebegin', preview);
-}
- 
-function clearImagePreview() {
-  pendingImageBase64 = null;
-  pendingImageMime = null;
-  document.getElementById('imagePreviewContainer')?.remove();
-}
-
-
-// ─── DEBUG HELPER ───
-function logDebug(msg, color = '#2a7a9e') {
-  console.log(`%c[AAi Debug] ${msg}`, `color:${color};font-weight:bold`);
-}
-
-
 
 async function sendMessage(text) {
   const area = document.getElementById('chatArea');
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
- 
-  // Simpan & bersihkan gambar pending sebelum append
-  const imageBase64 = pendingImageBase64;
-  const imageMime = pendingImageMime;
-  const imagePreviewSrc = imageBase64 ? `data:${imageMime};base64,${imageBase64}` : null;
- 
-  clearImagePreview();
- 
-  appendMessage('user', text, null, imagePreviewSrc ? { imageUrl: imagePreviewSrc } : null);
-  scrollBottom();
- 
+
+  // Tampilkan user bubble langsung (optimistic)
+  area.insertAdjacentHTML('beforeend', `
+    <div class="msg-row user" data-raw="${encodeURIComponent(text)}" data-id="">
+      <div style="flex:1;width:100%;">
+        <div class="bubble">${formatContent(text)}</div>
+        <div class="user-actions">
+          <span style="font-size:11px;opacity:.65;margin-right:auto;">
+            ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+    </div>`);
+
   const typingId = 'typing_' + Date.now();
   area.insertAdjacentHTML('beforeend', `
     <div class="msg-row assistant" id="${typingId}">
@@ -727,11 +630,11 @@ async function sendMessage(text) {
       </div>
       <div class="typing-indicator">
         <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-        <span style="margin-left:12px;font-size:13.5px;">AAi berpikir ${isBrowsingMode ? '🌐' : ''}…</span>
+        <span style="margin-left:12px;font-size:13.5px;">AAi berpikir…</span>
       </div>
     </div>`);
   scrollBottom();
- 
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -740,55 +643,63 @@ async function sendMessage(text) {
         message: text,
         session_id: currentSessionId,
         user_id: currentUser.id,
-        persona_name: currentPersona,
-        browsing_mode: isBrowsingMode,
-        image_base64: imageBase64,   // ← BARU
-        image_mime: imageMime         // ← BARU
+        persona_name: currentPersona
       })
     });
- 
+
     document.getElementById(typingId)?.remove();
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Server error');
- 
-    appendMessage('assistant', data.reply);
- 
-    // Push ke currentMessages
-    const parentForUser = currentMessages.length > 0 ? currentMessages[currentMessages.length - 1].id : null;
-    currentMessages.push({ id: data.user_message_id, role: 'user', content: text, parent_id: parentForUser, created_at: new Date().toISOString() });
-    currentMessages.push({ id: data.message_id, role: 'assistant', content: data.reply, parent_id: data.user_message_id, created_at: new Date().toISOString() });
- 
-    const userRows = area.querySelectorAll('.msg-row.user');
-    userRows[userRows.length - 1]?.setAttribute('data-id', data.user_message_id);
-    const aiRows = area.querySelectorAll('.msg-row.assistant');
-    aiRows[aiRows.length - 1]?.setAttribute('data-id', data.message_id);
- 
+
+    // ✅ Set session ID dulu sebelum apapun
     if (data.session_id && !currentSessionId) {
       currentSessionId = data.session_id;
-      loadSessions();
+      localStorage.setItem('aai_last_session', currentSessionId);
     }
+
+    // ✅ Tentukan parent chain yang benar
+    const lastAssistant = [...currentMessages].reverse().find(m => m.role === 'assistant');
+    const parentForUser = lastAssistant ? lastAssistant.id : null;
+
+    // ✅ Push ke state dulu
+    currentMessages.push({
+      id: data.user_message_id,
+      role: 'user',
+      content: text,
+      parent_id: parentForUser,
+      created_at: new Date().toISOString()
+    });
+
+    currentMessages.push({
+      id: data.message_id,
+      role: 'assistant',
+      content: data.reply,
+      parent_id: data.user_message_id,
+      created_at: new Date().toISOString()
+    });
+
+    // ✅ Render SEMUA dari state, bukan mix append + state
+    renderMessageTree();
+
+    // ✅ Load sessions di background (non-blocking)
+    loadSessions();
+
   } catch (e) {
     document.getElementById(typingId)?.remove();
+    // Hapus optimistic user bubble kalau gagal
+    const userBubbles = area.querySelectorAll('.msg-row.user');
+    const last = userBubbles[userBubbles.length - 1];
+    if (last && !last.getAttribute('data-id')) last.remove();
     appendMessage('assistant', `⚠️ ${e.message}`);
   }
 }
 
-// ─── SESSIONS + DELETE ───
-async function loadSessions() {
-  const res = await fetch(`/api/sessions?user_id=${currentUser.id}`);
-  if (res.ok) {
-    sessions = await res.json();
-    renderSidebar();
-  }
-}
 
 
-// ─── RENAME SESSION ───
 async function renameSession(id, oldTitle) {
   const newTitle = prompt("Masukkan judul baru untuk obrolan ini:", oldTitle);
   if (!newTitle || newTitle.trim() === "" || newTitle === oldTitle) return;
 
-  // Optimistic UI update (ubah di layar dulu biar terasa instan)
   const sessionIndex = sessions.findIndex(s => s.id === id);
   if (sessionIndex !== -1) {
     sessions[sessionIndex].title = newTitle.trim();
@@ -805,10 +716,10 @@ async function renameSession(id, oldTitle) {
     if (!res.ok) throw new Error("Gagal update ke server");
   } catch (e) {
     console.error("Error rename:", e);
-    // Kalau gagal, load ulang dari server
     loadSessions();
   }
 }
+
 function renderSidebar() {
   const container = document.getElementById('sessionList');
   container.innerHTML = '';
@@ -821,16 +732,16 @@ function renderSidebar() {
   sessions.forEach(s => {
     const item = document.createElement('div');
     item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
-item.innerHTML = `
+    item.innerHTML = `
       <div style="flex:1;display:flex;align-items:center;gap:12px;overflow:hidden;">
         <div style="width:9px;height:9px;background:#5ab4d4;border-radius:50%;flex-shrink:0;"></div>
         <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
       </div>
       <div class="session-actions">
         <button class="action-btn" title="Edit Judul" 
-  data-sid="${s.id}" 
-  data-title="${escHtml(s.title || '')}"
-  onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
+          data-sid="${s.id}" 
+          data-title="${escHtml(s.title || '')}"
+          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
         <button class="action-btn" title="Hapus Obrolan" onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
       </div>
     `;
@@ -839,7 +750,6 @@ item.innerHTML = `
   });
 }
 
-// UBAH TOTAL FUNGSI INI:
 let sessionToDelete = null;
 
 function deleteSession(id) {
@@ -852,11 +762,10 @@ function closeDeleteModal() {
   document.getElementById('deleteModal').classList.remove('active');
 }
 
-// Event listener untuk tombol Ya, Hapus
 document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
   if (!sessionToDelete) return;
   const id = sessionToDelete;
-  closeDeleteModal(); // Tutup modal duluan biar mulus
+  closeDeleteModal();
 
   try {
     const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
@@ -869,28 +778,15 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
   }
 });
 
-// ─── CHAT ───
-async function loadSession(id) {
-  currentSessionId = id;
-  const session = sessions.find(s => s.id === id);
-  document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
-
-  try {
-    const res = await fetch(`/api/messages?session_id=${id}`);
-    if (!res.ok) throw new Error("Gagal memuat pesan");
-    currentMessages = await res.json();
-    
-    renderMessageTree(); 
-    
-    if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
-    renderSidebar();
-  } catch (e) {
-    logDebug(`Error load session: ${e.message}`, '#e74c3c');
-  }
-}
 
 function newChat() {
   currentSessionId = null;
+  localStorage.removeItem('aai_last_session'); // Hapus jejak sesi lama
+  
+  currentMessages = [];
+  activeMessageIds = new Set();
+  activeVersionMap = {};
+  
   const area = document.getElementById('chatArea');
   area.innerHTML = `
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
@@ -898,40 +794,43 @@ function newChat() {
         <img src="/ayaka1.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
       </div>
       <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${currentUser.username}! 👋</h2>
-      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.<br><strong>Browsing Mode sudah AKTIF</strong> untuk info terkini 2026.</p>
+      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
     </div>`;
   document.getElementById('topbarTitle').textContent = 'AAi';
   renderSidebar();
 }
 
-// Fungsi untuk mencari jalur terpanjang/terbaru dari percakapan
 function buildActiveBranch() {
   if (currentMessages.length === 0) return [];
- 
-  // Mulai dari pesan paling awal (tidak punya parent)
-  let current = currentMessages.find(m => !m.parent_id);
+
+  // Cari root: parent_id null ATAU tidak ada di daftar id
+  const allIds = new Set(currentMessages.map(m => m.id));
+  let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
+  
+  if (!current) {
+    // Fallback: urutkan by created_at, ambil yang paling awal
+    current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  }
   if (!current) return [];
- 
+
   const branch = [current];
- 
+
   while (true) {
     const children = currentMessages.filter(m => m.parent_id === current.id);
     if (children.length === 0) break;
- 
-    // Ambil versi yang dipilih user, atau fallback ke yang paling baru (terakhir)
+
     const selectedId = activeVersionMap[current.id];
     const selected = selectedId
       ? children.find(c => c.id === selectedId)
       : children[children.length - 1];
- 
+
     current = selected || children[children.length - 1];
     branch.push(current);
   }
- 
+
   activeMessageIds = new Set(branch.map(m => m.id));
   return branch;
 }
-
 
 function switchVersion(id) {
   const msg = currentMessages.find(m => m.id === id);
@@ -940,7 +839,6 @@ function switchVersion(id) {
   renderMessageTree();
   scrollBottom();
 }
- 
 
 function renderMessageTree() {
   const area = document.getElementById('chatArea');
@@ -960,6 +858,11 @@ function renderMessageTree() {
   });
   
   scrollBottom();
+}
+
+function renderChunkedAssistant(fullText, metadata, messageId, versionInfo = null) {
+  appendMessage('assistant', fullText, null, metadata, messageId, versionInfo);
+  requestAnimationFrame(() => scrollBottom());
 }
 
 function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
@@ -995,11 +898,8 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
  
-    // Simpan plain text untuk TTS (encode di data attribute)
-    const encodedContent = encodeURIComponent(content);
- 
-    html = `
-    <div class="msg-row assistant" data-id="${messageId || ''}" data-content="${encodedContent}">
+   html = `
+    <div class="msg-row assistant" data-id="${messageId || ''}" data-plain-text="${encodeURIComponent(content)}">
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
@@ -1011,22 +911,16 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       <div class="msg-actions">
         <button title="Copy Jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
         <button title="Ulangi Jawaban" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan Jawaban" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.content))">
+        <button class="tts-btn" title="Dengarkan Jawaban" onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
         <span style="font-size:11px;opacity:.65;margin-left:auto;">${time}</span>
       </div>
     </div>`;
   } else {
-    // User bubble — tampilkan gambar kalau ada
-    const imgPreview = metadata?.imageUrl
-      ? `<img src="${metadata.imageUrl}" style="max-width:200px;max-height:200px;border-radius:10px;margin-bottom:8px;display:block;">`
-      : '';
- 
     html = `
     <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId || ''}">
       <div style="flex:1;width:100%;">
-        ${imgPreview}
         <div class="bubble">${formatContent(content)}</div>
         <div class="user-actions">
           <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
@@ -1040,7 +934,6 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
   scrollBottom();
 }
 
-// Fungsi Copy khusus User
 function copyUserMsg(btn) {
   const bubble = btn.closest('.user').querySelector('.bubble');
   navigator.clipboard.writeText(bubble.innerText);
@@ -1049,9 +942,7 @@ function copyUserMsg(btn) {
   setTimeout(() => icon.className = 'far fa-copy', 2000);
 }
 
-// ─── FUNGSI ACTION AI ───
 function copyFullAI(btn) {
-  // Ambil isi teks dari bubble tepat di atas tombol ini
   const bubble = btn.closest('.assistant').querySelector('.bubble');
   navigator.clipboard.writeText(bubble.innerText);
   
@@ -1068,7 +959,6 @@ function regenerateAI(btn) {
   const aiRow = btn.closest('.msg-row.assistant');
   const aiMessageId = aiRow.getAttribute('data-id');
  
-  // Cari pesan user di atasnya untuk ambil teks & ID
   let current = aiRow.previousElementSibling;
   let rawUserText = '';
   let userMessageId = null;
@@ -1082,7 +972,6 @@ function regenerateAI(btn) {
     current = current.previousElementSibling;
   }
  
-  // Fallback: cari di currentMessages lewat parent_id AI message
   if (!userMessageId && aiMessageId) {
     const aiMsg = currentMessages.find(m => m.id === aiMessageId);
     userMessageId = aiMsg?.parent_id || null;
@@ -1097,7 +986,6 @@ function regenerateAI(btn) {
   }
 }
 
-// Fungsi khusus Regenerate agar tidak menduplikasi bubble user
 async function executeRegenerate(text, userMessageId = null) {
   const area = document.getElementById('chatArea');
   const typingId = 'typing_' + Date.now();
@@ -1123,8 +1011,7 @@ async function executeRegenerate(text, userMessageId = null) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        browsing_mode: isBrowsingMode,
-        user_message_id: userMessageId   // ← kunci: beritahu backend ini regenerate
+        user_message_id: userMessageId
       })
     });
  
@@ -1133,7 +1020,6 @@ async function executeRegenerate(text, userMessageId = null) {
  
     if (!res.ok) throw new Error(data.error || 'Server error');
  
-    // ── Tambah versi baru ke currentMessages ──
     currentMessages.push({
       id: data.message_id,
       role: 'assistant',
@@ -1142,25 +1028,22 @@ async function executeRegenerate(text, userMessageId = null) {
       created_at: new Date().toISOString()
     });
  
-    // ── Auto-pilih versi baru ini ──
     if (userMessageId) {
       activeVersionMap[userMessageId] = data.message_id;
     }
  
-    // Re-render seluruh tree biar navigasi versi muncul
     renderMessageTree();
  
   } catch (e) {
     document.getElementById(typingId)?.remove();
-    appendMessage('assistant', `⚠️ Gagal memuat ulang: ${e.message}`);
+    appendMessage('assistant', `⚠️ Regenerate gagal: ${e.message}`);
   }
 }
 
-// ─── KUSTOMISASI MARKED.JS UNTUK WINDOW KODE ───
+// ─── MARKED.JS RENDERER ───
 const renderer = new marked.Renderer();
 renderer.code = function(code, language) {
   const lang = language || 'code';
-  // Amankan kode dari error string (kompatibilitas marked versi baru)
   const text = typeof code === 'string' ? code : code.text; 
   return `<div class="code-window">
             <div class="code-header">
@@ -1174,7 +1057,6 @@ renderer.code = function(code, language) {
 };
 marked.setOptions({ renderer: renderer });
 
-// Fungsi Copy khusus untuk Window Kode
 function copyCodeWindow(btn) {
   const pre = btn.closest('.code-window').querySelector('pre');
   navigator.clipboard.writeText(pre.textContent);
@@ -1188,14 +1070,9 @@ function copyCodeWindow(btn) {
 }
 
 function formatContent(text) {
-  // ANTI-BUG: Kalau teks kosong/error, jangan panggil marked.js!
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Sistem merespons dengan data kosong.</em>";
-  
   let html = marked.parse(text);
-  
-  // 2. (Opsional) Tetap pertahankan custom card untuk "Sumber" agar tetap cantik
   html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi, `<div class="source-card">🌐 <a href="$1" target="_blank" style="color:#2a7a9e">$1</a></div>`);
-  
   return html;
 }
 
@@ -1208,8 +1085,7 @@ function scrollBottom() {
   area.scrollTop = area.scrollHeight;
 }
 
-// ─── LAINNYA ───
-// ─── PENGATURAN MENU (BROWSING & PERSONA) ───
+// ─── SETTINGS MENU (PERSONA ONLY) ───
 function toggleSettingsMenu() {
   const menu = document.getElementById('settingsMenu');
   menu.classList.toggle('show');
@@ -1218,33 +1094,18 @@ function toggleSettingsMenu() {
   }
 }
 
-// Render isi menu secara dinamis agar centang selalu update
-// Render isi menu secara dinamis agar centang selalu update
 function renderSettingsMenu() {
   const menu = document.getElementById('settingsMenu');
   const personas = [
-    { val: 'Auto', label: '✨ Auto' },
-    { val: 'Santai', label: '😌 Santai' },
-    { val: 'Kritikus Brutal', label: '🔥 Kritikus' },
-    { val: 'Rosalia', label: '🌹 Rosalia' }
+    { val: 'Auto',           label: '✨ Auto' },
+    { val: 'Santai',         label: '😌 Santai' },
+    { val: 'Coding',         label: '💻 Coding Expert' },  // ← tambah ini
+    { val: 'Kritikus Brutal',label: '🔥 Kritikus' },
+    { val: 'Rosalia',        label: '🌹 Rosalia' }
   ];
 
-  let html = `
-    <div class="settings-header">Media</div>
-    <button class="settings-item" onclick="triggerImageUpload(); document.getElementById('settingsMenu').classList.remove('show');">
-      <span><i class="fas fa-image" style="margin-right:8px; width:16px;"></i>Upload Gambar</span>
-    </button>
-    <div class="settings-divider"></div>
 
-    <div class="settings-header">Jaringan</div>
-    <button class="settings-item ${isBrowsingMode ? 'active' : ''}" onclick="toggleBrowsingUI()">
-      <span><i class="fas fa-globe" style="margin-right:8px; width:16px;"></i>Browsing Mode</span>
-      <i class="fas fa-check check"></i>
-    </button>
-    <div class="settings-divider"></div>
-
-    <div class="settings-header">Persona AI</div>
-  `;
+  let html = `<div class="settings-header">Persona AI</div>`;
 
   personas.forEach(p => {
     const isActive = currentPersona === p.val;
@@ -1259,28 +1120,18 @@ function renderSettingsMenu() {
   menu.innerHTML = html;
 }
 
-function toggleBrowsingUI() {
-  isBrowsingMode = !isBrowsingMode;
-  localStorage.setItem('aai_browsing_mode', isBrowsingMode);
-  renderSettingsMenu(); // Render ulang agar centang langsung berubah
-  logDebug(`Browsing mode diubah → ${isBrowsingMode}`, '#e74c3c');
-}
-
 function selectPersonaUI(val) {
   currentPersona = val;
   localStorage.setItem('aai_persona', val);
-  renderSettingsMenu(); // Render ulang agar centang pindah
+  renderSettingsMenu();
 }
 
-// Tutup menu pengaturan jika user klik di luar area menu
 document.addEventListener('click', function(e) {
   const wrapper = document.querySelector('.settings-wrapper');
   if (wrapper && !wrapper.contains(e.target)) {
     document.getElementById('settingsMenu').classList.remove('show');
   }
 });
-
-
 
 function handleKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1291,9 +1142,8 @@ function handleKey(e) {
 
 function autoResize(el) {
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 120) + 'px'; // Max tinggi dikurangi jadi 120px
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
-
 
 function handleSend() {
   const inp = document.getElementById('messageInput');
@@ -1304,37 +1154,103 @@ function handleSend() {
   sendMessage(text);
 }
 
-// ─── SIDEBAR TOGGLE (MOBILE) ───
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   sidebar.classList.toggle('open');
 }
 
-// Tutup sidebar otomatis jika user klik area chat (khusus tampilan HP)
 document.addEventListener('click', function(e) {
   if (window.innerWidth <= 768) {
     const sidebar = document.getElementById('sidebar');
     const hamburger = document.querySelector('.hamburger');
-    // Jika sidebar terbuka, dan yang diklik BUKAN sidebar & BUKAN hamburger
     if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target)) {
       sidebar.classList.remove('open');
     }
   }
 });
 
-
-// ─── LOGOUT ───
 function logout() {
   if (confirm("Yakin mau keluar, Bos?")) {
     localStorage.removeItem('aai_user');
-    window.location.href = '/login'; // Pastikan rute '/login' kamu benar
+    window.location.href = '/login';
   }
 }
 
-// ─── INIT ───
-loadSessions();
-newChat();
+async function loadSession(id) {
+  currentSessionId = id;
+  localStorage.setItem('aai_last_session', id);
 
+  const session = sessions.find(s => s.id === id);
+  document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
+
+  currentMessages = [];
+  activeMessageIds = new Set();
+  activeVersionMap = {};
+  document.getElementById('chatArea').innerHTML = `
+    <div style="padding:40px;text-align:center;color:var(--text-muted);">
+      <i class="fas fa-spinner fa-spin" style="font-size:28px;"></i>
+      <p style="margin-top:12px;">Memuat percakapan...</p>
+    </div>`;
+
+  try {
+    // ✅ Pakai /api/messages, bukan /api/chat
+    const res = await fetch(`/api/messages?session_id=${id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+
+    if (data.success && Array.isArray(data.messages)) {
+      currentMessages = data.messages;
+      renderMessageTree();
+    } else {
+      throw new Error("Format data tidak valid");
+    }
+
+    if (window.innerWidth <= 768) {
+      document.getElementById('sidebar').classList.remove('open');
+    }
+    renderSidebar();
+
+  } catch (e) {
+    logDebug(`Error load session: ${e.message}`, '#e74c3c');
+    document.getElementById('chatArea').innerHTML = `
+      <div style="padding:40px;text-align:center;color:#e74c3c;">
+        ⚠️ Gagal memuat riwayat: ${e.message}
+      </div>`;
+  }
+}
+
+
+// ─── LOAD ALL SESSIONS ───
+async function loadSessions() {
+  try {
+    const res = await fetch(`/api/sessions?user_id=${currentUser.id}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    sessions = Array.isArray(data) ? data : (data.sessions || []);
+    renderSidebar();
+  } catch (e) {
+    logDebug(`Gagal load sessions: ${e.message}`, '#e74c3c');
+    sessions = [];
+    renderSidebar();
+  }
+}
+
+
+async function initApp() {
+  await loadSessions();
+  
+  // Cek apakah user terakhir kali di sesi tertentu
+  const lastSessionId = localStorage.getItem('aai_last_session');
+  if (lastSessionId && sessions.find(s => s.id === lastSessionId)) {
+    loadSession(lastSessionId);
+  } else {
+    newChat();
+  }
+}
+
+// Jalankan saat DOM siap
+document.addEventListener('DOMContentLoaded', initApp);
 </script>
 </body>
 </html>
