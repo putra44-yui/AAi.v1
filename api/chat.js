@@ -144,6 +144,7 @@ ${combinedSystem}
 ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji, respons panjang dan detail.
 - Bantu pekerjaan konsep sulit, excel, coding, dll.
+- Jangan gunakan panggilan gw, lu, gue, lo. Utamakan nama atau "kamu".
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.`
     };
 
@@ -153,7 +154,7 @@ ATURAN PENTING:
     let currentSessionId = session_id;
     if (!currentSessionId) {
       // Judul cepat dari 40 karakter pertama, update async setelah streaming
-      const quickTitle = userMessage.substring(0, 40);
+      const quickTitle = userMessage.length > 25 ? userMessage.substring(0, 25) + "..." : userMessage;
       const { data: newSession, error: sesErr } = await supabase
         .from('sessions').insert({ user_id: user.id, title: quickTitle }).select().single();
       if (sesErr) throw new Error("Gagal buat sesi: " + sesErr.message);
@@ -287,7 +288,7 @@ async function generateTitle(apiKey, userMessage, sessionId) {
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: MAIN_MODEL,
-        messages: [{ role: "user", content: `Buatkan judul singkat (maks 4 kata) tanpa tanda kutip, tanpa titik, untuk pesan: "${userMessage}"` }],
+        messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
       })
     });

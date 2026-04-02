@@ -561,7 +561,7 @@ function detectCodeMode(textarea) {
   } else {
     textarea.classList.remove('code-mode');
     wrap.classList.remove('code-mode');
-    textarea.placeholder = 'Ketik pesan… (ketik ``` untuk mode kode)';
+    textarea.placeholder = 'Ketik pesan… ';
   }
 }
 
@@ -682,24 +682,30 @@ async function sendMessage(text) {
               userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
 
             // Set session
-            if (parsed.session_id && !currentSessionId) {
-              currentSessionId = parsed.session_id;
-              localStorage.setItem('aai_last_session', currentSessionId);
-              loadSessions(); // non-blocking
-            }
+ // Set session
+if (parsed.session_id && !currentSessionId) {
+  currentSessionId = parsed.session_id;
+  localStorage.setItem('aai_last_session', currentSessionId);
+  setTimeout(async () => {
+    await loadSessions();
+    const activeSec = sessions.find(s => s.id === currentSessionId);
+    if (activeSec) {
+      document.getElementById('topbarTitle').textContent = activeSec.title;
+    }
+  }, 2500);
+} 
 
-            // Push state
-            const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
-            currentMessages.push({
-              id: parsed.user_message_id, role: 'user', content: text,
-              parent_id: lastAI?.id || null, created_at: new Date().toISOString()
-            });
-            currentMessages.push({
-              id: parsed.message_id, role: 'assistant', content: fullText,
-              parent_id: parsed.user_message_id, created_at: new Date().toISOString()
-            });
+const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
+currentMessages.push({
+  id: parsed.user_message_id, role: 'user', content: text,
+  parent_id: lastAI?.id || null, created_at: new Date().toISOString()
+});
+currentMessages.push({
+  id: parsed.message_id, role: 'assistant', content: fullText,
+  parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+});
 
-            scrollBottom();
+scrollBottom();
           }
         } catch (e) {
           if (e.message && !e.message.includes('JSON')) throw e;
