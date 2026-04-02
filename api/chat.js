@@ -1,9 +1,9 @@
 export const maxDuration = 60;
 import * as XLSX from 'xlsx';
-import { Document, Packer, Paragraph, TextRun } from 'docx';
-import { createClient } from '@supabase/supabase-js';
 import mammoth from 'mammoth';
+import { createClient } from '@supabase/supabase-js';
 
+let Document, Packer, Paragraph, TextRun;
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -395,11 +395,21 @@ ATURAN PENTING:
             buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
           } 
           else if (ext === 'docx') {
-            const paragraphs = content.split('\n').map(line =>
-              new Paragraph({ children: [new TextRun({ text: line, font: 'Arial', size: 24 })] })
-            );
-            const doc = new Document({ sections: [{ children: paragraphs }] });
-            buffer = await Packer.toBuffer(doc);
+  // Dynamic import docx di sini
+  const docx = await import('docx');
+  Document = docx.Document;
+  Packer = docx.Packer;
+  Paragraph = docx.Paragraph;
+  TextRun = docx.TextRun;
+
+  const paragraphs = content.split('\n').map(line =>
+    new Paragraph({ 
+      children: [new TextRun({ text: line, font: 'Arial', size: 24 })] 
+    })
+  );
+  const doc = new Document({ sections: [{ children: paragraphs }] });
+  buffer = await Packer.toBuffer(doc);
+
           } else {
             buffer = Buffer.from(content, 'utf-8');
           }
