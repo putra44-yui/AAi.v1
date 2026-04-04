@@ -14,6 +14,7 @@ let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
+const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
 let currentUtterance = null;
@@ -265,7 +266,7 @@ function applyHighlight(code, lang) {
 // ══════════════════════════════════════════
 function buildStreamBubbleHTML(streamId, timeStr) {
   return `
-    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="">
+    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="">
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
@@ -682,6 +683,7 @@ async function processStream(response, streamId, onDone) {
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+      streamRow.setAttribute('data-persona', parsed.persona_used || '');
       const finalPreview = previewData || normalizePreview(parsed.preview);
       streamRow.setAttribute('data-preview', finalPreview ? encodeURIComponent(JSON.stringify(finalPreview)) : '');
       onDone(parsed, fullText, finalPreview);
@@ -768,6 +770,7 @@ async function sendMessage(text, files = []) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        memory_experiment_mode: currentMemoryExperimentMode,
         files: files
       })
     });
@@ -802,7 +805,8 @@ async function sendMessage(text, files = []) {
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
-        preview: preview || null
+        preview: preview || null,
+        persona: parsed.persona_used || currentPersona
       });
 
       if (isCompactRequest) {
@@ -878,6 +882,10 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 
   setSendBtn('stop');
   abortController = new AbortController();
+  const frozenPersona =
+    aiRow?.getAttribute('data-persona') ||
+    (assistantMessageId ? currentMessages.find(m => m.id === assistantMessageId)?.persona : null) ||
+    currentPersona;
 
   try {
     const res = await fetch('/api/chat', {
@@ -888,7 +896,9 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         message: text,
         session_id: currentSessionId,
         user_id: currentUser.id,
-        persona_name: currentPersona,
+        persona_name: frozenPersona,
+        memory_experiment_mode: currentMemoryExperimentMode,
+        consistency_mode: true,
         user_message_id: userMessageId
         // NO assistant_message_id — creates a new sibling for version navigation
       })
@@ -906,7 +916,8 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: userMessageId, created_at: new Date().toISOString(),
-        preview: preview || null
+        preview: preview || null,
+        persona: parsed.persona_used || frozenPersona
       });
       // Select the new version
       if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
@@ -1015,6 +1026,7 @@ async function saveEdit(btn, msgId) {
         message: newText,
         session_id: currentSessionId,
         user_id: currentUser.id,
+        memory_experiment_mode: currentMemoryExperimentMode,
         persona_name: currentPersona
       })
     });
@@ -1058,6 +1070,7 @@ async function sendMessageBranched(text, parentId = null) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentId
       })
     });
@@ -1077,7 +1090,8 @@ async function sendMessageBranched(text, parentId = null) {
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
-        preview: preview || null
+        preview: preview || null,
+        persona: parsed.persona_used || currentPersona
       });
       if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
     });
@@ -1249,7 +1263,9 @@ function renderMessageTree() {
   branch.forEach(m => {
     const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
     const idx      = siblings.findIndex(s => s.id === m.id);
-    const extra = m.role === 'assistant' && m.preview ? { preview: m.preview } : null;
+    const extra = m.role === 'assistant'
+      ? { preview: m.preview || null, persona: m.persona || '' }
+      : null;
     appendMessage(m.role, m.content, m.created_at, null, m.id, {
       total: siblings.length, current: idx + 1, siblings: siblings.map(s => s.id)
     }, extra);
@@ -1297,7 +1313,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
     html = `
-    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}">
+    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}">
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
@@ -1512,6 +1528,7 @@ function renderSettingsMenu() {
       <span>${p.label}</span><i class="fas fa-check check"></i>
     </button>`;
   });
+
   document.getElementById('settingsMenu').innerHTML = html;
 }
 function selectPersonaUI(val) {
@@ -1520,6 +1537,8 @@ function selectPersonaUI(val) {
   updateModeLabel();
   renderSettingsMenu();
 }
+
+
 document.addEventListener('click', e => {
   const w = document.querySelector('.settings-wrapper');
   if (w && !w.contains(e.target)) document.getElementById('settingsMenu').classList.remove('show');

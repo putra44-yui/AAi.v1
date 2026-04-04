@@ -133,9 +133,37 @@ alter table person_memory
   add column if not exists confidence float default 0.7,
   add column if not exists observation_count int default 1,
   add column if not exists updated_at timestamptz default now(),
-  add column if not exists source_message_id uuid references messages(id) on delete set null;
+  add column if not exists source_message_id uuid references messages(id) on delete set null,
+  add column if not exists priority_score float default 0.5,
+  add column if not exists memory_type text default 'fakta',
+  add column if not exists category text default 'umum',
+  add column if not exists status text default 'active',
+  add column if not exists deleted_at timestamptz,
+  add column if not exists deletion_reason text,
+  add column if not exists deleted_by uuid references users(id) on delete set null;
+
+alter table person_memory
+  drop constraint if exists chk_person_memory_status;
+alter table person_memory
+  add constraint chk_person_memory_status check (status in ('active', 'archived'));
+
+alter table person_memory
+  drop constraint if exists chk_person_memory_type;
+alter table person_memory
+  add constraint chk_person_memory_type check (memory_type in ('pattern', 'kebiasaan', 'cara_berpikir', 'preferensi', 'emosi', 'fakta'));
+
+alter table person_memory
+  drop constraint if exists chk_person_memory_priority_score;
+alter table person_memory
+  add constraint chk_person_memory_priority_score check (priority_score >= 0 and priority_score <= 1);
 
 create index if not exists idx_person_memory_updated on person_memory(person_id, updated_at desc);
+create index if not exists idx_person_memory_priority on person_memory(person_id, status, priority_score desc, updated_at desc);
+create index if not exists idx_person_memory_type_status on person_memory(person_id, memory_type, status, updated_at desc);
+
+update person_memory
+set priority_score = least(0.99, greatest(0.05, coalesce(confidence, 0.7) * greatest(0.3, least(1.0, coalesce(observation_count, 1) / 5.0))))
+where priority_score is null or priority_score = 0.5;
 
 -- Trigger: auto-increment observation_count & updated_at saat memori diperbarui
 create or replace function update_person_memory_on_update()
@@ -145,6 +173,18 @@ begin
   new.observation_count = coalesce(old.observation_count, 0) + 1;
   -- Naikkan confidence semakin sering teramati (cap di 0.98)
   new.confidence = least(0.98, coalesce(old.confidence, 0.7) + 0.05);
+  new.priority_score = least(0.99, greatest(0.05, new.confidence * greatest(0.3, least(1.0, new.observation_count / 5.0))));
+
+  if new.status = 'archived' and old.status is distinct from 'archived' then
+    new.deleted_at = now();
+  end if;
+
+  if new.status = 'active' and old.status is distinct from 'active' then
+    new.deleted_at = null;
+    new.deletion_reason = null;
+    new.deleted_by = null;
+  end if;
+
   return new;
 end;
 $$ language plpgsql;

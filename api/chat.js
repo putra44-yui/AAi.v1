@@ -11,13 +11,17 @@ const supabase = createClient(
 );
 
 const MAIN_MODEL = "qwen/qwen3.6-plus:free";
+const DEFAULT_FALLBACK_MODEL = 'qwen/qwen2.5-coder:free';
 const MEMORY_TAG_PREFIX = '[MEMORY:';
+const MEMORY_FORGET_TAG_PREFIX = '[MEMORY_FORGET:';
 const CLARIFY_BLOCK_START = '[AAI_CLARIFY]';
 const CLARIFY_BLOCK_END = '[/AAI_CLARIFY]';
 const MAX_HISTORY_MESSAGES = 7;
 const MAX_HISTORY_MESSAGES_COMPACT = 60;
 const HISTORY_SUMMARY_MAX_MESSAGES = 6;
 const HISTORY_SUMMARY_MAX_CHARS = 260;
+const DEFAULT_MAX_INJECTED_MEMORIES = 120;
+const RETRYABLE_OPENROUTER_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const CHECKPOINT_SUMMARY_START = '[SESSION_CHECKPOINT]';
 const CHECKPOINT_SUMMARY_END = '[/SESSION_CHECKPOINT]';
 
@@ -25,6 +29,351 @@ const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kema
 
 function uniqueList(items = []) {
   return [...new Set(items.filter(Boolean))];
+}
+
+function parsePositiveIntEnv(name, fallbackValue) {
+  const raw = Number.parseInt(process.env[name] || '', 10);
+  if (Number.isNaN(raw) || raw <= 0) return fallbackValue;
+  return raw;
+}
+
+function parseFloatEnv(name, fallbackValue, min = 0, max = 1) {
+  const raw = Number.parseFloat(process.env[name] || '');
+  if (Number.isNaN(raw)) return fallbackValue;
+  return Math.max(min, Math.min(max, raw));
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeMemoryType(input = '') {
+  const normalized = String(input || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (['pattern', 'kebiasaan', 'cara_berpikir', 'preferensi', 'emosi', 'fakta'].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === 'cara_berfikir') return 'cara_berpikir';
+  if (normalized === 'cara_pikir') return 'cara_berpikir';
+  if (normalized === 'habit') return 'kebiasaan';
+  if (normalized === 'thinking_style') return 'cara_berpikir';
+  return 'fakta';
+}
+
+function normalizeMemoryKey(input = '') {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_\s-]/g, '')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function normalizeMemoryText(input = '') {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function computePriorityScore(confidence = 0.7, observationCount = 1) {
+  const clampedConfidence = Math.max(0.05, Math.min(0.99, Number(confidence || 0.7)));
+  const seenFactor = Math.max(0.3, Math.min(1.0, Number(observationCount || 1) / 5));
+  return Number((clampedConfidence * seenFactor).toFixed(4));
+}
+
+function jaccardSimilarity(a = '', b = '') {
+  const setA = new Set(normalizeMemoryText(a).split(' ').filter(Boolean));
+  const setB = new Set(normalizeMemoryText(b).split(' ').filter(Boolean));
+  if (!setA.size && !setB.size) return 1;
+  if (!setA.size || !setB.size) return 0;
+
+  let intersection = 0;
+  for (const token of setA) {
+    if (setB.has(token)) intersection += 1;
+  }
+
+  const union = new Set([...setA, ...setB]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+
+function parseMemoryTagPayload(payload = '') {
+  const raw = String(payload || '').trim();
+  if (!raw) return null;
+
+  if (!raw.includes(';') && !/\bkey\s*=|\bvalue\s*=|\btype\s*=|\bmemory_type\s*=|\bcategory\s*=/i.test(raw)) {
+    const delimiterIndex = raw.indexOf('=');
+    if (delimiterIndex > 0) {
+      const key = normalizeMemoryKey(raw.slice(0, delimiterIndex));
+      const value = raw.slice(delimiterIndex + 1).trim();
+      if (!key || !value) return null;
+      return { key, value, memoryType: 'fakta', category: 'umum' };
+    }
+    return null;
+  }
+
+  const fields = {};
+  for (const segment of raw.split(';')) {
+    const cleanSegment = segment.trim();
+    if (!cleanSegment) continue;
+    const idx = cleanSegment.indexOf('=');
+    if (idx <= 0) continue;
+    const field = cleanSegment.slice(0, idx).trim().toLowerCase();
+    const value = cleanSegment.slice(idx + 1).trim();
+    if (!value) continue;
+    fields[field] = value;
+  }
+
+  const key = normalizeMemoryKey(fields.key || fields.mem_key || fields.label || '');
+  const value = String(fields.value || fields.val || fields.fact || '').trim();
+  if (!key || !value) return null;
+
+  return {
+    key,
+    value,
+    memoryType: normalizeMemoryType(fields.memory_type || fields.type || 'fakta'),
+    category: String(fields.category || 'umum').trim().toLowerCase().slice(0, 60) || 'umum'
+  };
+}
+
+function parseMemoryInstructionTags(rawReply = '') {
+  const text = String(rawReply || '');
+  const memoryUpserts = [];
+  const forgetKeys = [];
+
+  const cleanReply = text.replace(/\[(MEMORY|MEMORY_FORGET):([^\]]+)\]/g, (_, tagType, payload) => {
+    if (tagType === 'MEMORY_FORGET') {
+      const parsed = parseMemoryTagPayload(payload);
+      if (parsed?.key) forgetKeys.push(parsed.key);
+      else {
+        const fallbackKey = normalizeMemoryKey(String(payload || '').replace(/^key\s*=/i, '').trim());
+        if (fallbackKey) forgetKeys.push(fallbackKey);
+      }
+      return '';
+    }
+
+    const parsed = parseMemoryTagPayload(payload);
+    if (parsed) memoryUpserts.push(parsed);
+    return '';
+  });
+
+  return {
+    cleanReply: cleanReply.trimEnd(),
+    memoryUpserts: uniqueList(memoryUpserts.map(m => JSON.stringify(m))).map(item => JSON.parse(item)),
+    forgetKeys: uniqueList(forgetKeys)
+  };
+}
+
+function buildMemoryContext(memories = []) {
+  if (!Array.isArray(memories) || memories.length === 0) return 'Tidak ada memori.';
+
+  const labelByType = {
+    pattern: 'Pattern',
+    kebiasaan: 'Kebiasaan',
+    cara_berpikir: 'Cara Berpikir',
+    preferensi: 'Preferensi',
+    emosi: 'Emosi',
+    fakta: 'Fakta'
+  };
+
+  const grouped = new Map();
+  for (const memory of memories) {
+    const type = normalizeMemoryType(memory.memory_type || 'fakta');
+    if (!grouped.has(type)) grouped.set(type, []);
+
+    const confidence = Number(memory.confidence || 0.7);
+    const confidenceLabel = confidence >= 0.85 ? 'tinggi' : confidence >= 0.65 ? 'sedang' : 'rendah';
+    grouped.get(type).push(`- [${confidenceLabel}] ${memory.key}: ${memory.value}`);
+  }
+
+  const orderedTypes = ['pattern', 'kebiasaan', 'cara_berpikir', 'preferensi', 'emosi', 'fakta'];
+  const blocks = [];
+  for (const type of orderedTypes) {
+    const rows = grouped.get(type);
+    if (!rows?.length) continue;
+    blocks.push(`${labelByType[type]}:\n${rows.join('\n')}`);
+  }
+
+  return blocks.join('\n\n') || 'Tidak ada memori.';
+}
+
+function detectMemoryIntent(message = '') {
+  const msg = String(message || '').toLowerCase();
+
+  if (/kebiasaan|rutinitas|sering\s+apa|habit/.test(msg)) return 'kebiasaan';
+  if (/suka|favorit|kesukaan|preferensi|lebih\s+suka/.test(msg)) return 'preferensi';
+  if (/gimana|orangnya|karakter|kepribadian|cara\s+berpikir|ambil\s+keputusan/.test(msg)) return 'kepribadian';
+  if (/emosi|perasaan|sedih|marah|cemas|tenang/.test(msg)) return 'emosi';
+
+  return 'general';
+}
+
+function getIntentMemoryTypes(intent = 'general') {
+  const intentToMemoryType = {
+    kebiasaan: ['kebiasaan', 'pattern'],
+    preferensi: ['preferensi', 'pattern'],
+    kepribadian: ['cara_berpikir', 'pattern', 'emosi'],
+    emosi: ['emosi', 'pattern'],
+    general: ['fakta', 'pattern', 'kebiasaan', 'preferensi', 'cara_berpikir', 'emosi']
+  };
+
+  return intentToMemoryType[intent] || intentToMemoryType.general;
+}
+
+function resolveMemoryScoreWeights() {
+  const priorityWeight = parseFloatEnv('AAI_MEMORY_WEIGHT_PRIORITY', 0.55, 0, 1);
+  const relevanceWeight = parseFloatEnv('AAI_MEMORY_WEIGHT_RELEVANCE', 0.35, 0, 1);
+  const freshnessWeight = parseFloatEnv('AAI_MEMORY_WEIGHT_FRESHNESS', 0.10, 0, 1);
+
+  const total = priorityWeight + relevanceWeight + freshnessWeight;
+  if (total <= 0) {
+    return { priority: 0.55, relevance: 0.35, freshness: 0.10 };
+  }
+
+  return {
+    priority: Number((priorityWeight / total).toFixed(4)),
+    relevance: Number((relevanceWeight / total).toFixed(4)),
+    freshness: Number((freshnessWeight / total).toFixed(4))
+  };
+}
+
+function normalizeMemoryExperimentMode(mode = '') {
+  return String(mode || '').toLowerCase().trim() === 'context-heavy'
+    ? 'context-heavy'
+    : 'balanced';
+}
+
+function resolveMemoryExperimentProfile(mode, defaults) {
+  const normalizedMode = normalizeMemoryExperimentMode(mode);
+
+  if (normalizedMode === 'context-heavy') {
+    return {
+      mode: normalizedMode,
+      weights: { priority: 0.35, relevance: 0.55, freshness: 0.10 },
+      minPreferredRelevance: 0.14,
+      minOtherRelevance: 0.34,
+      relevantMemoryLimit: Math.max(18, Math.min(42, Number(defaults.relevantMemoryLimit || 24)))
+    };
+  }
+
+  return {
+    mode: 'balanced',
+    weights: defaults.weights,
+    minPreferredRelevance: defaults.minPreferredRelevance,
+    minOtherRelevance: defaults.minOtherRelevance,
+    relevantMemoryLimit: defaults.relevantMemoryLimit
+  };
+}
+
+function computeFreshnessScore(updatedAt) {
+  if (!updatedAt) return 0.35;
+  const updatedTime = new Date(updatedAt).getTime();
+  if (!Number.isFinite(updatedTime)) return 0.35;
+
+  const now = Date.now();
+  const ageDays = Math.max(0, (now - updatedTime) / (1000 * 60 * 60 * 24));
+  const score = Math.exp(-ageDays / 45);
+  return Number(Math.max(0.15, Math.min(1, score)).toFixed(4));
+}
+
+function computeRelevanceToQuery(memory = {}, message = '', preferredTypes = []) {
+  const normalizedType = normalizeMemoryType(memory.memory_type || 'fakta');
+  const query = normalizeMemoryText(message);
+  const memoryText = [memory.key, memory.value, memory.category, normalizedType]
+    .map(part => normalizeMemoryText(part || ''))
+    .join(' ')
+    .trim();
+
+  if (!query || !memoryText) {
+    return preferredTypes.includes(normalizedType) ? 0.45 : 0.2;
+  }
+
+  const lexical = jaccardSimilarity(query, memoryText);
+  const typeBoost = preferredTypes.includes(normalizedType) ? 0.35 : 0.08;
+  const categoryBoost = memory.category && query.includes(normalizeMemoryText(memory.category)) ? 0.15 : 0;
+  return Number(Math.min(1, lexical + typeBoost + categoryBoost).toFixed(4));
+}
+
+function selectRelevantMemories(memories = [], userMessage = '', options = {}) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return { items: [], intent: 'general', preferredTypes: getIntentMemoryTypes('general') };
+  }
+
+  const limit = Math.max(6, Number(options.limit || 24));
+  const weights = options.weights || { priority: 0.55, relevance: 0.35, freshness: 0.10 };
+  const minPreferredRelevance = Number(options.minPreferredRelevance ?? 0.18);
+  const minOtherRelevance = Number(options.minOtherRelevance ?? 0.28);
+
+  const intent = detectMemoryIntent(userMessage);
+  const preferredTypes = getIntentMemoryTypes(intent);
+
+  const scored = memories.map(memory => {
+    const basePriority = Number(memory.priority_score || computePriorityScore(memory.confidence || 0.7, memory.observation_count || 1));
+    const relevance = computeRelevanceToQuery(memory, userMessage, preferredTypes);
+    const freshness = computeFreshnessScore(memory.updated_at);
+    const finalScore = Number((
+      weights.priority * basePriority +
+      weights.relevance * relevance +
+      weights.freshness * freshness
+    ).toFixed(4));
+
+    return {
+      ...memory,
+      _intent: intent,
+      _relevance: relevance,
+      _freshness: freshness,
+      _final_score: finalScore
+    };
+  });
+
+  scored.sort((a, b) => {
+    if (b._final_score !== a._final_score) return b._final_score - a._final_score;
+    if ((b.priority_score || 0) !== (a.priority_score || 0)) return (b.priority_score || 0) - (a.priority_score || 0);
+    return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime();
+  });
+
+  const preferredPool = scored
+    .filter(item => preferredTypes.includes(normalizeMemoryType(item.memory_type || 'fakta')))
+    .filter(item => item._relevance >= minPreferredRelevance);
+  const otherPool = scored
+    .filter(item => !preferredTypes.includes(normalizeMemoryType(item.memory_type || 'fakta')))
+    .filter(item => item._relevance >= minOtherRelevance);
+
+  const selected = [];
+  const preferredQuota = Math.min(limit, Math.max(4, Math.ceil(limit * 0.65)));
+
+  for (const item of preferredPool) {
+    if (selected.length >= preferredQuota) break;
+    selected.push(item);
+  }
+
+  for (const item of otherPool) {
+    if (selected.length >= limit) break;
+    selected.push(item);
+  }
+
+  for (const item of scored) {
+    if (selected.length >= limit) break;
+    if (selected.some(existing => existing.id === item.id)) continue;
+    selected.push(item);
+  }
+
+  return { items: selected.slice(0, limit), intent, preferredTypes };
+}
+
+function buildLastChatContext(historyRows = [], maxLines = 8) {
+  if (!Array.isArray(historyRows) || historyRows.length === 0) return 'Belum ada riwayat chat sebelumnya.';
+
+  const lines = historyRows
+    .slice(-maxLines)
+    .map((row, idx) => {
+      const role = row.role === 'assistant' ? 'AI' : row.role === 'user' ? 'User' : 'System';
+      return `${idx + 1}. [${role}] ${compactHistoryMessage(row.content, 180)}`;
+    });
+
+  return lines.join('\n');
 }
 
 function sanitizeGeneratedFileBlock(content = '') {
@@ -216,10 +565,15 @@ function createMemoryTagStreamFilter() {
         continue;
       }
 
-      const tagStartIndex = buffer.indexOf(MEMORY_TAG_PREFIX);
-      if (tagStartIndex !== -1) {
-        visible += buffer.slice(0, tagStartIndex);
-        buffer = buffer.slice(tagStartIndex + MEMORY_TAG_PREFIX.length);
+      const prefixCandidates = [MEMORY_TAG_PREFIX, MEMORY_FORGET_TAG_PREFIX]
+        .map(prefix => ({ prefix, index: buffer.indexOf(prefix) }))
+        .filter(item => item.index !== -1)
+        .sort((a, b) => a.index - b.index);
+
+      if (prefixCandidates.length > 0) {
+        const selected = prefixCandidates[0];
+        visible += buffer.slice(0, selected.index);
+        buffer = buffer.slice(selected.index + selected.prefix.length);
         suppressingMemoryTag = true;
         continue;
       }
@@ -230,7 +584,8 @@ function createMemoryTagStreamFilter() {
         break;
       }
 
-      const safeLength = Math.max(0, buffer.length - (MEMORY_TAG_PREFIX.length - 1));
+      const maxPrefixLength = Math.max(MEMORY_TAG_PREFIX.length, MEMORY_FORGET_TAG_PREFIX.length);
+      const safeLength = Math.max(0, buffer.length - (maxPrefixLength - 1));
       if (safeLength === 0) break;
 
       visible += buffer.slice(0, safeLength);
@@ -456,6 +811,101 @@ function getModelConfig(personaList) {
   return configs[persona] || configs['Auto'];
 }
 
+function buildModelCandidates() {
+  const fallbackFromEnv = String(process.env.OPENROUTER_FALLBACK_MODEL || '').trim();
+  const fallbacks = uniqueList([
+    fallbackFromEnv || DEFAULT_FALLBACK_MODEL
+  ]).filter(model => model && model !== MAIN_MODEL);
+  return [MAIN_MODEL, ...fallbacks];
+}
+
+async function callOpenRouterWithRetry({ apiKey, payload }) {
+  const maxRetries = Math.max(0, parsePositiveIntEnv('OPENROUTER_MAX_RETRIES', 2));
+  const attemptTimeoutMs = parsePositiveIntEnv('OPENROUTER_ATTEMPT_TIMEOUT_MS', 45000);
+  const backoffBaseMs = parsePositiveIntEnv('OPENROUTER_BACKOFF_BASE_MS', 800);
+  const models = buildModelCandidates();
+  let totalRetryCount = 0;
+
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+    const modelName = models[modelIndex];
+    const fallbackUsed = modelIndex > 0;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+
+      try {
+        const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://aai.family',
+            'X-Title': 'AAi Keluarga'
+          },
+          body: JSON.stringify({ ...payload, model: modelName }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (aiResponse.ok) {
+          return {
+            ok: true,
+            response: aiResponse,
+            modelUsed: modelName,
+            retryCount: totalRetryCount,
+            fallbackUsed
+          };
+        }
+
+        const errorBody = await aiResponse.text();
+        const isRetryable = RETRYABLE_OPENROUTER_STATUS.has(aiResponse.status);
+        if (!isRetryable) {
+          return {
+            ok: false,
+            status: aiResponse.status,
+            statusText: aiResponse.statusText,
+            errorBody,
+            modelUsed: modelName,
+            retryCount: totalRetryCount,
+            fallbackUsed
+          };
+        }
+
+        if (attempt >= maxRetries) {
+          break;
+        }
+
+        totalRetryCount += 1;
+        const jitter = Math.floor(Math.random() * 450);
+        const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
+        await sleep(waitMs);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (attempt >= maxRetries) {
+          break;
+        }
+
+        totalRetryCount += 1;
+        const jitter = Math.floor(Math.random() * 450);
+        const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
+        await sleep(waitMs);
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    status: 503,
+    statusText: 'Service Unavailable',
+    errorBody: 'Gagal terhubung ke provider setelah retry dan fallback.',
+    modelUsed: MAIN_MODEL,
+    retryCount: totalRetryCount,
+    fallbackUsed: true
+  };
+}
+
 // ✅ HELPER: Upload Base64 ke Supabase Storage
 async function uploadFileToStorage(base64String, fileName, mimeType) {
   const base64 = base64String.split(',')[1];
@@ -533,6 +983,8 @@ export default async function handler(req, res) {
       assistant_message_id = null,
       update_only = false,
       edit_message_id = null,
+      consistency_mode = false,
+      memory_experiment_mode = 'balanced',
       files = [] // ← Terima array file dari frontend
     } = req.body;
 
@@ -651,6 +1103,17 @@ export default async function handler(req, res) {
       .eq('id', user.person_id).single();
 
     const currentAge = calculateAge(person?.date_of_birth);
+    const injectedMemoryLimit = parsePositiveIntEnv('AAI_MAX_INJECTED_MEMORIES', DEFAULT_MAX_INJECTED_MEMORIES);
+    const relevantMemoryLimit = parsePositiveIntEnv('AAI_MAX_RELEVANT_MEMORIES', 24);
+    const memoryWeights = resolveMemoryScoreWeights();
+    const minPreferredRelevance = parseFloatEnv('AAI_MEMORY_MIN_RELEVANCE_PREFERRED', 0.18, 0, 1);
+    const minOtherRelevance = parseFloatEnv('AAI_MEMORY_MIN_RELEVANCE_OTHER', 0.28, 0, 1);
+    const experimentProfile = resolveMemoryExperimentProfile(memory_experiment_mode, {
+      weights: memoryWeights,
+      minPreferredRelevance,
+      minOtherRelevance,
+      relevantMemoryLimit
+    });
 
     // 2. Family context (sama seperti sebelumnya)
     const { data: allPersons } = await supabase.from('persons').select('name, date_of_birth, role');
@@ -674,8 +1137,21 @@ export default async function handler(req, res) {
       .join('\n') || 'Belum ada relasi.';
 
     const { data: memories } = await supabase
-      .from('person_memory').select('key, value').eq('person_id', user.person_id);
-    const memoryText = memories?.map(m => `${m.key}: ${m.value}`).join('\n') || 'Tidak ada memori.';
+      .from('person_memory')
+      .select('id, key, value, confidence, observation_count, updated_at, priority_score, memory_type, category, status')
+      .eq('person_id', user.person_id)
+      .eq('status', 'active')
+      .order('priority_score', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(injectedMemoryLimit);
+    const relevantSelection = selectRelevantMemories(memories || [], userMessage, {
+      limit: experimentProfile.relevantMemoryLimit,
+      weights: experimentProfile.weights,
+      minPreferredRelevance: experimentProfile.minPreferredRelevance,
+      minOtherRelevance: experimentProfile.minOtherRelevance
+    });
+    const relevantMemories = relevantSelection.items;
+    const memoryText = buildMemoryContext(relevantMemories);
 
     let targetAssistantMessageId = assistant_message_id || null;
     if (!targetAssistantMessageId && edit_message_id) {
@@ -694,6 +1170,7 @@ export default async function handler(req, res) {
     // 3. Chat history
     const apiKey = process.env.OPENROUTER_API_KEY;
     const msgLower = userMessage.toLowerCase();
+    const forgetIntentRequested = /\blupakan\b|\bforget\b|\bhapus memori\b|\bjangan ingat\b/.test(msgLower);
     const isCompactCheckpointRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(userMessage);
 
     const sessionState = session_id
@@ -753,6 +1230,20 @@ export default async function handler(req, res) {
       ...recentHistory.map(m => ({ role: m.role, content: m.content }))
     ];
 
+    const contextualPriorityBlock = [
+      '[USER MESSAGE]',
+      userMessage || '-',
+      '',
+      '[RELEVANT MEMORY]',
+      `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
+      `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
+      `Experiment mode: ${experimentProfile.mode}`,
+      memoryText || 'Tidak ada memori.',
+      '',
+      '[LAST CHAT]',
+      buildLastChatContext(recentHistory)
+    ].join('\n');
+
     // 4. Persona (sama)
     let targetPersona = persona_name;
     if (targetPersona === 'Auto') {
@@ -766,7 +1257,7 @@ export default async function handler(req, res) {
         targetPersona = 'Santai';
     }
     let personaList = [targetPersona];
-    if (/sayang|cinta/i.test(msgLower) && targetPersona !== 'Rosalia')
+    if (!consistency_mode && /sayang|cinta/i.test(msgLower) && targetPersona !== 'Rosalia')
       personaList = ['Santai', 'Rosalia'];
 
     const { data: personasData } = await supabase
@@ -784,7 +1275,7 @@ Keluarga:\n${familyContext}
 
 Relasi:\n${relationContext}
 
-Memori permanen:\n${memoryText}
+Konteks prioritas (WAJIB jadi rujukan awal):\n${contextualPriorityBlock}
 
 ${fileContext}
 
@@ -838,14 +1329,14 @@ ATURAN PENTING:
 
 ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
 - Kamu sedang mengenal ${person?.name} dari awal. Setiap percakapan adalah kesempatan untuk belajar tentangnya.
-- Jika kamu mendeteksi fakta baru tentang ${person?.name} (kebiasaan, preferensi, gaya komunikasi, topik favorit, cara belajar, emosi, pola kerja, dll), sisipkan tag memori di AKHIR responmu (setelah semua isi jawaban):
-  [MEMORY:key=value]
-- Contoh key yang berguna: gaya_komunikasi, topik_favorit, cara_belajar, jam_aktif, bahasa_sering_dipakai, masalah_berulang, preferensi_jawaban, karakter_umum
-- Contoh: [MEMORY:preferensi_jawaban=suka langsung ke kode tanpa penjelasan panjang]
-- Maksimal 2 tag [MEMORY:...] per respons.
-- Jangan duplikasi fakta yang sudah ada di "Memori permanen" di atas.
-- Jika fakta yang sudah ada ternyata berubah/salah, tulis ulang dengan key yang sama dan value yang diperbarui.
-- Tag [MEMORY:...] adalah instruksi sistem, JANGAN tampilkan ke user, letakkan di paling akhir respons.`
+- Jika kamu mendeteksi memori baru tentang ${person?.name} (pattern, kebiasaan, cara berpikir, preferensi, emosi, fakta), sisipkan tag memori terstruktur di AKHIR responmu:
+  [MEMORY:type=pattern;category=komunikasi;key=gaya_jawab;value=suka langsung ke inti]
+- memory type wajib salah satu: pattern, kebiasaan, cara_berpikir, preferensi, emosi, fakta.
+- Maksimal 3 tag [MEMORY:...] per respons.
+- Jika isi memori mirip dengan memori lama, tetap gunakan key yang paling relevan agar sistem melakukan update, bukan menambah duplikat.
+- Jika user meminta melupakan sesuatu, gunakan tag:
+  [MEMORY_FORGET:key=nama_memori]
+- Tag [MEMORY:...] dan [MEMORY_FORGET:...] adalah instruksi sistem internal, JANGAN tampilkan ke user, letakkan di paling akhir respons.`
     };
 
     // Buat sesi baru jika belum ada
@@ -917,6 +1408,13 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     }
 
     const modelConfig = getModelConfig(personaList);
+    const effectiveModelConfig = consistency_mode
+      ? {
+          ...modelConfig,
+          temperature: Math.min(modelConfig.temperature, 0.2),
+          top_p: Math.min(modelConfig.top_p, 0.85)
+        }
+      : modelConfig;
     const compactInstructionPrompt = isCompactCheckpointRequest
       ? {
           role: 'system',
@@ -950,52 +1448,45 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         }
       : null;
 
-        // ── OPENROUTER CALL + DETAILED LOGGING ──
-    console.log(`[OpenRouter] Mengirim request ke model: ${MAIN_MODEL}`);
+        // ── OPENROUTER CALL + RETRY/FALLBACK ──
+    const openRouterPayload = {
+      messages: [
+        systemPrompt,
+        ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
+        ...chatHistory,
+        {
+          role: 'user',
+          content: `${userMessage}${fileContext ? `\n\n📎 LAMPIRAN FILE:\n${fileContext}` : ''}`
+        }
+      ],
+      stream: true,
+      temperature: effectiveModelConfig.temperature,
+      max_tokens: effectiveModelConfig.max_tokens,
+      top_p: effectiveModelConfig.top_p
+    };
 
-    const aiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://aai.family',
-        'X-Title': 'AAi Keluarga'
-      },
-      body: JSON.stringify({
-  model: MAIN_MODEL,
-  messages: [
-    systemPrompt,
-    ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
-    ...chatHistory,
-    {
-      role: "user",
-      content: `${userMessage}${fileContext ? `\n\n📎 LAMPIRAN FILE:\n${fileContext}` : ''}`
-    }
-  ],
-  stream: true,
-  temperature: modelConfig.temperature,
-  max_tokens: modelConfig.max_tokens,
-  top_p: modelConfig.top_p
-})
-    });
+    const providerResult = await callOpenRouterWithRetry({ apiKey, payload: openRouterPayload });
+    if (!providerResult.ok) {
+      const errorDetail = providerResult.errorBody || 'Unknown error';
+      console.error('[OpenRouter] ERROR DETAIL:', {
+        status: providerResult.status,
+        statusText: providerResult.statusText,
+        model: providerResult.modelUsed,
+        retries: providerResult.retryCount,
+        fallback: providerResult.fallbackUsed,
+        errorDetail
+      });
 
-    console.log(`[OpenRouter] Status response: ${aiResponse.status} ${aiResponse.statusText}`);
-
-    if (!aiResponse.ok) {
-      let errorDetail = 'Unknown error';
-      try {
-        const errData = await aiResponse.json();
-        errorDetail = JSON.stringify(errData, null, 2);
-        console.error(`[OpenRouter] ERROR DETAIL:`, errData);
-      } catch (e) {
-        errorDetail = await aiResponse.text();
-        console.error(`[OpenRouter] Raw error text:`, errorDetail);
-      }
-
-      res.write(`data: ${JSON.stringify({ error: `Provider returned error - ${aiResponse.status} ${errorDetail}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: `Provider returned error - ${providerResult.status} ${errorDetail}` })}\n\n`);
       res.end();
       return;
     }
+
+    const aiResponse = providerResult.response;
+    const modelUsed = providerResult.modelUsed;
+    const retryCount = providerResult.retryCount;
+    const fallbackUsed = providerResult.fallbackUsed;
+    console.log(`[OpenRouter] Status response: ${aiResponse.status} ${aiResponse.statusText} | model=${modelUsed} | retries=${retryCount} | fallback=${fallbackUsed}`);
 
     const reader = aiResponse.body.getReader();
     const decoder = new TextDecoder();
@@ -1054,18 +1545,11 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
 
     // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
     if (fullReply.trim()) {
-      // ── PARSE & STRIP [MEMORY:key=value] TAGS ──
-      const memoryTagRegex = /\[MEMORY:([^\]=\n]+)=([^\]\n]+)\]/g;
-      const detectedMemories = [];
-      let cleanReply = fullReply;
-      let memMatch;
-      while ((memMatch = memoryTagRegex.exec(fullReply)) !== null) {
-        const key = memMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
-        const value = memMatch[2].trim();
-        if (key && value) detectedMemories.push({ key, value });
-        cleanReply = cleanReply.replace(memMatch[0], '');
-      }
-      cleanReply = cleanReply.trimEnd();
+      // ── PARSE & STRIP MEMORY CONTROL TAGS ──
+      const memoryOps = parseMemoryInstructionTags(fullReply);
+      const detectedMemories = memoryOps.memoryUpserts;
+      const detectedForgetKeys = memoryOps.forgetKeys;
+      let cleanReply = memoryOps.cleanReply;
 
       const clarifyStripResult = stripClarifyControlBlocks(cleanReply);
       cleanReply = clarifyStripResult.text.trimEnd();
@@ -1142,7 +1626,12 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         message_id: aiMsgData?.id,
         user_message_id: finalUserMessageId,
         preview_id: previewRecordId,
-        preview: shouldShowPreview ? previewPayload : null
+        preview: shouldShowPreview ? previewPayload : null,
+        persona_used: targetPersona,
+        model_used: modelUsed,
+        retry_count: retryCount,
+        fallback_used: fallbackUsed,
+        consistency_mode: !!consistency_mode
       })}\n\n`);
       res.flush?.();
 
@@ -1157,35 +1646,106 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         }
       }
 
-      // ── UPSERT MEMORI AI SECARA BACKGROUND ──
-      if (detectedMemories.length > 0 && user.person_id) {
+      // ── UPSERT/ARCHIVE MEMORI AI SECARA BACKGROUND ──
+      if ((detectedMemories.length > 0 || detectedForgetKeys.length > 0) && user.person_id) {
+        const { data: existingMemories } = await supabase
+          .from('person_memory')
+          .select('id, key, value, memory_type, category, status, observation_count')
+          .eq('person_id', user.person_id)
+          .in('status', ['active', 'archived']);
+
+        const memoryPool = Array.isArray(existingMemories) ? [...existingMemories] : [];
+
         for (const mem of detectedMemories) {
           try {
-            const { data: existing } = await supabase
-              .from('person_memory')
-              .select('id, observation_count')
-              .eq('person_id', user.person_id)
-              .eq('key', mem.key)
-              .maybeSingle();
+            const normalizedKey = normalizeMemoryKey(mem.key);
+            const normalizedType = normalizeMemoryType(mem.memoryType);
+            const exact = memoryPool.find(item =>
+              item.status === 'active' &&
+              normalizeMemoryType(item.memory_type) === normalizedType &&
+              normalizeMemoryKey(item.key) === normalizedKey
+            );
 
-            if (existing) {
+            const fuzzy = exact || memoryPool.find(item => {
+              if (item.status !== 'active') return false;
+              if (normalizeMemoryType(item.memory_type) !== normalizedType) return false;
+              return jaccardSimilarity(item.key, normalizedKey) >= 0.72;
+            });
+
+            if (fuzzy?.id) {
               await supabase.from('person_memory')
-                .update({ value: mem.value, source_message_id: aiMsgData?.id })
-                .eq('id', existing.id);
-            } else {
-              await supabase.from('person_memory')
-                .insert({
-                  person_id: user.person_id,
-                  key: mem.key,
+                .update({
+                  key: normalizedKey,
                   value: mem.value,
-                  confidence: 0.7,
-                  observation_count: 1,
-                  source_message_id: aiMsgData?.id
-                });
+                  memory_type: normalizedType,
+                  category: mem.category || 'umum',
+                  status: 'active',
+                  source_message_id: aiMsgData?.id,
+                  deleted_at: null,
+                  deleted_by: null,
+                  deletion_reason: null
+                })
+                .eq('id', fuzzy.id);
+              console.log(`[Memory] Update "${normalizedKey}" for person ${user.person_id}`);
+              continue;
             }
-            console.log(`[Memory] Upsert "${mem.key}" for person ${user.person_id}`);
+
+            const insertPayload = {
+              person_id: user.person_id,
+              key: normalizedKey,
+              value: mem.value,
+              memory_type: normalizedType,
+              category: mem.category || 'umum',
+              status: 'active',
+              confidence: 0.7,
+              observation_count: 1,
+              priority_score: computePriorityScore(0.7, 1),
+              source_message_id: aiMsgData?.id
+            };
+
+            const { data: insertedMemory } = await supabase
+              .from('person_memory')
+              .insert(insertPayload)
+              .select('id, key, value, memory_type, category, status, observation_count')
+              .single();
+
+            if (insertedMemory) memoryPool.push(insertedMemory);
+            console.log(`[Memory] Insert "${normalizedKey}" for person ${user.person_id}`);
           } catch (memErr) {
             console.error(`[Memory] Gagal upsert "${mem.key}":`, memErr.message);
+          }
+        }
+
+        if (forgetIntentRequested && detectedForgetKeys.length > 0) {
+          for (const rawKey of detectedForgetKeys) {
+            try {
+              const normalizedForgetKey = normalizeMemoryKey(rawKey);
+              const candidate = memoryPool.find(item => {
+                if (item.status !== 'active') return false;
+                const keySimilarity = jaccardSimilarity(item.key, normalizedForgetKey);
+                const valueSimilarity = jaccardSimilarity(item.value, normalizedForgetKey);
+                return normalizeMemoryKey(item.key) === normalizedForgetKey || keySimilarity >= 0.72 || valueSimilarity >= 0.78;
+              });
+
+              if (!candidate?.id) continue;
+
+              await supabase
+                .from('person_memory')
+                .update({
+                  status: 'archived',
+                  deletion_reason: 'user_forget_command',
+                  deleted_by: user.id,
+                  source_message_id: aiMsgData?.id
+                })
+                .eq('id', candidate.id)
+                .eq('status', 'active');
+
+              const poolIdx = memoryPool.findIndex(item => item.id === candidate.id);
+              if (poolIdx >= 0) memoryPool[poolIdx].status = 'archived';
+              console.log(`[Memory] Archive "${candidate.key}" for person ${user.person_id}`);
+            } catch (forgetErr) {
+              console.error(`[Memory] Gagal archive "${rawKey}":`, forgetErr.message);
+            }
           }
         }
       }
