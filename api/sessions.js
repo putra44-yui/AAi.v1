@@ -12,7 +12,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await supabase
       .from('sessions')
-      .select('id, title, updated_at')
+      .select('id, title, updated_at, compact_checkpoint_at')
       .eq('user_id', user_id)
       .order('updated_at', { ascending: false });
 

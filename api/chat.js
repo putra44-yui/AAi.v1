@@ -1,6 +1,7 @@
 export const maxDuration = 300;
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import { PDFParse } from 'pdf-parse';
 import { createClient } from '@supabase/supabase-js';
 
 let Document, Packer, Paragraph, TextRun;
@@ -10,11 +11,333 @@ const supabase = createClient(
 );
 
 const MAIN_MODEL = "qwen/qwen3.6-plus:free";
+const MEMORY_TAG_PREFIX = '[MEMORY:';
+const CLARIFY_BLOCK_START = '[AAI_CLARIFY]';
+const CLARIFY_BLOCK_END = '[/AAI_CLARIFY]';
+const MAX_HISTORY_MESSAGES = 7;
+const MAX_HISTORY_MESSAGES_COMPACT = 60;
+const HISTORY_SUMMARY_MAX_MESSAGES = 6;
+const HISTORY_SUMMARY_MAX_CHARS = 260;
+const CHECKPOINT_SUMMARY_START = '[SESSION_CHECKPOINT]';
+const CHECKPOINT_SUMMARY_END = '[/SESSION_CHECKPOINT]';
 
 const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
 
 function uniqueList(items = []) {
   return [...new Set(items.filter(Boolean))];
+}
+
+function sanitizeGeneratedFileBlock(content = '') {
+  let clean = String(content || '').replace(/\r/g, '').trim();
+  clean = clean.replace(/^```[a-zA-Z0-9_-]*\n?/i, '').replace(/\n?```$/, '');
+  return clean.trim();
+}
+
+function toSlug(input = '') {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function normalizeCellValue(value) {
+  return String(value == null ? '' : value)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function pickBestDelimiter(line = '') {
+  const delimiters = ['#', '\t', ';', ','];
+  let best = '#';
+  let bestCount = -1;
+
+  for (const delimiter of delimiters) {
+    const count = line.split(delimiter).length - 1;
+    if (count > bestCount) {
+      best = delimiter;
+      bestCount = count;
+    }
+  }
+
+  return best;
+}
+
+function parseDelimitedLines(rawContent = '') {
+  const clean = sanitizeGeneratedFileBlock(rawContent);
+  if (!clean) return [];
+
+  const lines = clean
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  if (!lines.length) return [];
+
+  const delimiter = pickBestDelimiter(lines[0]);
+  return lines.map(line => line.split(delimiter).map(cell => cell.trim()));
+}
+
+function parseXlsbRows(rawContent = '') {
+  return parseDelimitedLines(rawContent);
+}
+
+function parseSheetBlocks(rawContent = '') {
+  const clean = sanitizeGeneratedFileBlock(rawContent);
+  if (!clean) return [];
+
+  const blocks = [];
+  const regex = /\[\[SHEET:([^\]]+)\]\]([\s\S]*?)(?=(\[\[SHEET:[^\]]+\]\])|$)/g;
+  let match;
+
+  while ((match = regex.exec(clean)) !== null) {
+    const name = String(match[1] || '').trim();
+    const rows = parseDelimitedLines(match[2] || '');
+    if (!name || !rows.length) continue;
+    blocks.push({ name: name.slice(0, 31), rows });
+  }
+
+  if (blocks.length > 0) return blocks;
+
+  const rows = parseXlsbRows(clean);
+  if (!rows.length) return [];
+  return [{ name: 'Data', rows }];
+}
+
+function findJoinColumnIndex(headersA = [], headersB = []) {
+  const scoredCandidates = ['id', 'kode', 'nik', 'nip', 'email', 'no_hp', 'phone', 'nama'];
+
+  const normalizedA = headersA.map(h => toSlug(h));
+  const normalizedB = headersB.map(h => toSlug(h));
+
+  for (const key of scoredCandidates) {
+    const idxA = normalizedA.findIndex(h => h === key || h.endsWith(`_${key}`) || h.includes(key));
+    const idxB = normalizedB.findIndex(h => h === key || h.endsWith(`_${key}`) || h.includes(key));
+    if (idxA >= 0 && idxB >= 0) {
+      return { idxA, idxB, label: key };
+    }
+  }
+
+  for (let i = 0; i < normalizedA.length; i++) {
+    const idxB = normalizedB.indexOf(normalizedA[i]);
+    if (idxB >= 0) {
+      return { idxA: i, idxB, label: normalizedA[i] || 'kolom_sama' };
+    }
+  }
+
+  return { idxA: 0, idxB: 0, label: 'kolom_1' };
+}
+
+function buildSandingWorkbookSheets(sheetBlocks = []) {
+  if (sheetBlocks.length < 2) return sheetBlocks;
+
+  const sheetA = sheetBlocks[0];
+  const sheetB = sheetBlocks[1];
+
+  const [headerA = [], ...rowsA] = sheetA.rows;
+  const [headerB = [], ...rowsB] = sheetB.rows;
+
+  if (!headerA.length || !headerB.length) return sheetBlocks;
+
+  const { idxA, idxB } = findJoinColumnIndex(headerA, headerB);
+  const mapB = new Map();
+
+  for (const row of rowsB) {
+    const key = normalizeCellValue(row[idxB]);
+    if (!key) continue;
+    if (!mapB.has(key)) mapB.set(key, []);
+    mapB.get(key).push(row);
+  }
+
+  const headerMatched = [
+    ...headerA.map(h => `${sheetA.name}.${h || 'kolom'}`),
+    ...headerB.map(h => `${sheetB.name}.${h || 'kolom'}`)
+  ];
+
+  const matchedRows = [headerMatched];
+  const naRows = [headerMatched];
+  const emptyB = new Array(headerB.length).fill('#N/A');
+
+  for (const rowA of rowsA) {
+    const key = normalizeCellValue(rowA[idxA]);
+    const found = key ? mapB.get(key) : null;
+    if (found && found.length) {
+      for (const rowB of found) {
+        matchedRows.push([...rowA, ...rowB]);
+      }
+      continue;
+    }
+    naRows.push([...rowA, ...emptyB]);
+  }
+
+  return [
+    ...sheetBlocks,
+    { name: 'Data Berhasil Sanding', rows: matchedRows },
+    { name: 'Data Tidak Bersandingan', rows: naRows }
+  ];
+}
+
+function applyWorksheetColumnWidths(ws, rows = []) {
+  if (!rows.length) return;
+  const maxCols = Math.max(...rows.map(r => r.length), 0);
+  if (maxCols === 0) return;
+
+  const widths = Array.from({ length: maxCols }, (_, colIdx) => {
+    const maxLen = rows.reduce((acc, row) => {
+      const value = row[colIdx] == null ? '' : String(row[colIdx]);
+      return Math.max(acc, value.length);
+    }, 6);
+
+    return { wch: Math.min(60, Math.max(10, maxLen + 2)) };
+  });
+
+  ws['!cols'] = widths;
+}
+
+function createMemoryTagStreamFilter() {
+  let buffer = '';
+  let suppressingMemoryTag = false;
+
+  return function filterChunk(chunk = '', flush = false) {
+    if (chunk) buffer += chunk;
+
+    let visible = '';
+
+    while (buffer.length > 0) {
+      if (suppressingMemoryTag) {
+        const tagEndIndex = buffer.indexOf(']');
+        if (tagEndIndex === -1) {
+          if (flush) buffer = '';
+          break;
+        }
+
+        buffer = buffer.slice(tagEndIndex + 1);
+        suppressingMemoryTag = false;
+        continue;
+      }
+
+      const tagStartIndex = buffer.indexOf(MEMORY_TAG_PREFIX);
+      if (tagStartIndex !== -1) {
+        visible += buffer.slice(0, tagStartIndex);
+        buffer = buffer.slice(tagStartIndex + MEMORY_TAG_PREFIX.length);
+        suppressingMemoryTag = true;
+        continue;
+      }
+
+      if (flush) {
+        visible += buffer;
+        buffer = '';
+        break;
+      }
+
+      const safeLength = Math.max(0, buffer.length - (MEMORY_TAG_PREFIX.length - 1));
+      if (safeLength === 0) break;
+
+      visible += buffer.slice(0, safeLength);
+      buffer = buffer.slice(safeLength);
+    }
+
+    return visible;
+  };
+}
+
+function stripClarifyControlBlocks(text = '') {
+  const raw = String(text || '');
+  const startIdx = raw.indexOf(CLARIFY_BLOCK_START);
+  if (startIdx === -1) {
+    return { text: raw.trimEnd(), hadBlock: false };
+  }
+
+  const endIdx = raw.indexOf(CLARIFY_BLOCK_END, startIdx + CLARIFY_BLOCK_START.length);
+  const stripped = endIdx === -1
+    ? raw.slice(0, startIdx)
+    : `${raw.slice(0, startIdx)}${raw.slice(endIdx + CLARIFY_BLOCK_END.length)}`;
+
+  return {
+    text: stripped.replace(/\n{3,}/g, '\n\n').trimEnd(),
+    hadBlock: true
+  };
+}
+
+function extractCheckpointSummary(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+
+  const startIdx = raw.indexOf(CHECKPOINT_SUMMARY_START);
+  if (startIdx === -1) {
+    return compactHistoryMessage(raw, 2600);
+  }
+
+  const endIdx = raw.indexOf(CHECKPOINT_SUMMARY_END, startIdx + CHECKPOINT_SUMMARY_START.length);
+  const summaryText = endIdx === -1
+    ? raw.slice(startIdx + CHECKPOINT_SUMMARY_START.length)
+    : raw.slice(startIdx + CHECKPOINT_SUMMARY_START.length, endIdx);
+
+  return compactHistoryMessage(summaryText, 2600);
+}
+
+function stripCheckpointControlBlocks(text = '') {
+  const raw = String(text || '');
+  const startIdx = raw.indexOf(CHECKPOINT_SUMMARY_START);
+  if (startIdx === -1) {
+    return { text: raw.trimEnd(), hadBlock: false };
+  }
+
+  const endIdx = raw.indexOf(CHECKPOINT_SUMMARY_END, startIdx + CHECKPOINT_SUMMARY_START.length);
+  const stripped = endIdx === -1
+    ? raw.slice(0, startIdx)
+    : `${raw.slice(0, startIdx)}${raw.slice(endIdx + CHECKPOINT_SUMMARY_END.length)}`;
+
+  return {
+    text: stripped.replace(/\n{3,}/g, '\n\n').trimEnd(),
+    hadBlock: true
+  };
+}
+
+function compactHistoryMessage(content = '', maxChars = HISTORY_SUMMARY_MAX_CHARS) {
+  const normalized = String(content || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return '-';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 3)}...`;
+}
+
+function buildOlderHistorySummary(messages = []) {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const sampledMessages = messages.slice(-HISTORY_SUMMARY_MAX_MESSAGES);
+  const omittedCount = Math.max(0, messages.length - sampledMessages.length);
+  const lines = sampledMessages.map((message, index) => {
+    const roleLabel = message.role === 'assistant'
+      ? 'AI'
+      : message.role === 'user'
+        ? 'User'
+        : String(message.role || 'system');
+
+    return `${index + 1}. [${roleLabel}] ${compactHistoryMessage(message.content, HISTORY_SUMMARY_MAX_CHARS)}`;
+  });
+
+  return [
+    'Konteks percakapan yang lebih lama sudah dipadatkan agar tetap muat di konteks model.',
+    `Total pesan lama yang diringkas: ${messages.length}.`,
+    ...(omittedCount > 0 ? [`Pesan yang tidak ditampilkan penuh: ${omittedCount}.`] : []),
+    'Cuplikan inti konteks lama:',
+    ...lines
+  ].join('\n');
+}
+
+async function extractPdfText(buffer) {
+  const parser = new PDFParse({ data: buffer });
+
+  try {
+    const result = await parser.getText({ lineEnforce: true });
+    const text = String(result?.text || '').replace(/\n{3,}/g, '\n\n').trim();
+    return text;
+  } finally {
+    await parser.destroy().catch(() => {});
+  }
 }
 
 function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
@@ -133,13 +456,6 @@ function getModelConfig(personaList) {
   return configs[persona] || configs['Auto'];
 }
 
-function getModelName(personaList) {
-  const persona = personaList[0];
-  return persona === 'Coding' 
-    ? "qwen/qwen3.6-plus:free" 
-    : "qwen/qwen3.6-plus:free";
-}
-
 // ✅ HELPER: Upload Base64 ke Supabase Storage
 async function uploadFileToStorage(base64String, fileName, mimeType) {
   const base64 = base64String.split(',')[1];
@@ -220,8 +536,8 @@ export default async function handler(req, res) {
       files = [] // ← Terima array file dari frontend
     } = req.body;
 
-    const userMessage = message?.trim();
-    if (!userMessage && !edit_message_id) throw new Error("Pesan tidak boleh kosong");
+    const userMessage = String(message || '').trim();
+    if (!userMessage) throw new Error("Pesan tidak boleh kosong");
 
         // ====================== EDIT PESAN (UPDATE) ======================
     if (edit_message_id) {
@@ -244,7 +560,7 @@ export default async function handler(req, res) {
       }
     }
 
-        // ✅ PROSES FILE + EKSTRAK TEKS (TXT, XLSX, DOCX, GAMBAR)
+        // ✅ PROSES FILE + EKSTRAK TEKS (TXT, JS, HTML, XLSX, DOCX, GAMBAR)
     let fileContext = '';
     if (files && files.length > 0) {
       console.log(`[Files] Menerima ${files.length} file.`);
@@ -259,9 +575,11 @@ export default async function handler(req, res) {
 
           const base64Data = f.base64.split(',')[1];
           const buffer = Buffer.from(base64Data, 'base64');
+          const fileNameLower = String(f.name || '').toLowerCase();
+          const mimeType = String(f.type || '').toLowerCase();
 
           // 1. Excel (.xlsx, .xls)
-          if (f.type.includes('sheet') || f.name.match(/\.xlsx?$/i)) {
+          if (mimeType.includes('sheet') || fileNameLower.match(/\.xlsx?$/i)) {
             const workbook = XLSX.read(buffer, { type: 'buffer' });
             const sheetName = workbook.SheetNames[0];
             const sheet = workbook.Sheets[sheetName];
@@ -269,20 +587,44 @@ export default async function handler(req, res) {
             textContents.push(`📊 ${f.name} (Sheet: ${sheetName}):\n${csv}`);
           }
           // 2. Word (.docx)
-          else if (f.type.includes('word') || f.name.match(/\.docx$/i)) {
+          else if (mimeType.includes('officedocument.wordprocessingml.document') || fileNameLower.endsWith('.docx')) {
             const result = await mammoth.extractRawText({ buffer });
             textContents.push(`📝 ${f.name}:\n${result.value}`);
           }
-          // 3. Teks biasa (.txt)
-          else if (f.type === 'text/plain' || f.name.toLowerCase().endsWith('.txt')) {
+          // 3. Word lama (.doc)
+          else if (mimeType === 'application/msword' || fileNameLower.endsWith('.doc')) {
+            textContents.push(`⚠️ ${f.name}: file Word lama (.doc) berhasil diunggah, tetapi ekstraksi isi format legacy ini belum diaktifkan di server.`);
+          }
+          // 4. PDF
+          else if (mimeType === 'application/pdf' || fileNameLower.endsWith('.pdf')) {
+            const pdfText = await extractPdfText(buffer);
+            if (pdfText) {
+              textContents.push(`📕 ${f.name} (PDF):\n${pdfText}`);
+            } else {
+              textContents.push(`⚠️ ${f.name}: PDF berhasil diunggah, tetapi teks tidak terdeteksi. Kemungkinan PDF berbentuk scan/gambar.`);
+            }
+          }
+          // 5. Teks biasa (.txt)
+          else if (mimeType === 'text/plain' || fileNameLower.endsWith('.txt')) {
             textContents.push(`📄 ${f.name}:\n${buffer.toString('utf-8')}`);
           }
-          // 4. Gambar (URL saja, model vision nanti bisa baca)
-          else if (f.type.startsWith('image/')) {
+          // 6. JavaScript (.js, .mjs, .cjs)
+          else if (/javascript/i.test(mimeType) || fileNameLower.match(/\.(?:js|mjs|cjs)$/i)) {
+            textContents.push(`💻 ${f.name} (JavaScript):\n${buffer.toString('utf-8')}`);
+          }
+          // 7. HTML (.html, .htm)
+          else if (mimeType === 'text/html' || fileNameLower.match(/\.html?$/i)) {
+            textContents.push(`🌐 ${f.name} (HTML):\n${buffer.toString('utf-8')}`);
+          }
+          // 8. Gambar (URL saja, model vision nanti bisa baca)
+          else if (mimeType.startsWith('image/')) {
             textContents.push(`🖼️ ${f.name}: ${url}`);
+          } else {
+            textContents.push(`⚠️ ${f.name}: file berhasil diunggah, tetapi belum ada extractor khusus untuk format ini. Jika isi perlu dianalisis presisi, kirim versi .txt, .docx, .xlsx, .html, atau .js.`);
           }
         } catch (e) {
           console.error(`⚠️ Gagal ekstrak ${f.name}:`, e.message);
+          textContents.push(`⚠️ ${f.name}: ekstraksi gagal di server (${e.message}). File tetap diunggah, tetapi isi mungkin belum terbaca penuh.`);
         }
       }
 
@@ -322,7 +664,13 @@ export default async function handler(req, res) {
       .from('relationships')
       .select('person_a(name,role), person_b(name,role), relation_type');
     const relationContext = (relations || [])
-      .map(r => `- ${r.person_a.name} (${r.person_a.role}) ${r.relation_type} ${r.person_b.name} (${r.person_b.role})`)
+      .map(r => {
+        const personA = r.person_a;
+        const personB = r.person_b;
+        if (!personA?.name || !personB?.name) return null;
+        return `- ${personA.name} (${personA.role}) ${r.relation_type} ${personB.name} (${personB.role})`;
+      })
+      .filter(Boolean)
       .join('\n') || 'Belum ada relasi.';
 
     const { data: memories } = await supabase
@@ -345,6 +693,20 @@ export default async function handler(req, res) {
 
     // 3. Chat history
     const apiKey = process.env.OPENROUTER_API_KEY;
+    const msgLower = userMessage.toLowerCase();
+    const isCompactCheckpointRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(userMessage);
+
+    const sessionState = session_id
+      ? ((await supabase
+          .from('sessions')
+          .select('*')
+          .eq('id', session_id)
+          .maybeSingle()).data || null)
+      : null;
+
+    const persistedCheckpointSummary = String(sessionState?.compact_checkpoint_summary || '').trim();
+    const checkpointMessageId = sessionState?.compact_checkpoint_message_id || null;
+
     const chatHistoryRows = session_id
       ? ((await supabase.from('messages').select('id, role, content')
           .eq('session_id', session_id).order('created_at', { ascending: true })).data || [])
@@ -359,14 +721,40 @@ export default async function handler(req, res) {
       if (assistantIndex >= 0) historyCutoffIndex = assistantIndex;
     }
 
-    const chatHistory = chatHistoryRows
+    const filteredHistory = chatHistoryRows
       .slice(0, historyCutoffIndex)
-      .filter(m => m.id !== targetAssistantMessageId)
-      .map(m => ({ role: m.role, content: m.content }));
+      .filter(m => m.id !== targetAssistantMessageId);
+
+    const checkpointIndex = checkpointMessageId
+      ? filteredHistory.findIndex(m => m.id === checkpointMessageId)
+      : -1;
+
+    const checkpointScopedHistory = checkpointMessageId
+      ? (checkpointIndex >= 0 ? filteredHistory.slice(checkpointIndex + 1) : [])
+      : filteredHistory;
+
+    const effectiveMaxHistory = isCompactCheckpointRequest
+      ? MAX_HISTORY_MESSAGES_COMPACT
+      : MAX_HISTORY_MESSAGES;
+
+    const olderHistorySummary = checkpointScopedHistory.length > effectiveMaxHistory
+      ? buildOlderHistorySummary(checkpointScopedHistory.slice(0, -effectiveMaxHistory))
+      : '';
+
+    const recentHistory = checkpointScopedHistory.length > effectiveMaxHistory
+      ? checkpointScopedHistory.slice(-effectiveMaxHistory)
+      : checkpointScopedHistory;
+
+    const chatHistory = [
+      ...(persistedCheckpointSummary
+        ? [{ role: 'system', content: `Checkpoint sesi aktif (gunakan sebagai konteks utama):\n${persistedCheckpointSummary}` }]
+        : []),
+      ...(olderHistorySummary ? [{ role: 'system', content: olderHistorySummary }] : []),
+      ...recentHistory.map(m => ({ role: m.role, content: m.content }))
+    ];
 
     // 4. Persona (sama)
     let targetPersona = persona_name;
-    const msgLower = userMessage.toLowerCase();
     if (targetPersona === 'Auto') {
       if (/kritik|brutal|roasting|sedih|curhat|nangis|galau|kecewa|capek|stres/i.test(msgLower))
         targetPersona = 'Kritikus Brutal';
@@ -418,13 +806,46 @@ ATURAN PENTING:
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.
 - Jika ada URL gambar/file di atas, sebutkan bahwa file berhasil diterima dan berikan link jika relevan.
 - Jika user melampirkan file/teks, WAJIB konfirmasi dulu: "File [nama] berhasil dibaca. Berikut ringkasannya:" sebelum menjawab pertanyaan utama.
+- Jika user melampirkan file .js/.mjs/.cjs, baca sebagai kode JavaScript dan gunakan isinya sebagai konteks utama.
+- Lampiran gambar/file hanya konteks. Jangan otomatis menganggap user ingin generate file; nilai dulu tujuan dari isi percakapannya.
 - Jika user minta buat file, WAJIB gunakan format: [FILE_START:nama_file.ext] (isi konten) [FILE_END]. Gunakan .txt untuk teks, .xlsb untuk tabel (pisahkan kolom dengan tanda #, BUKAN koma), .docx untuk dokumen.
+- Untuk file .xlsb, gunakan format tabel rapi dengan header di baris pertama. Jika ada 2 dataset/sheet, gunakan format ini agar backend bisa auto-sanding:
+  [[SHEET:Data_A]]
+  kolom1#kolom2#kolom3
+  ...
+  [[SHEET:Data_B]]
+  kolom1#kolomX#kolomY
+  ...
+  Backend akan menambahkan 2 sheet hasil: "Data Berhasil Sanding" dan "Data Tidak Bersandingan" (#N/A).
+- Jika kamu butuh data tambahan sebelum bisa menjawab atau mengeksekusi dengan tepat, JANGAN langsung lanjut ke solusi final.
+- Tulis dulu penjelasan singkat 1-3 kalimat untuk user, lalu WAJIB tambahkan blok kontrol TANPA markdown di akhir respons dengan format persis berikut:
+  [AAI_CLARIFY]
+  {"title":"Perlu data lanjutan","description":"...","submit_label":"Lanjutkan Dengan Jawaban Ini","questions":[{"key":"tujuan","label":"...","options":["A. ...","B. ...","C. ..."]}]}
+  [/AAI_CLARIFY]
+- Aturan blok klarifikasi:
+  1) JSON wajib valid, tanpa trailing comma, tanpa komentar, tanpa markdown.
+  2) Isi 1-4 pertanyaan, tiap pertanyaan 2-4 opsi singkat.
+  3) key wajib huruf kecil + underscore.
+  4) Gunakan mekanisme ini untuk file, kode, gambar, atau percakapan umum jika konteks masih kurang.
+  5) Jika memakai blok ini, JANGAN beri hasil final dulu. Tunggu jawaban user berikutnya.
+  6) Jika memakai blok ini, JANGAN tambahkan tag [MEMORY:...] di respons itu.
 - Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download.
 - Jangan abaikan konten lampiran. Gunakan sebagai konteks utama jika relevan.
 - Jika user minta macro/VBA, WAJIB buat 2 file terpisah:
   1. [FILE_START:data_nama.xlsb] (data tabel, pisah kolom dengan #) [FILE_END]
   2. [FILE_START:macro_nama.bas] (kode VBA lengkap, tanpa markdown) [FILE_END]
-- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download + instruksi singkat: "Alt+F11 → File → Import Module → pilih .bas → Run".`
+- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download + instruksi singkat: "Alt+F11 → File → Import Module → pilih .bas → Run".
+
+ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
+- Kamu sedang mengenal ${person?.name} dari awal. Setiap percakapan adalah kesempatan untuk belajar tentangnya.
+- Jika kamu mendeteksi fakta baru tentang ${person?.name} (kebiasaan, preferensi, gaya komunikasi, topik favorit, cara belajar, emosi, pola kerja, dll), sisipkan tag memori di AKHIR responmu (setelah semua isi jawaban):
+  [MEMORY:key=value]
+- Contoh key yang berguna: gaya_komunikasi, topik_favorit, cara_belajar, jam_aktif, bahasa_sering_dipakai, masalah_berulang, preferensi_jawaban, karakter_umum
+- Contoh: [MEMORY:preferensi_jawaban=suka langsung ke kode tanpa penjelasan panjang]
+- Maksimal 2 tag [MEMORY:...] per respons.
+- Jangan duplikasi fakta yang sudah ada di "Memori permanen" di atas.
+- Jika fakta yang sudah ada ternyata berubah/salah, tulis ulang dengan key yang sama dan value yang diperbarui.
+- Tag [MEMORY:...] adalah instruksi sistem, JANGAN tampilkan ke user, letakkan di paling akhir respons.`
     };
 
     // Buat sesi baru jika belum ada
@@ -496,6 +917,38 @@ ATURAN PENTING:
     }
 
     const modelConfig = getModelConfig(personaList);
+    const compactInstructionPrompt = isCompactCheckpointRequest
+      ? {
+          role: 'system',
+          content: `MODE: COMPACT_CHECKPOINT
+- Jawaban HARUS berbasis data yang sudah ada di riwayat chat/sesi ini.
+- Jangan menambah fakta baru. Jika tidak ada data, tulis: "Belum ada data".
+- Untuk setiap poin, bedakan jelas mana yang terverifikasi dan mana asumsi.
+- Fokus untuk planning kerja/ngoding: detail, rapi, dan siap eksekusi.
+- Jawaban ke user susun dengan bagian ini jika relevan:
+  1. Ringkasan kondisi terkini
+  2. Fakta atau keputusan yang sudah pasti
+  3. Perubahan kode/file/artefak penting
+  4. Risiko, kendala, atau asumsi aktif
+  5. Next step paling masuk akal
+- WAJIB sertakan blok ringkasan sesi final di AKHIR jawaban (tanpa markdown):
+  [SESSION_CHECKPOINT]
+  Tujuan utama:
+  - ...
+  Status terbaru:
+  - ...
+  Keputusan penting:
+  - ...
+  File/artefak penting:
+  - ...
+  Constraint/risiko:
+  - ...
+  Next step:
+  - ...
+  [/SESSION_CHECKPOINT]
+- Ringkasan checkpoint harus berdiri sendiri, menyatukan konteks lama + konteks baru, maksimum 2200 karakter dan tetap padat.`
+        }
+      : null;
 
         // ── OPENROUTER CALL + DETAILED LOGGING ──
     console.log(`[OpenRouter] Mengirim request ke model: ${MAIN_MODEL}`);
@@ -512,6 +965,7 @@ ATURAN PENTING:
   model: MAIN_MODEL,
   messages: [
     systemPrompt,
+    ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
     ...chatHistory,
     {
       role: "user",
@@ -547,6 +1001,7 @@ ATURAN PENTING:
     const decoder = new TextDecoder();
     let fullReply = '';
     let buffer = '';
+    const filterVisibleToken = createMemoryTagStreamFilter();
     const heartbeat = setInterval(() => {
       try {
         res.write(': ping\n\n');
@@ -565,8 +1020,11 @@ ATURAN PENTING:
           const token = parsed.choices?.[0]?.delta?.content || '';
           if (token) {
             fullReply += token;
-            res.write(`data: ${JSON.stringify({ token })}\n\n`);
-            res.flush?.();
+            const visibleToken = filterVisibleToken(token, false);
+            if (visibleToken) {
+              res.write(`data: ${JSON.stringify({ token: visibleToken })}\n\n`);
+              res.flush?.();
+            }
           }
         } catch {}
       }
@@ -583,6 +1041,11 @@ ATURAN PENTING:
       // Flush decoder + sisa buffer
       buffer += decoder.decode();
       if (buffer.trim()) processSSEBuffer(buffer + '\n');
+      const finalVisibleToken = filterVisibleToken('', true);
+      if (finalVisibleToken) {
+        res.write(`data: ${JSON.stringify({ token: finalVisibleToken })}\n\n`);
+        res.flush?.();
+      }
     } catch (streamErr) {
       console.error("Stream error:", streamErr.message);
     } finally {
@@ -591,13 +1054,44 @@ ATURAN PENTING:
 
     // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
     if (fullReply.trim()) {
-      // 1. Simpan dulu ke DB (raw reply, biar cepat)
+      // ── PARSE & STRIP [MEMORY:key=value] TAGS ──
+      const memoryTagRegex = /\[MEMORY:([^\]=\n]+)=([^\]\n]+)\]/g;
+      const detectedMemories = [];
+      let cleanReply = fullReply;
+      let memMatch;
+      while ((memMatch = memoryTagRegex.exec(fullReply)) !== null) {
+        const key = memMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
+        const value = memMatch[2].trim();
+        if (key && value) detectedMemories.push({ key, value });
+        cleanReply = cleanReply.replace(memMatch[0], '');
+      }
+      cleanReply = cleanReply.trimEnd();
+
+      const clarifyStripResult = stripClarifyControlBlocks(cleanReply);
+      cleanReply = clarifyStripResult.text.trimEnd();
+      if (!cleanReply && clarifyStripResult.hadBlock) {
+        cleanReply = 'Aku butuh beberapa detail tambahan dulu. Pilih opsi di kotak yang muncul, atau isi lainnya.';
+      }
+
+      const checkpointSummaryToPersist = isCompactCheckpointRequest
+        ? extractCheckpointSummary(cleanReply)
+        : '';
+
+      if (isCompactCheckpointRequest) {
+        const checkpointStripResult = stripCheckpointControlBlocks(cleanReply);
+        cleanReply = checkpointStripResult.text.trimEnd();
+        if (!cleanReply && checkpointStripResult.hadBlock) {
+          cleanReply = 'Checkpoint sesi berhasil diperbarui. Konteks lama sudah dipadatkan.';
+        }
+      }
+
+      // 1. Simpan dulu ke DB (clean reply tanpa memory tags)
       let aiMsgData;
       if (targetAssistantMessageId) {
         const { data: updatedAssistant, error: updateAssistantErr } = await supabase
           .from('messages')
           .update({
-            content: fullReply,
+            content: cleanReply,
             parent_id: finalUserMessageId || edit_message_id
           })
           .eq('id', targetAssistantMessageId)
@@ -612,7 +1106,7 @@ ATURAN PENTING:
           .insert({
             session_id: currentSessionId,
             role: 'assistant',
-            content: fullReply,
+            content: cleanReply,
             parent_id: finalUserMessageId || edit_message_id
           })
           .select()
@@ -625,6 +1119,21 @@ ATURAN PENTING:
       await supabase.from('sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', currentSessionId);
+
+      if (isCompactCheckpointRequest && currentSessionId && aiMsgData?.id) {
+        try {
+          await supabase
+            .from('sessions')
+            .update({
+              compact_checkpoint_summary: checkpointSummaryToPersist || compactHistoryMessage(cleanReply, 2600),
+              compact_checkpoint_message_id: aiMsgData.id,
+              compact_checkpoint_at: new Date().toISOString()
+            })
+            .eq('id', currentSessionId);
+        } catch (checkpointErr) {
+          console.error('[Checkpoint] Gagal simpan checkpoint sesi:', checkpointErr.message);
+        }
+      }
 
       // 2. Kirim event `done` ke client SEGERA
       res.write(`data: ${JSON.stringify({
@@ -648,17 +1157,51 @@ ATURAN PENTING:
         }
       }
 
+      // ── UPSERT MEMORI AI SECARA BACKGROUND ──
+      if (detectedMemories.length > 0 && user.person_id) {
+        for (const mem of detectedMemories) {
+          try {
+            const { data: existing } = await supabase
+              .from('person_memory')
+              .select('id, observation_count')
+              .eq('person_id', user.person_id)
+              .eq('key', mem.key)
+              .maybeSingle();
+
+            if (existing) {
+              await supabase.from('person_memory')
+                .update({ value: mem.value, source_message_id: aiMsgData?.id })
+                .eq('id', existing.id);
+            } else {
+              await supabase.from('person_memory')
+                .insert({
+                  person_id: user.person_id,
+                  key: mem.key,
+                  value: mem.value,
+                  confidence: 0.7,
+                  observation_count: 1,
+                  source_message_id: aiMsgData?.id
+                });
+            }
+            console.log(`[Memory] Upsert "${mem.key}" for person ${user.person_id}`);
+          } catch (memErr) {
+            console.error(`[Memory] Gagal upsert "${mem.key}":`, memErr.message);
+          }
+        }
+      }
+
       // 3. File processing di background (setelah client sudah dapat `done`)
       try {
         const fileRegex = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
         let match;
-        let processedReply = fullReply;
+        let processedReply = cleanReply;
         let hasFiles = false;
+        const fileSourceText = cleanReply;
 
-        while ((match = fileRegex.exec(fullReply)) !== null) {
+        while ((match = fileRegex.exec(fileSourceText)) !== null) {
           hasFiles = true;
           const filename = match[1].trim();
-          let content = match[2].trim();
+          const content = sanitizeGeneratedFileBlock(match[2]);
           const ext = filename.split('.').pop().toLowerCase();
 
           let buffer;
@@ -667,13 +1210,24 @@ ATURAN PENTING:
               buffer = Buffer.from(content, 'utf-8');
             } 
             else if (ext === 'bas' || ext === 'vba') {
-              buffer = Buffer.from(content, 'utf-8');
+              const normalizedVba = content.replace(/\n/g, '\r\n');
+              buffer = Buffer.from(normalizedVba, 'utf-8');
             } 
             else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
-              const rows = content.split('\n').map(row => row.split('#').map(c => c.trim()));
-              const ws = XLSX.utils.aoa_to_sheet(rows);
+              const parsedSheets = parseSheetBlocks(content);
+              if (!parsedSheets.length) {
+                throw new Error('Konten tabel kosong. Gunakan format kolom dengan pemisah # di setiap baris.');
+              }
+
+              const sheetsToBuild = buildSandingWorkbookSheets(parsedSheets);
               const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, 'Data');
+
+              for (const sheet of sheetsToBuild) {
+                const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
+                applyWorksheetColumnWidths(ws, sheet.rows);
+                XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
+              }
+
               buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
             } 
             else if (ext === 'docx') {
@@ -747,7 +1301,7 @@ async function generateTitle(apiKey, userMessage, sessionId) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "qwen/qwen3.6-plus:free", // ← Hardcode biar nggak error
+        model: MAIN_MODEL,
         messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
       })

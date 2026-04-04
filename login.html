@@ -243,7 +243,12 @@
       if (!res.ok) throw new Error(data.error || 'Login gagal.');
 
       // Simpan ke localStorage
-      localStorage.setItem('aai_user', JSON.stringify({ id: data.user.id, username: data.user.username }));
+      localStorage.setItem('aai_user', JSON.stringify({
+        id: data.user.id,
+        username: data.user.username,
+        family_role: data.user.family_role || null,
+        person_name: data.user.person_name || data.user.username
+      }));
       window.location.href = '/';
 
     } catch (e) {

@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, username')
+    .select('id, username, person_id')
     .eq('username', username.trim().toLowerCase())
     .single();
 
@@ -26,5 +26,24 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: `Username "${username}" tidak ditemukan.` });
   }
 
-  return res.status(200).json({ user });
+  let familyRole = null;
+  let personName = null;
+  if (user?.person_id) {
+    const { data: person } = await supabase
+      .from('persons')
+      .select('name, role')
+      .eq('id', user.person_id)
+      .maybeSingle();
+    familyRole = person?.role || null;
+    personName = person?.name || null;
+  }
+
+  return res.status(200).json({
+    user: {
+      id: user.id,
+      username: user.username,
+      family_role: familyRole,
+      person_name: personName
+    }
+  });
 }
