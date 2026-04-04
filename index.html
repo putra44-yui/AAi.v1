@@ -7,6 +7,10 @@
 <link rel="icon" type="image/gif" href="/ayaka.gif">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<!-- ✅ HIGHLIGHT.JS — syntax highlighting untuk code box -->
+ <link href="https://fonts.googleapis.com/css2?family=Space+Mono&family=Share+Tech+Mono&family=Orbitron&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <style>
 :root {
   --blue-light:  #c8eaf5;
@@ -18,6 +22,23 @@
   --radius:      24px;
   --shadow-sm:   0 4px 12px rgba(138,234,245,.15);
   --shadow-md:   0 10px 30px rgba(138,234,245,.22);
+}
+.code-window pre.hljs-pre::-webkit-scrollbar { height: 6px; }
+.code-window pre.hljs-pre::-webkit-scrollbar-track { background: #161b22; }
+.code-window pre.hljs-pre::-webkit-scrollbar-thumb { background: #484f58; border-radius: 3px; }
+.code-window pre.hljs-pre::-webkit-scrollbar-thumb:hover { background: #58a6ff; }
+.code-window pre.hljs-pre {
+  margin: 0;
+  padding: 0 0 16px 0;
+  background: transparent !important;
+  font-family: 'Space Mono', 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 14.6px;
+  line-height: 1.65;
+  font-weight: 370;
+  letter-spacing: 0.32px;
+  tab-size: 4;
+  overflow-x: auto;
+  white-space: pre;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -218,37 +239,173 @@ body::before {
 .bubble pre code { background: transparent; padding: 0; color: inherit; }
 .bubble table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
 .bubble th, .bubble td { border: 1px solid var(--blue-light); padding: 8px; text-align: left; }
-
-/* ── CODE WINDOW (VISUAL SEPARATION & DARKER) ── */
+.bubble ol, .bubble ul { padding-left: 22px; margin: 10px 0; }
+.bubble li { margin-bottom: 6px; line-height: 1.65; }
+.bubble li::marker { color: var(--blue-dark); font-weight: 700; }
+/* ── CODE WINDOW ── */
 .code-window {
-  background: #0d1117; border-radius: 12px; margin: 16px 0;
-  overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,.35); border: 1px solid #30363d;
   position: relative;
+  border-radius: 12px;
+  overflow: visible; /* hapus spasi berlebih di sini */
+  margin: 16px 0 48px; /* top 16px, right/left 0, bottom 32px */
+  border: 1px solid #30363d;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  background: #0d1117;
+  display: flex;
+  flex-direction: column;
 }
 .code-window::before {
-  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, #58a6ff, #bc8cff);
+  content: ''; 
+  position: absolute; 
+  top: 0; left: 0; right: 0; 
+  height: 3px;
+  background: linear-gradient(90deg, #58a6ff, #bc8cff, #5ab4d4);
+  z-index: 1;
 }
-.bubble p + .code-window, .bubble .code-window + p { margin-top: 12px; }
+.bubble p + .code-window, 
+.bubble .code-window + p { 
+  margin-top: 0px; 
+}
+
+
 .code-header {
-  display: flex; justify-content: space-between; align-items: center;
-  background: #161b22; padding: 8px 14px; color: #8b949e;
-  font-size: 12px; border-bottom: 1px solid #30363d;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 50 !important;
+  
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;             
+  
+  border-bottom: none !important;
+  box-shadow: none !important;
+  
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+/* Saat di-scroll tetap transparan total */
+.code-window.scrolled .code-header {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-bottom: none !important;
+}
+
+/* Scroll area (scrollbar x tetap nempel di bawah) */
+.code-scroll-area {
+  overflow-x: auto;
+  overflow-y: visible;
+  background: #0d1117;
+  max-height: none;
+  padding: 0 16px 24px 16px;
+}
+/* ── SCROLLBAR KEREN & TIPIS ── */
+.code-scroll-area::-webkit-scrollbar {
+  height: 5px;                    /* tipis tapi masih kelihatan elegan */
+  background: transparent;
+}
+
+.code-scroll-area::-webkit-scrollbar-track {
+  background: #161b22;
+  border-radius: 9999px;
+  margin: 0 8px;                  /* biar tidak terlalu mepet pinggir */
+}
+
+.code-scroll-area::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, #58a6ff, #a78bfa);
+  border-radius: 9999px;
+  box-shadow: 0 1px 4px rgba(88, 166, 255, 0.5);
+}
+
+.code-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(90deg, #79c0ff, #c9b6ff);
+  box-shadow: 0 0 8px rgba(121, 192, 255, 0.7);
+}
+
+/* Firefox support */
+.code-scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: #58a6ff #161b22;
+}
+
+
+
+.code-header-lang {
+  font-weight: 500;
+  font-family: ui-monospace, monospace;
+  color: #79c0ff;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-header-lang .lang-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: currentColor; opacity: .7; display: inline-block;
 }
 .code-header-actions { display: flex; gap: 12px; align-items: center; }
-.code-window pre {
-  margin: 0; padding: 14px;
-  overflow-x: auto; overflow-y: auto; max-height: 50vh;
-  color: #c9d1d9; font-family: ui-monospace, monospace;
-  font-size: 13.5px; white-space: pre;
+
+/* ── HIGHLIGHT.JS OVERRIDES untuk background hitam ── */
+.code-window pre.hljs-pre {
+  margin: 0;
+  padding: 16px 0 0 0;
+  overflow: visible;
+  max-height: none;
+  background: #0d1117 !important;
+  font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  line-height: 1.2;
+  letter-spacing: 0.3px;
+  tab-size: 2;
   transition: all .3s ease;
+  -webkit-overflow-scrolling: touch;
 }
-.code-window pre.minimized { display: none; }
+.code-window pre.hljs-pre.minimized { display: none; }
+.code-window pre.hljs-pre code.hljs {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+/* Warna token hljs — disesuaikan dengan latar hitam #0d1117 */
+.hljs-keyword, .hljs-selector-tag, .hljs-tag    { color: #ff7b72; font-weight: 400 !important; } /* merah-oranye */
+.hljs-built_in, .hljs-builtin-name              { color: #ffa657; }                   /* oranye terang */
+.hljs-type, .hljs-class .hljs-title             { color: #ffa657; font-weight: 400 !important;}
+.hljs-string, .hljs-attr, .hljs-template-tag    { color: #a5d6ff; }                   /* biru muda */
+.hljs-title, .hljs-section, .hljs-title.function__{ color: #d2a8ff; font-weight: 400 !important;}/* ungu */
+.hljs-comment, .hljs-quote                      { color: #8b949e; font-style: italic; }
+.hljs-number, .hljs-literal, .hljs-variable     { color: #79c0ff; }                   /* biru */
+.hljs-params                                    { color: #e6edf3; }
+.hljs-addition                                  { color: #aff5b4; background: #033a16; }
+.hljs-deletion                                  { color: #ffdcd7; background: #67060c; }
+.hljs-meta                                      { color: #f2cc60; }
+.hljs-operator, .hljs-punctuation               { color: #ff7b72; }
+.hljs-property                                  { color: #79c0ff; }
+.hljs-selector-class, .hljs-selector-id         { color: #d2a8ff; }
+
+/* ── EXCEL FORMULA SYNTAX COLORS ── */
+.excel-fn       { color: #ffa657; font-weight: 500 !important; }   /* fungsi: SUM, IF, … */
+.excel-op       { color: #ff7b72; }                     /* operator: = + - * / */
+.excel-str      { color: #a5d6ff; }                     /* string: "teks" */
+.excel-num      { color: #79c0ff; }                     /* angka */
+.excel-ref      { color: #d2a8ff; }                     /* referensi sel: A1, B2:C5 */
+.excel-sheet    { color: #f2cc60; }                     /* nama sheet: Sheet1! */
+.excel-bool     { color: #ff7b72; font-weight: 500 !important;}   /* TRUE / FALSE */
+.excel-error    { color: #ffa198; font-style: italic; } /* #REF!, #N/A, dll */
+
 .copy-code-btn {
   background: none; border: none; color: #8b949e; cursor: pointer;
   display: flex; align-items: center; gap: 6px; font-size: 12px; transition: .2s;
+  padding: 3px 8px; border-radius: 6px;
 }
-.copy-code-btn:hover { color: #58a6ff; transform: scale(1.05); }
+.copy-code-btn:hover { color: #58a6ff; background: rgba(88,166,255,.1); transform: scale(1.05); }
 
 /* ── STREAMING CURSOR ── */
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
@@ -286,8 +443,8 @@ body::before {
 .msg-actions button:hover { color: var(--blue-dark); transform: scale(1.15); }
 .user-actions {
   display: flex; justify-content: flex-end; align-items: center;
-  margin-top: 8px; gap: 16px; color: var(--text-muted);
-  padding-right: 4px;
+  margin-top: 6px; gap: 6px; 
+  color: var(--text-muted); padding-right: 0; 
 }
 .user-actions button {
   background: none; border: none; color: inherit;
@@ -339,40 +496,21 @@ body::before {
   box-shadow: var(--shadow-md);
   transition: background .3s, border-color .3s;
 }
-.input-wrap.code-mode {
-  background: #1a2540;
-  border-color: var(--blue-mid);
-  border-radius: 16px;
-  align-items: flex-start;
-  padding: 12px 16px;
-}
-.code-mode-badge {
-  display: none;
-  font-size: 11px; font-weight: 700;
-  color: var(--blue-mid); font-family: ui-monospace, monospace;
-  padding: 2px 8px; background: rgba(90,180,212,.15);
-  border-radius: 8px; white-space: nowrap;
-  align-self: flex-start; margin-top: 2px;
-}
-.input-wrap.code-mode .code-mode-badge { display: flex; align-items: center; gap: 4px; }
 
 /* ── UPLOAD BUTTON & PREVIEW ── */
 .upload-container { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; padding-bottom: 4px; }
 .upload-btn { width: 36px; height: 36px; border-radius: 50%; background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: .2s; font-size: 18px; }
 .upload-btn:hover { color: var(--blue-mid); transform: scale(1.1); }
-/* ✅ CONTAINER PREVIEW DI ATAS TEXTAREA */
 .file-preview-container {
   display: flex; flex-wrap: wrap; gap: 12px;
   padding: 12px 16px 8px; max-width: 100%;
-  min-height: 0; 
+  min-height: 0;
   transition: opacity 0.3s ease, transform 0.3s ease, padding 0.3s ease;
 }
 .file-preview-container:empty { display: none; padding: 0; }
 .file-preview-container.fading-out {
   opacity: 0; transform: translateY(-8px); pointer-events: none;
 }
-
-/* ✅ KARTU PREVIEW (LEBIH BESAR & "NGGAK PELIT") */
 .file-preview-item {
   position: relative; background: #fff;
   border: 2px solid var(--blue-light); border-radius: 16px;
@@ -382,7 +520,6 @@ body::before {
   transition: transform .2s, box-shadow .2s;
 }
 .file-preview-item:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
-
 .file-preview-item img {
   width: 100%; height: 100%; object-fit: cover;
   border-radius: 10px; flex: 1;
@@ -404,18 +541,11 @@ body::before {
 .file-preview-item .remove-file:hover { transform: scale(1.15); background: #c0392b; }
 
 #messageInput {
-  flex: 1; min-width: 0;
+  flex: 1; min-width: 0;  font-family: 'DM Sans', sans-serif; 
   border: none; background: transparent;
   font-size: 15px; outline: none; resize: none;
   max-height: 120px; line-height: 1.5; padding: 8px 0;
   color: var(--text);
-  transition: font-family .2s, color .2s, font-size .2s;
-}
-#messageInput.code-mode {
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  color: #c8eaf5;
-  max-height: 200px;
 }
 
 .send-btn {
@@ -504,6 +634,17 @@ body::before {
   .msg-row.user { max-width: 90%; }
   .session-actions { opacity: 1; }
 }
+
+.code-window .code-scroll-area {
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  overflow: hidden !important;
+}
+
+.code-window.minimized .code-scroll-area {
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -553,7 +694,6 @@ body::before {
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
-  <!-- ✅ PREVIEW GAMBAR/FILE DI ATAS TEXTAREA -->
   <div id="filePreview" class="file-preview-container"></div>
 
   <div class="input-wrap" id="inputWrap">
@@ -563,13 +703,7 @@ body::before {
         <i class="fas fa-paperclip"></i>
       </button>
     </div>
-
-    <span class="code-mode-badge"><i class="fas fa-code" style="font-size:10px;"></i> CODE</span>
-    <textarea id="messageInput" rows="1"
-      placeholder="Ketik pesan…"
-      onkeydown="handleKey(event)"
-      oninput="autoResize(this); detectCodeMode(this);"
-      onpaste="setTimeout(() => detectCodeMode(this), 10);"></textarea>
+    <textarea id="messageInput" rows="1" placeholder="Ketik pesan…" onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
     <div class="settings-wrapper">
       <button class="settings-btn" onclick="toggleSettingsMenu()" title="Persona">
         <i class="fas fa-sliders-h"></i>
@@ -664,41 +798,138 @@ function speakText(btn, text) {
   speechSynthesis.speak(currentUtterance);
 }
 
-// ══════════════════════════════════════════
-// DETEKSI CODE MODE (FIX: Bisa keluar dengan Enter/teks biasa)
-// ══════════════════════════════════════════
-function detectCodeMode(textarea) {
-  const val = textarea.value.trim();
-  const wrap = document.getElementById('inputWrap');
-  const lines = val.split('\n');
-  const lastLine = lines[lines.length - 1].trim();
 
-  // Cek apakah ada pola kode
-  const hasCodePattern = /function |const |let |var |class |=>|import |export|def |print\(|async |await|SELECT |INSERT|UPDATE|FROM|```/i.test(val);
-  
-  // Jika baris terakhir kosong atau berisi teks percakapan biasa, matikan code mode
-  const isEndingWithNormalText = lastLine === '' || /^[a-z\s.,!?'"()\-]+$/i.test(lastLine);
-
-  if (hasCodePattern && !isEndingWithNormalText) {
-    textarea.classList.add('code-mode');
-    wrap.classList.add('code-mode');
-    textarea.placeholder = 'Mode kode aktif…';
-  } else {
-    textarea.classList.remove('code-mode');
-    wrap.classList.remove('code-mode');
-    textarea.placeholder = 'Ketik pesan…';
-  }
-}
 
 function getMessageText() {
   const inp = document.getElementById('messageInput');
   let text = inp.value.trim();
   if (!text) return '';
-  if (text.includes('```')) return text;
-  if (inp.classList.contains('code-mode')) {
-    return '```\n' + text + '\n```';
-  }
   return text;
+}
+
+// ══════════════════════════════════════════
+// SYNTAX HIGHLIGHTING — EXCEL FORMULA
+// Menghighlight formula Excel dengan warna token berbeda
+// ══════════════════════════════════════════
+const EXCEL_FUNCTIONS = [
+  'ABS','ACOS','ACOSH','ADDRESS','AND','AREAS','ASIN','ASINH','ATAN','ATAN2','ATANH',
+  'AVERAGE','AVERAGEA','AVERAGEIF','AVERAGEIFS','BASE','CEILING','CELL','CHAR','CHOOSE',
+  'CLEAN','CODE','COLUMN','COLUMNS','COMBIN','COMPLEX','CONCATENATE','CONCAT','COS','COSH',
+  'COUNT','COUNTA','COUNTBLANK','COUNTIF','COUNTIFS','DATE','DATEVALUE','DAY','DAYS','DAYS360',
+  'DB','DCOUNT','DDB','DELTA','DEVSQ','DGET','DMAX','DMIN','DPRODUCT','DSTDEV','DSUM',
+  'DURATION','EDATE','EOMONTH','ERROR.TYPE','EXACT','EXP','FACT','FALSE','FILTER','FIND',
+  'FLOOR','FORECAST','FV','FVSCHEDULE','GETPIVOTDATA','GROWTH','HLOOKUP','HOUR','HYPERLINK',
+  'IF','IFERROR','IFNA','IFS','INDEX','INDIRECT','INFO','INT','INTERCEPT','IPMT','IRR','ISBLANK',
+  'ISERR','ISERROR','ISEVEN','ISLOGICAL','ISNA','ISNONTEXT','ISNUMBER','ISODD','ISREF','ISTEXT',
+  'LARGE','LEFT','LEN','LINEST','LN','LOG','LOG10','LOOKUP','LOWER','MATCH','MAX','MAXA','MAXIFS',
+  'MEDIAN','MID','MIN','MINA','MINIFS','MINUTE','MIRR','MOD','MODE','MONTH','MROUND','N','NA',
+  'NETWORKDAYS','NOT','NOW','NPER','NPV','NUMBERVALUE','ODD','OFFSET','OR','PERCENTILE',
+  'PERCENTRANK','PERIOD','PI','PMT','PPMT','PRODUCT','PROPER','PV','QUARTILE','QUOTIENT',
+  'RADIANS','RAND','RANDBETWEEN','RANK','RATE','REPLACE','REPT','RIGHT','ROMAN','ROUND',
+  'ROUNDDOWN','ROUNDUP','ROW','ROWS','SEARCH','SECOND','SIGN','SIN','SINH','SLOPE','SMALL',
+  'SORT','SORTBY','SQRT','STDEV','STDEVA','SUBSTITUTE','SUM','SUMIF','SUMIFS','SUMPRODUCT',
+  'SWITCH','T','TAN','TANH','TEXT','TIME','TIMEVALUE','TODAY','TRANSPOSE','TRIM','TRUE',
+  'TRUNC','TYPE','UNIQUE','UPPER','VALUE','VLOOKUP','WEEKDAY','WEEKNUM','WORKDAY','XIRR',
+  'XLOOKUP','XMATCH','XNPV','YEAR','YEARFRAC'
+].join('|');
+
+function highlightExcel(rawText) {
+  // Escape HTML dulu
+  let s = rawText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // 1. String "teks" → biru muda
+  s = s.replace(/"([^"]*)"/g, '<span class="excel-str">"$1"</span>');
+
+  // 2. Error Excel (#REF!, #N/A, #VALUE!, dll)
+  s = s.replace(/#(REF!|N\/A|VALUE!|DIV\/0!|NULL!|NUM!|NAME\?|SPILL!|CALC!|GETTING_DATA)/g,
+    '<span class="excel-error">#$1</span>');
+
+  // 3. Nama Sheet diikuti tanda seru (Sheet1! atau 'My Sheet'!)
+  s = s.replace(/('(?:[^']|'')*'|[A-Za-z_\u00C0-\u024F][A-Za-z0-9_\u00C0-\u024F]*)(!)/g,
+    '<span class="excel-sheet">$1$2</span>');
+
+  // 4. Fungsi Excel (sebelum tanda kurung)
+  const fnRe = new RegExp('\\b(' + EXCEL_FUNCTIONS + ')(?=\\s*\\()', 'g');
+  s = s.replace(fnRe, '<span class="excel-fn">$1</span>');
+
+  // 5. TRUE / FALSE
+  s = s.replace(/\b(TRUE|FALSE)\b/g, '<span class="excel-bool">$1</span>');
+
+  // 6. Referensi sel: A1, $B$2, A1:C5, R1C1, dll
+  s = s.replace(/\b(\$?[A-Za-z]{1,3}\$?\d+(?::\$?[A-Za-z]{1,3}\$?\d+)?)\b/g,
+    '<span class="excel-ref">$1</span>');
+
+  // 7. Angka
+  s = s.replace(/(?<![a-zA-Z"])(-?\b\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?%?)\b/g,
+    '<span class="excel-num">$1</span>');
+
+  // 8. Operator = + - * / & ^ < > ,
+  s = s.replace(/([=+\-*/&^<>,])/g, '<span class="excel-op">$1</span>');
+
+  return s;
+}
+
+// ══════════════════════════════════════════
+// AUTO-DETECT LANGUAGE
+// ══════════════════════════════════════════
+const LANG_DOTS = {
+  javascript: '#f0db4f', python: '#3572A5', html: '#e34c26',
+  css: '#563d7c', sql: '#e38c00', bash: '#89e051',
+  java: '#b07219', 'c++': '#f34b7d', typescript: '#2b7489',
+  excel: '#1d6f42', json: '#292929', xml: '#0060ac',
+  php: '#4F5D95', ruby: '#701516', go: '#00ADD8',
+  rust: '#dea584', swift: '#ffac45', kotlin: '#A97BFF',
+  dart: '#00B4AB', shell: '#89e051', powershell: '#012456',
+  yaml: '#cb171e', markdown: '#083fa1', code: '#8b949e'
+};
+
+function detectLanguage(code, hintLang) {
+  const c = code.trim();
+
+  // Jika ada hint dari fenced code block
+  if (hintLang) {
+    const h = hintLang.toLowerCase();
+    if (h === 'excel' || h === 'xlsx' || h === 'formula') return 'excel';
+    return h;
+  }
+
+  // Excel formula: dimulai dengan =FunctionName( atau =CellRef atau array formula {=
+  if (/^[{]?=\s*[A-Z]/.test(c) || /^=\s*(SUM|IF|VLOOKUP|INDEX|MATCH|COUNTIF|SUMIF|AVERAGE|MAX|MIN|IFERROR|AND|OR|XLOOKUP|FILTER|SORT|UNIQUE|TEXT|DATE|NOW|TODAY)\s*\(/i.test(c)) {
+    return 'excel';
+  }
+  // Jika banyak baris dimulai dengan =
+  const lines = c.split('\n').filter(l => l.trim());
+  if (lines.length > 0 && lines.filter(l => /^\s*=/.test(l)).length / lines.length > 0.5) {
+    return 'excel';
+  }
+
+  // Gunakan hljs auto-detect jika tersedia
+  if (typeof hljs !== 'undefined') {
+    try {
+      const result = hljs.highlightAuto(c, [
+        'javascript','typescript','python','html','css','sql','bash','shell',
+        'java','cpp','json','xml','yaml','php','ruby','go','rust','swift','kotlin','dart','powershell'
+      ]);
+      return result.language || 'code';
+    } catch { return 'code'; }
+  }
+  return 'code';
+}
+
+function applyHighlight(code, lang) {
+  if (lang === 'excel') return highlightExcel(code);
+  if (typeof hljs === 'undefined') return escHtml(code);
+  try {
+    if (lang && lang !== 'code' && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  } catch {
+    return escHtml(code);
+  }
 }
 
 // ══════════════════════════════════════════
@@ -784,6 +1015,7 @@ async function processStream(response, streamId, onDone) {
       }
     }
   }
+  setTimeout(initStickyCodeHeaders, 600);
 }
 
 // ══════════════════════════════════════════
@@ -854,10 +1086,9 @@ async function sendMessage(text, files = []) {
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
       bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error') 
-        ? '⚠️ Provider error – cek koneksi / API key' 
+      const errorMsg = e.message.includes('Provider returned error')
+        ? '⚠️ Provider error – cek koneksi / API key'
         : e.message;
-      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -943,10 +1174,9 @@ async function executeRegenerate(text, userMessageId = null) {
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
       bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error') 
-        ? '⚠️ Provider error – cek koneksi / API key' 
+      const errorMsg = e.message.includes('Provider returned error')
+        ? '⚠️ Provider error – cek koneksi / API key'
         : e.message;
-      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -1101,10 +1331,9 @@ async function sendMessageBranched(text, parentId = null) {
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
       bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error') 
-        ? '⚠️ Provider error – cek koneksi / API key' 
+      const errorMsg = e.message.includes('Provider returned error')
+        ? '⚠️ Provider error – cek koneksi / API key'
         : e.message;
-      
       bubbleEl.innerHTML = `
         <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
         <button onclick="retryLastMessage(this)"
@@ -1275,6 +1504,7 @@ function renderMessageTree() {
     });
   });
   scrollBottom();
+  setTimeout(initStickyCodeHeaders, 400);
 }
 
 // ══════════════════════════════════════════
@@ -1341,9 +1571,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       metadata.files.forEach(f => {
         const isImage = f.type && f.type.startsWith('image/');
         const name = f.name || 'file';
-        
         if (isImage && f.base64) {
-          // Escape base64 agar tidak pecah di HTML
           const safeSrc = f.base64.replace(/"/g, '&quot;');
           filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
         } else {
@@ -1390,45 +1618,83 @@ function copyFullAI(btn) {
 }
 
 // ══════════════════════════════════════════
-// MARKED RENDERER
+// MARKED RENDERER — dengan hljs + Excel
 // ══════════════════════════════════════════
 const renderer = new marked.Renderer();
+
 renderer.code = function(code, language) {
-  const lang = language || 'code';
-  const text = typeof code === 'string' ? code : code.text;
+  // Marked v2 vs v4 compat
+  const rawLang = (typeof code === 'object' ? (code.lang || '') : (language || ''));
+  const text    = typeof code === 'object' ? (code.text || code) : code;
+
+  // Auto-detect bahasa
+  const lang = detectLanguage(String(text), rawLang ? rawLang.toLowerCase() : '');
+
+  // Syntax highlighting
+  const highlighted = applyHighlight(String(text), lang);
+
+  // Warna titik di header sesuai bahasa
+  const dotColor = LANG_DOTS[lang] || LANG_DOTS['code'];
+
   return `<div class="code-window">
-    <div class="code-header">
-      <span style="text-transform:uppercase;font-weight:600;letter-spacing:.5px;">${lang}</span>
-      <div class="code-header-actions">
-        <button class="copy-code-btn" onclick="toggleCodeWindow(this)">
-          <i class="fas fa-chevron-up"></i> <span class="btn-text">Minimize</span>
-        </button>
-        <button class="copy-code-btn" onclick="copyCodeWindow(this)">
-          <i class="fas fa-copy"></i> Copy
-        </button>
-      </div>
+  <div class="code-header">
+    <span class="code-header-lang">
+      <span class="lang-dot" style="background:${dotColor};color:${dotColor};"></span>
+      ${lang ? lang.charAt(0).toUpperCase() + lang.slice(1).toLowerCase() : 'Code'}
+    </span>
+    <div class="code-header-actions">
+      <button class="copy-code-btn" onclick="toggleCodeWindow(this)">
+        <i class="fas fa-chevron-up"></i> <span class="btn-text">Minimize</span>
+      </button>
+      <button class="copy-code-btn" onclick="copyCodeWindow(this)">
+        <i class="fas fa-copy"></i> Copy
+      </button>
     </div>
-    <pre><code>${escHtml(text)}</code></pre>
-  </div>`;
+  </div>
+  <div class="code-scroll-area">
+    <pre class="hljs-pre"><code class="hljs">${highlighted}</code></pre>
+  </div>
+</div>`;
 };
+
 marked.setOptions({ renderer, breaks: true });
 
 function copyCodeWindow(btn) {
   const pre = btn.closest('.code-window').querySelector('pre');
   navigator.clipboard.writeText(pre.textContent);
   const orig = btn.innerHTML;
-  btn.innerHTML = '<i class="fas fa-check"></i> Copied!'; btn.style.color = '#fff';
-  setTimeout(() => { btn.innerHTML = orig; btn.style.color = '#c8eaf5'; }, 2000);
+  btn.innerHTML = '<i class="fas fa-check"></i> Copied!'; btn.style.color = '#a5d6ff';
+  setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
 }
 function toggleCodeWindow(btn) {
-  const pre  = btn.closest('.code-window').querySelector('pre');
-  const icon = btn.querySelector('i');
-  const span = btn.querySelector('.btn-text');
-  const min  = pre.classList.toggle('minimized');
-  icon.className   = min ? 'fas fa-chevron-down' : 'fas fa-chevron-up';
-  span.textContent = min ? 'Expand' : 'Minimize';
-}
+  const codeWindow = btn.closest('.code-window');
+  const scrollArea = codeWindow.querySelector('.code-scroll-area');
+  const pre        = codeWindow.querySelector('pre');
+  const icon       = btn.querySelector('i');
+  const span       = btn.querySelector('.btn-text');
 
+  const isMin = codeWindow.classList.toggle('minimized');
+
+  if (isMin) {
+    // Collapse
+    pre.classList.add('minimized');
+    scrollArea.style.maxHeight = '0px';
+    icon.className = 'fas fa-chevron-down';
+    span.textContent = 'Expand';
+    codeWindow.classList.remove('scrolled');
+  } else {
+    // Expand
+    pre.classList.remove('minimized');
+    scrollArea.style.maxHeight = scrollArea.scrollHeight + 'px';
+    icon.className = 'fas fa-chevron-up';
+    span.textContent = 'Minimize';
+
+    // Reset supaya bisa scroll lagi setelah animasi
+    setTimeout(() => {
+      scrollArea.style.maxHeight = 'none';
+    }, 350);
+  }
+}
 function formatContent(text) {
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
   let html = marked.parse(text);
@@ -1477,17 +1743,51 @@ document.addEventListener('click', e => {
 });
 
 // ══════════════════════════════════════════
-// INPUT & UPLOAD HANDLER
+// ✅ FIX 1: ENTER KEY — HP = ganti baris, Desktop = kirim
 // ══════════════════════════════════════════
 function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  if (e.key !== 'Enter' || e.shiftKey) return;
+
+  const inp = document.getElementById('messageInput');
+  const val = inp.value;
+  const pos = inp.selectionStart;
+
+  // Cari baris aktif saat ini
+  const lineStart  = val.lastIndexOf('\n', pos - 1) + 1;
+  const currentLine = val.substring(lineStart, pos);
+
+  // Cocokkan pola "1. teks" atau "12. teks"
+  const match = currentLine.match(/^(\d+)\.\s(.*)/);
+  if (match) {
+    e.preventDefault();
+    if (match[2].trim() === '') {
+      // Item kosong → batalkan list, hapus "N. " di baris ini
+      inp.value = val.substring(0, lineStart) + val.substring(pos);
+      inp.selectionStart = inp.selectionEnd = lineStart;
+    } else {
+      // Lanjutkan penomoran
+      const next = parseInt(match[1]) + 1;
+      const ins  = '\n' + next + '. ';
+      inp.value = val.substring(0, pos) + ins + val.substring(pos);
+      inp.selectionStart = inp.selectionEnd = pos + ins.length;
+    }
+    autoResize(inp);
+    return;
+  }
+
+  const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  if (!isTouchDevice) {
+    e.preventDefault();
+    handleSend();
+  }
 }
+
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
 }
 
-// ← File Upload Logic
+// ── File Upload Logic ──
 document.getElementById('fileInput').addEventListener('change', function(e) {
   const files = Array.from(e.target.files);
   files.forEach(file => {
@@ -1499,7 +1799,6 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
   this.value = '';
 });
 
-// ✅ RENDER PREVIEW (TARGET CONTAINER BARU + STRUKTUR LEBIH BESAR)
 function renderFilePreview() {
   const container = document.getElementById('filePreview');
   container.innerHTML = '';
@@ -1507,10 +1806,9 @@ function renderFilePreview() {
     const div = document.createElement('div');
     div.className = 'file-preview-item';
     const isImage = file.type.startsWith('image/');
-
     div.innerHTML = `
-      ${isImage 
-        ? `<img src="${URL.createObjectURL(file)}" alt="preview">` 
+      ${isImage
+        ? `<img src="${URL.createObjectURL(file)}" alt="preview">`
         : `<i class="fas fa-file-alt file-icon"></i>`
       }
       <div class="file-name">${file.name}</div>
@@ -1530,7 +1828,6 @@ function removeFile(index) {
   renderFilePreview();
 }
 
-// ✅ HELPER: File ke Base64
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1540,17 +1837,6 @@ function fileToBase64(file) {
   });
 }
 
-// ✅ HELPER: File ke Base64 (aman & async)
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-  });
-}
-
-// ✅ GANTI handleSend() LAMA
 async function handleSend() {
   const inp = document.getElementById('messageInput');
   const text = inp.value.trim();
@@ -1569,19 +1855,12 @@ async function handleSend() {
       name: f.name, type: f.type, base64: await fileToBase64(f)
     })));
 
-    // Reset input teks
     inp.value = ''; autoResize(inp);
-    inp.classList.remove('code-mode');
-    document.getElementById('inputWrap').classList.remove('code-mode');
-
-    // Fade-out preview halus
     const previewContainer = document.getElementById('filePreview');
     previewContainer.classList.add('fading-out');
 
-    // Kirim pesan (UI append + streaming)
     sendMessage(text, filesPayload);
 
-    // Bersihkan state setelah animasi selesai
     setTimeout(() => {
       selectedFiles = [];
       renderFilePreview();
@@ -1613,6 +1892,33 @@ function logout() {
   }
 }
 
+// === STICKY HEADER + TRANSPARENT BACKGROUND ===
+function initStickyCodeHeaders() {
+  document.querySelectorAll('.code-window').forEach(codeWindow => {
+    const scrollArea = codeWindow.querySelector('.code-scroll-area');
+    
+    if (scrollArea) {
+      const handleScroll = () => {
+        if (scrollArea.scrollTop > 12) {
+          codeWindow.classList.add('scrolled');
+        } else {
+          codeWindow.classList.remove('scrolled');
+        }
+      };
+      
+      scrollArea.addEventListener('scroll', handleScroll);
+      
+      // Reset saat pertama kali
+      handleScroll();
+    }
+  });
+}
+
+
+
+
+
+
 // ══════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════
@@ -1623,6 +1929,8 @@ async function initApp() {
   else newChat();
 }
 document.addEventListener('DOMContentLoaded', initApp);
+document.addEventListener('DOMContentLoaded', initStickyCodeHeaders);
+setTimeout(initStickyCodeHeaders, 600);
 </script>
 </body>
 </html>
