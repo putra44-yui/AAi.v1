@@ -1,4 +1,4 @@
-export const maxDuration = 60;
+export const maxDuration = 300;
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import { createClient } from '@supabase/supabase-js';
@@ -86,6 +86,8 @@ export default async function handler(req, res) {
         const {
       message, session_id, user_id, username,
       persona_name = 'Auto', parent_id = null, user_message_id = null,
+      assistant_message_id = null,
+      update_only = false,
       edit_message_id = null,
       files = [] // ← Terima array file dari frontend
     } = req.body;
@@ -103,14 +105,15 @@ export default async function handler(req, res) {
 
       if (updateErr) throw new Error("Gagal update pesan user: " + updateErr.message);
 
-      // Hapus semua jawaban AI lama yang sudah tidak relevan
-      await supabase
-        .from('messages')
-        .delete()
-        .eq('parent_id', edit_message_id)
-        .eq('role', 'assistant');
+      console.log(`✅ Pesan ${edit_message_id} berhasil di-update`);
 
-      console.log(`✅ Pesan ${edit_message_id} berhasil di-update & AI lama dihapus`);
+      if (update_only) {
+        return res.status(200).json({
+          success: true,
+          message_id: edit_message_id,
+          updated_only: true
+        });
+      }
     }
 
         // ✅ PROSES FILE + EKSTRAK TEKS (TXT, XLSX, DOCX, GAMBAR)
@@ -198,12 +201,40 @@ export default async function handler(req, res) {
       .from('person_memory').select('key, value').eq('person_id', user.person_id);
     const memoryText = memories?.map(m => `${m.key}: ${m.value}`).join('\n') || 'Tidak ada memori.';
 
+    let targetAssistantMessageId = assistant_message_id || null;
+    if (!targetAssistantMessageId && edit_message_id) {
+      const { data: existingAssistant } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('session_id', session_id)
+        .eq('parent_id', edit_message_id)
+        .eq('role', 'assistant')
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      targetAssistantMessageId = existingAssistant?.id || null;
+    }
+
     // 3. Chat history
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const chatHistory = session_id
-      ? ((await supabase.from('messages').select('role, content')
+    const chatHistoryRows = session_id
+      ? ((await supabase.from('messages').select('id, role, content')
           .eq('session_id', session_id).order('created_at', { ascending: true })).data || [])
       : [];
+
+    let historyCutoffIndex = chatHistoryRows.length;
+    if (edit_message_id) {
+      const editedIndex = chatHistoryRows.findIndex(m => m.id === edit_message_id);
+      if (editedIndex >= 0) historyCutoffIndex = editedIndex + 1;
+    } else if (targetAssistantMessageId) {
+      const assistantIndex = chatHistoryRows.findIndex(m => m.id === targetAssistantMessageId);
+      if (assistantIndex >= 0) historyCutoffIndex = assistantIndex;
+    }
+
+    const chatHistory = chatHistoryRows
+      .slice(0, historyCutoffIndex)
+      .filter(m => m.id !== targetAssistantMessageId)
+      .map(m => ({ role: m.role, content: m.content }));
 
     // 4. Persona (sama)
     let targetPersona = persona_name;
@@ -279,7 +310,7 @@ ATURAN PENTING:
     }
 
     // Simpan pesan user (kecuali kalau edit)
-    let finalUserMessageId = user_message_id;
+    let finalUserMessageId = edit_message_id || user_message_id;
     if (!edit_message_id && !finalUserMessageId) {
       let effectiveParentId = parent_id;
       if (!effectiveParentId) {
@@ -354,124 +385,171 @@ ATURAN PENTING:
     const decoder = new TextDecoder();
     let fullReply = '';
     let buffer = '';
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {}
+    }, 10000);
+
+    function processSSEBuffer(buf) {
+      const lines = buf.split('\n');
+      const remainder = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (raw === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(raw);
+          const token = parsed.choices?.[0]?.delta?.content || '';
+          if (token) {
+            fullReply += token;
+            res.write(`data: ${JSON.stringify({ token })}\n\n`);
+            res.flush?.();
+          }
+        } catch {}
+      }
+      return remainder;
+    }
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const raw = line.slice(6).trim();
-          if (raw === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(raw);
-            const token = parsed.choices?.[0]?.delta?.content || '';
-            if (token) {
-              fullReply += token;
-              res.write(`data: ${JSON.stringify({ token })}\n\n`);
-              res.flush?.();
-            }
-          } catch {}
-        }
+        buffer = processSSEBuffer(buffer);
       }
+      // Flush decoder + sisa buffer
+      buffer += decoder.decode();
+      if (buffer.trim()) processSSEBuffer(buffer + '\n');
     } catch (streamErr) {
       console.error("Stream error:", streamErr.message);
+    } finally {
+      clearInterval(heartbeat);
     }
 
-    // Simpan AI response ke DB
-        // ✅ AUTO GENERATE FILE (TXT, XLSB, BAS, DOCX)
+    // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
     if (fullReply.trim()) {
-      const fileRegex = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
-      let match;
-      while ((match = fileRegex.exec(fullReply)) !== null) {
-        const filename = match[1].trim();
-        let content = match[2].trim();
-        const ext = filename.split('.').pop().toLowerCase();
+      // 1. Simpan dulu ke DB (raw reply, biar cepat)
+      let aiMsgData;
+      if (targetAssistantMessageId) {
+        const { data: updatedAssistant, error: updateAssistantErr } = await supabase
+          .from('messages')
+          .update({
+            content: fullReply,
+            parent_id: finalUserMessageId || edit_message_id
+          })
+          .eq('id', targetAssistantMessageId)
+          .select()
+          .single();
 
-        let buffer;
-        try {
-          if (ext === 'txt') {
-            buffer = Buffer.from(content, 'utf-8');
-          } 
-          else if (ext === 'bas' || ext === 'vba') {
-            // Macro VBA → plain text, siap import ke Excel
-            buffer = Buffer.from(content, 'utf-8');
-          } 
-          else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
-            const rows = content.split('\n').map(row => row.split('#').map(c => c.trim()));
-            const ws = XLSX.utils.aoa_to_sheet(rows);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Data');
-            buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
-          } 
-          else if (ext === 'docx') {
-  // Dynamic import docx di sini
-  const docx = await import('docx');
-  Document = docx.Document;
-  Packer = docx.Packer;
-  Paragraph = docx.Paragraph;
-  TextRun = docx.TextRun;
+        if (updateAssistantErr) throw updateAssistantErr;
+        aiMsgData = updatedAssistant;
+      } else {
+        const { data: insertedAssistant, error: insertAssistantErr } = await supabase
+          .from('messages')
+          .insert({
+            session_id: currentSessionId,
+            role: 'assistant',
+            content: fullReply,
+            parent_id: finalUserMessageId || edit_message_id
+          })
+          .select()
+          .single();
 
-  const paragraphs = content.split('\n').map(line =>
-    new Paragraph({ 
-      children: [new TextRun({ text: line, font: 'Arial', size: 24 })] 
-    })
-  );
-  const doc = new Document({ sections: [{ children: paragraphs }] });
-  buffer = await Packer.toBuffer(doc);
-
-          } else {
-            buffer = Buffer.from(content, 'utf-8');
-          }
-
-          const filePath = `generations/${Date.now()}-${filename}`;
-          const mimeMap = {
-            'xlsb': 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
-            'bas': 'text/plain',
-            'vba': 'text/plain',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-          };
-
-          const { error } = await supabase.storage.from('aai-files').upload(filePath, buffer, {
-            contentType: mimeMap[ext] || 'text/plain',
-            upsert: false
-          });
-
-          if (!error) {
-            const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
-            fullReply = fullReply.replace(match[0], `📥 **[Download ${filename}](${publicUrl})**`);
-          } else {
-            fullReply = fullReply.replace(match[0], `⚠️ Gagal upload: ${error.message}`);
-          }
-        } catch (e) {
-          console.error(`⚠️ Gagal generate ${filename}:`, e.message);
-          fullReply = fullReply.replace(match[0], `⚠️ Error: ${e.message}`);
-        }
+        if (insertAssistantErr) throw insertAssistantErr;
+        aiMsgData = insertedAssistant;
       }
-
-      // Simpan respons bersih ke DB
-      const { data: aiMsgData } = await supabase.from('messages').insert({
-        session_id: currentSessionId,
-        role: 'assistant',
-        content: fullReply,
-        parent_id: finalUserMessageId || edit_message_id
-      }).select().single();
 
       await supabase.from('sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', currentSessionId);
 
+      // 2. Kirim event `done` ke client SEGERA
       res.write(`data: ${JSON.stringify({
         done: true,
         session_id: currentSessionId,
         message_id: aiMsgData?.id,
         user_message_id: finalUserMessageId
       })}\n\n`);
+      res.flush?.();
+
+      // 3. File processing di background (setelah client sudah dapat `done`)
+      try {
+        const fileRegex = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
+        let match;
+        let processedReply = fullReply;
+        let hasFiles = false;
+
+        while ((match = fileRegex.exec(fullReply)) !== null) {
+          hasFiles = true;
+          const filename = match[1].trim();
+          let content = match[2].trim();
+          const ext = filename.split('.').pop().toLowerCase();
+
+          let buffer;
+          try {
+            if (ext === 'txt') {
+              buffer = Buffer.from(content, 'utf-8');
+            } 
+            else if (ext === 'bas' || ext === 'vba') {
+              buffer = Buffer.from(content, 'utf-8');
+            } 
+            else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
+              const rows = content.split('\n').map(row => row.split('#').map(c => c.trim()));
+              const ws = XLSX.utils.aoa_to_sheet(rows);
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, 'Data');
+              buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
+            } 
+            else if (ext === 'docx') {
+              const docx = await import('docx');
+              Document = docx.Document;
+              Packer = docx.Packer;
+              Paragraph = docx.Paragraph;
+              TextRun = docx.TextRun;
+              const paragraphs = content.split('\n').map(line =>
+                new Paragraph({ children: [new TextRun({ text: line, font: 'Arial', size: 24 })] })
+              );
+              const doc = new Document({ sections: [{ children: paragraphs }] });
+              buffer = await Packer.toBuffer(doc);
+            } else {
+              buffer = Buffer.from(content, 'utf-8');
+            }
+
+            const filePath = `generations/${Date.now()}-${filename}`;
+            const mimeMap = {
+              'xlsb': 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+              'bas': 'text/plain',
+              'vba': 'text/plain',
+              'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            };
+
+            const { error } = await supabase.storage.from('aai-files').upload(filePath, buffer, {
+              contentType: mimeMap[ext] || 'text/plain',
+              upsert: false
+            });
+
+            if (!error) {
+              const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
+              processedReply = processedReply.replace(match[0], `📥 **[Download ${filename}](${publicUrl})**`);
+            } else {
+              processedReply = processedReply.replace(match[0], `⚠️ Gagal upload: ${error.message}`);
+            }
+          } catch (e) {
+            console.error(`⚠️ Gagal generate ${filename}:`, e.message);
+            processedReply = processedReply.replace(match[0], `⚠️ Error: ${e.message}`);
+          }
+        }
+
+        // Update DB dengan versi yang sudah diproses (file links)
+        if (hasFiles && aiMsgData?.id) {
+          await supabase.from('messages')
+            .update({ content: processedReply })
+            .eq('id', aiMsgData.id);
+        }
+      } catch (fileErr) {
+        console.error("File processing error:", fileErr.message);
+      }
     } else {
       res.write(`data: ${JSON.stringify({ error: 'Respons kosong dari model.' })}\n\n`);
     }
