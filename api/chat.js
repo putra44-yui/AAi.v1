@@ -24,13 +24,20 @@ function calculateAge(dob) {
 function getModelConfig(personaList) {
   const persona = personaList[0];
   const configs = {
-    'Coding':          { temperature: 0.0, max_tokens: 32000, top_p: 0.85 },
-    'Kritikus Brutal': { temperature: 0.3, max_tokens: 4000,  top_p: 0.85 },
-    'Santai':          { temperature: 0.8, max_tokens: 2000,  top_p: 0.95 },
-    'Rosalia':         { temperature: 0.95, max_tokens: 2000, top_p: 0.98 },
-    'Auto':            { temperature: 0.7, max_tokens: 5000,  top_p: 0.9  }
+    'Coding':          { temperature: 0.0, max_tokens: 52000,  top_p: 0.85 },
+    'Kritikus Brutal': { temperature: 0.3, max_tokens: 3000,  top_p: 0.85 },
+    'Santai':          { temperature: 0.8, max_tokens: 1500,  top_p: 0.95 },
+    'Rosalia':         { temperature: 0.95, max_tokens: 1000, top_p: 0.95 }, 
+    'Auto':            { temperature: 0.7, max_tokens: 3000,  top_p: 0.9  }
   };
   return configs[persona] || configs['Auto'];
+}
+
+function getModelName(personaList) {
+  const persona = personaList[0];
+  return persona === 'Coding' 
+    ? "qwen/qwen3.6-plus:free" 
+    : "qwen/qwen3.6-plus:free";
 }
 
 // ✅ HELPER: Upload Base64 ke Supabase Storage
@@ -240,7 +247,15 @@ ${combinedSystem}
 ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji, respons panjang dan detail.
 - Bantu pekerjaan konsep sulit, excel, coding, dll.
-- Jangan gunakan panggilan gw, lu, gue, lo. Utamakan nama atau "kamu".
+- untuk user bernama teguh ketika meminta perbaiki bug, membuat fitur atau coding selain ia bukan bertanya apa penyebabnya atau bukan mode diskusi :
+      1.utamakan memberikan coding, dibanding penjelasan panjang untuk hemat token jika user = teguh. 
+      2.teguh sedang merancang sistem ai dan ux sebagai pemula, berikan coding terbaik untuk jangka panjang, bukan solusi cepat yang mungkin bikin masalah di kemudian hari.
+      3. planingnya memanfaatkan ai yang ada dalam membangun sistem ai, ketika ia sudah punya modal, ia akan mengganti otak nya menjadi versi server lokal.
+      4. jika teguh meminta sesuatu fitur atau suatu hal yang tidak begitu penting, berikan penjelasan atau opsi alternatif lebih baik yang berguna untuk masa depan.
+- untuk user rosalia :
+      1. utamakan bahasa yang lembut, penuh kasih sayang, dan dukungan emosional serta dengan candaan.
+      2. bantu dia belajar dunia teknologi dan pemrograman dengan cara yang menyenangkan, tanpa membuatnya merasa kewalahan.
+- Jangan gunakan panggilan gw, lu, gue, lo. Utamakan nama, "kamu" atau sayang.
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.
 - Jika ada URL gambar/file di atas, sebutkan bahwa file berhasil diterima dan berikan link jika relevan.
 - Jika user melampirkan file/teks, WAJIB konfirmasi dulu: "File [nama] berhasil dibaca. Berikut ringkasannya:" sebelum menjawab pertanyaan utama.
@@ -473,14 +488,13 @@ ATURAN PENTING:
   }
 }
 
-// Generate judul AI async
 async function generateTitle(apiKey, userMessage, sessionId) {
   try {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: MAIN_MODEL,
+        model: "qwen/qwen3.6-plus:free", // ← Hardcode biar nggak error
         messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
       })
