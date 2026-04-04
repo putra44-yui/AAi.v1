@@ -416,6 +416,11 @@ body::before {
   font-size: 14px;
   margin-left: 1px;
 }
+.streaming-plain {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
 
 /* ── TYPING INDICATOR ── */
 .typing-indicator {
@@ -965,6 +970,30 @@ function buildStreamBubbleHTML(streamId, timeStr) {
     </div>`;
 }
 
+function prepareAssistantRowForStreaming(aiRow, streamId) {
+  const bubbleEl = aiRow.querySelector('.bubble');
+  const actionsEl = aiRow.querySelector('.msg-actions');
+  if (!bubbleEl || !actionsEl) return null;
+
+  aiRow.id = streamId;
+  bubbleEl.id = `bubble_${streamId}`;
+  actionsEl.id = `actions_${streamId}`;
+  actionsEl.style.display = 'none';
+  bubbleEl.classList.add('stream-cursor');
+  bubbleEl.innerHTML = `
+    <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
+      <div class="typing-dot"></div>
+      <div class="typing-dot"></div>
+      <div class="typing-dot"></div>
+    </div>`;
+  aiRow.setAttribute('data-plain-text', '');
+  return { bubbleEl, actionsEl };
+}
+
+function renderStreamingContent(text) {
+  return `<div class="streaming-plain">${escHtml(text)}</div>`;
+}
+
 // ══════════════════════════════════════════
 // HELPER: proses stream SSE
 // ══════════════════════════════════════════
@@ -977,44 +1006,90 @@ async function processStream(response, streamId, onDone) {
   let fullText  = '';
   let buffer    = '';
   let firstToken = true;
+  let gotDone   = false;
+  let renderScheduled = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  function flushStreamingRender(finalRender = false) {
+    if (!bubbleEl) return;
+    bubbleEl.innerHTML = finalRender ? formatContent(fullText) : renderStreamingContent(fullText);
+    if (finalRender) bubbleEl.classList.remove('stream-cursor');
+    else bubbleEl.classList.add('stream-cursor');
+    scrollBottom();
+  }
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
+  function scheduleStreamingRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+      renderScheduled = false;
+      if (!gotDone) flushStreamingRender(false);
+    });
+  }
 
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const raw = line.slice(6).trim();
-      if (raw === '[DONE]') continue;
+  function processLine(line) {
+    if (!line.startsWith('data: ')) return;
+    const raw = line.slice(6).trim();
+    if (raw === '[DONE]') return;
 
-      let parsed;
-      try { parsed = JSON.parse(raw); }
-      catch { continue; }
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { return; }
 
-      if (parsed.error) throw new Error(parsed.error);
+    if (parsed.error) throw new Error(parsed.error);
 
-      if (parsed.token) {
-        if (firstToken) { bubbleEl.innerHTML = ''; firstToken = false; }
-        fullText += parsed.token;
-        bubbleEl.innerHTML = formatContent(fullText);
-        bubbleEl.classList.add('stream-cursor');
-        scrollBottom();
-      }
+    if (parsed.token) {
+      if (firstToken) { bubbleEl.innerHTML = ''; firstToken = false; }
+      fullText += parsed.token;
+      scheduleStreamingRender();
+    }
 
-      if (parsed.done) {
-        bubbleEl.classList.remove('stream-cursor');
-        actionsEl.style.display = 'flex';
-        streamRow.setAttribute('data-id', parsed.message_id || '');
-        streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-        onDone(parsed, fullText);
-        scrollBottom();
-      }
+    if (parsed.done) {
+      gotDone = true;
+      flushStreamingRender(true);
+      actionsEl.style.display = 'flex';
+      streamRow.setAttribute('data-id', parsed.message_id || '');
+      streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+      onDone(parsed, fullText);
+      scrollBottom();
     }
   }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+
+    // Flush sisa buffer
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      const lines = buffer.split('\n');
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+  } catch (e) {
+    console.error('[processStream] Error:', e.message);
+  }
+
+  // FALLBACK: jika stream terputus tanpa event `done` tapi sudah ada teks
+  if (!gotDone && fullText.trim()) {
+    console.warn('[processStream] Stream ended without done event. Fallback triggered.');
+    flushStreamingRender(true);
+    actionsEl.style.display = 'flex';
+    streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
+    onDone({ done: true, session_id: null, message_id: null, user_message_id: null }, fullText);
+    scrollBottom();
+  }
+
   setTimeout(initStickyCodeHeaders, 600);
 }
 
@@ -1036,6 +1111,9 @@ async function sendMessage(text, files = []) {
   setSendBtn('stop');
   abortController = new AbortController();
 
+  // Timeout 2 menit untuk respons panjang
+  const timeoutId = setTimeout(() => abortController.abort(), 120000);
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -1049,6 +1127,8 @@ async function sendMessage(text, files = []) {
         files: files
       })
     });
+
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       let errMsg = `Server error ${res.status}`;
@@ -1083,6 +1163,7 @@ async function sendMessage(text, files = []) {
 
     } catch (e) {
     console.error('❌ SendMessage Error:', e);
+    clearTimeout(timeoutId);
     const bubbleEl = document.getElementById(`bubble_${streamId}`);
     if (bubbleEl) {
       bubbleEl.classList.remove('stream-cursor');
@@ -1126,15 +1207,20 @@ function regenerateAI(btn) {
     userMsgId = aiMsg?.parent_id || null;
     if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
   }
-  if (rawUser) executeRegenerate(rawUser, userMsgId);
+  if (rawUser) executeRegenerate(rawUser, userMsgId, aiMsgId, aiRow);
 }
 
-async function executeRegenerate(text, userMessageId = null) {
-  const area     = document.getElementById('chatArea');
-  const streamId = 'regen_' + Date.now();
-  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-  scrollBottom();
+async function executeRegenerate(text, userMessageId = null, assistantMessageId = null, aiRow = null) {
+  const area = document.getElementById('chatArea');
+  const streamId = assistantMessageId ? `regen_${assistantMessageId}` : 'regen_' + Date.now();
+
+  if (aiRow) {
+    prepareAssistantRowForStreaming(aiRow, streamId);
+  } else {
+    const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+    scrollBottom();
+  }
 
   setSendBtn('stop');
   abortController = new AbortController();
@@ -1149,7 +1235,8 @@ async function executeRegenerate(text, userMessageId = null) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        user_message_id: userMessageId
+        user_message_id: userMessageId,
+        assistant_message_id: assistantMessageId
       })
     });
 
@@ -1161,11 +1248,18 @@ async function executeRegenerate(text, userMessageId = null) {
     }
 
     await processStream(res, streamId, (parsed, fullText) => {
-      currentMessages.push({
-        id: parsed.message_id, role: 'assistant', content: fullText,
-        parent_id: userMessageId, created_at: new Date().toISOString()
-      });
-      if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
+      const resolvedAssistantId = parsed.message_id || assistantMessageId;
+      const existingAssistant = currentMessages.find(m => m.id === resolvedAssistantId);
+      if (existingAssistant) {
+        existingAssistant.content = fullText;
+        existingAssistant.parent_id = userMessageId;
+      } else {
+        currentMessages.push({
+          id: resolvedAssistantId, role: 'assistant', content: fullText,
+          parent_id: userMessageId, created_at: new Date().toISOString()
+        });
+      }
+      if (userMessageId && resolvedAssistantId) activeVersionMap[userMessageId] = resolvedAssistantId;
       renderMessageTree();
     });
 
@@ -1197,14 +1291,15 @@ async function executeRegenerate(text, userMessageId = null) {
 // ══════════════════════════════════════════
 function retryLastMessage(btn) {
   const aiRow = btn.closest('.msg-row.assistant');
+  const aiMsgId = aiRow.getAttribute('data-id') || null;
   let el = aiRow.previousElementSibling;
   while (el) {
     if (el.classList.contains('user')) {
       const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
       const userMsgId = el.getAttribute('data-id') || null;
       if (raw) {
-        aiRow.remove();
-        executeRegenerate(raw, userMsgId);
+        if (!aiMsgId) aiRow.remove();
+        executeRegenerate(raw, userMsgId, aiMsgId, aiMsgId ? aiRow : null);
       }
       return;
     }
@@ -1219,7 +1314,12 @@ function editUserMsg(btn) {
   const row    = btn.closest('.msg-row.user');
   const bubble = row.querySelector('.bubble');
   const raw    = decodeURIComponent(row.dataset.raw || bubble.innerText);
-  const msgId  = row.dataset.id || ('edit_' + Date.now());
+  const msgId  = row.dataset.id;
+
+  if (!msgId) {
+    alert('Pesan ini belum punya ID database. Refresh dulu lalu coba edit lagi.');
+    return;
+  }
 
   bubble.dataset.originalHtml = bubble.innerHTML;
   bubble.innerHTML = `
@@ -1254,12 +1354,26 @@ async function saveEdit(btn, msgId) {
   bubble.innerHTML = formatContent(newText);
   row.setAttribute('data-raw', encodeURIComponent(newText));
 
+  let assistantMsgId = null;
+  let nextRow = row.nextElementSibling;
+  while (nextRow) {
+    if (nextRow.classList.contains('assistant')) {
+      assistantMsgId = nextRow.getAttribute('data-id') || null;
+      break;
+    }
+    nextRow = nextRow.nextElementSibling;
+  }
+  if (!assistantMsgId) {
+    assistantMsgId = currentMessages.find(m => m.parent_id === msgId && m.role === 'assistant')?.id || null;
+  }
+
   try {
     const res = await fetch(`/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         edit_message_id: msgId,
+        update_only: true,
         message: newText,
         session_id: currentSessionId,
         user_id: currentUser.id,
@@ -1270,7 +1384,11 @@ async function saveEdit(btn, msgId) {
     const msg = currentMessages.find(m => m.id === msgId);
     if (msg) msg.content = newText;
     renderMessageTree();
-    executeRegenerate(newText, msgId);
+    const refreshedUserRow = document.querySelector(`.msg-row.user[data-id="${msgId}"]`);
+    const refreshedAssistantRow = assistantMsgId
+      ? document.querySelector(`.msg-row.assistant[data-id="${assistantMsgId}"]`)
+      : null;
+    executeRegenerate(newText, msgId, assistantMsgId, refreshedAssistantRow);
   } catch (e) {
     alert('Gagal menyimpan perubahan: ' + e.message);
     renderMessageTree();
