@@ -438,41 +438,71 @@ body::before {
 
 /* ── AI PREVIEW (AMBIGUITY) ── */
 .ai-preview {
-  width: 100%;
+  align-self: flex-start;
+  width: auto;
+  max-width: min(340px, 100%);
   border: 1px solid rgba(90, 180, 212, 0.34);
-  border-radius: 16px;
+  border-radius: 999px;
   background: linear-gradient(135deg, rgba(200,234,245,.38), rgba(255,255,255,.85));
   box-shadow: var(--shadow-sm);
+  padding: 6px 10px;
+  transition: all .2s ease;
+}
+.ai-preview.is-open {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 16px;
   padding: 10px 12px;
 }
-.ai-preview summary {
+.ai-preview-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
-  list-style: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--blue-dark);
+  min-width: 0;
+  text-align: left;
 }
-.ai-preview summary::-webkit-details-marker { display: none; }
+.ai-preview:not(.is-open) .ai-preview-toggle {
+  justify-content: flex-start;
+}
 .ai-preview-summary-title {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 .ai-preview-chevron {
+  margin-left: auto;
   color: var(--text-muted);
   transition: transform .2s ease;
 }
-.ai-preview[open] .ai-preview-chevron { transform: rotate(180deg); }
+.ai-preview.is-open .ai-preview-chevron { transform: rotate(180deg); }
 .ai-preview-body {
   margin-top: 8px;
   border-top: 1px dashed rgba(90, 180, 212, 0.28);
   padding-top: 10px;
-  display: grid;
+  display: none;
   gap: 8px;
+}
+.ai-preview.is-open .ai-preview-body {
+  display: grid;
+}
+.ai-live-teaser {
+  margin-top: 4px;
+  margin-left: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
 }
 .ai-preview-block {
   background: rgba(255,255,255,.86);
@@ -495,23 +525,6 @@ body::before {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text);
-}
-.ai-preview-confidence {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.ai-preview-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  background: rgba(42,122,158,.12);
-  color: var(--blue-dark);
 }
 
 /* ── MSG ACTIONS ── */
@@ -1029,14 +1042,14 @@ function buildStreamBubbleHTML(streamId, timeStr) {
           AAi <span class="version-tag">V.1</span>
         </div>
       </div>
-      <details class="ai-preview" id="preview_${streamId}" style="display:none;" open>
-        <summary>
-          <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
-          <span class="ai-preview-confidence" id="preview_conf_${streamId}">Menilai ambigu...</span>
+      <div class="ai-preview" id="preview_${streamId}" style="display:none;">
+        <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
+          <span class="ai-preview-summary-title">🧠 Pemahaman AI</span>
           <i class="fas fa-chevron-down ai-preview-chevron"></i>
-        </summary>
+        </button>
         <div class="ai-preview-body" id="preview_body_${streamId}"></div>
-      </details>
+      </div>
+      <div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
           <div class="typing-dot"></div>
@@ -1075,25 +1088,30 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
 
   let previewEl = aiRow.querySelector('.ai-preview');
   if (!previewEl) {
-    previewEl = document.createElement('details');
+    previewEl = document.createElement('div');
     previewEl.className = 'ai-preview';
     previewEl.innerHTML = `
-      <summary>
-        <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
-        <span class="ai-preview-confidence">Menilai ambigu...</span>
+      <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
+        <span class="ai-preview-summary-title">🧠 Pemahaman AI</span>
         <i class="fas fa-chevron-down ai-preview-chevron"></i>
-      </summary>
+      </button>
       <div class="ai-preview-body"></div>`;
     aiRow.insertBefore(previewEl, bubbleEl);
   }
   previewEl.id = `preview_${streamId}`;
   previewEl.style.display = 'none';
-  previewEl.open = true;
-  const confEl = previewEl.querySelector('.ai-preview-confidence');
+  previewEl.classList.remove('is-open');
+  let teaserEl = aiRow.querySelector('.ai-live-teaser');
+  if (!teaserEl) {
+    teaserEl = document.createElement('div');
+    teaserEl.className = 'ai-live-teaser';
+    aiRow.insertBefore(teaserEl, bubbleEl);
+  }
   const bodyEl = previewEl.querySelector('.ai-preview-body');
-  if (confEl) {
-    confEl.id = `preview_conf_${streamId}`;
-    confEl.innerHTML = 'Menilai ambigu...';
+  if (teaserEl) {
+    teaserEl.id = `preview_stream_${streamId}`;
+    teaserEl.innerHTML = '';
+    teaserEl.style.display = 'none';
   }
   if (bodyEl) {
     bodyEl.id = `preview_body_${streamId}`;
@@ -1109,6 +1127,47 @@ function renderStreamingContent(text) {
   return `<div class="streaming-plain">${escHtml(text)}</div>`;
 }
 
+function togglePreview(btn) {
+  const panel = btn.closest('.ai-preview');
+  if (!panel) return;
+  panel.classList.toggle('is-open');
+}
+
+function getFriendlyProviderErrorMessage(rawMessage) {
+  const msg = String(rawMessage || 'Terjadi kesalahan saat memproses respons AI.');
+  const normalized = msg.toLowerCase();
+
+  const isRateLimited =
+    normalized.includes('429') ||
+    normalized.includes('rate-limited') ||
+    normalized.includes('temporarily rate-limited') ||
+    normalized.includes('provider returned error');
+
+  if (isRateLimited) {
+    return 'OpenRouter sedang padat (limit sementara). Coba lagi dalam 20-60 detik.';
+  }
+
+  return msg;
+}
+
+function renderStreamErrorUI(streamId, errorMessage) {
+  const bubbleEl = document.getElementById(`bubble_${streamId}`);
+  if (!bubbleEl) return;
+
+  bubbleEl.classList.remove('stream-cursor');
+  const friendly = getFriendlyProviderErrorMessage(errorMessage);
+  bubbleEl.innerHTML = `
+    <span style="color:#e74c3c;">⚠️ ${escHtml(friendly)}</span>
+    <button onclick="retryLastMessage(this)"
+      style="margin-left:12px;background:var(--blue-light);border:none;padding:6px 12px;
+             border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);display:flex;align-items:center;gap:6px;">
+      <i class="fas fa-sync"></i> Coba lagi
+    </button>`;
+
+  const actionsEl = document.getElementById(`actions_${streamId}`);
+  if (actionsEl) actionsEl.style.display = 'flex';
+}
+
 function asArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
@@ -1122,10 +1181,20 @@ function normalizePreview(preview) {
     checklist_konteks: {
       dipakai: asArray(preview.checklist_konteks?.dipakai),
       kurang: asArray(preview.checklist_konteks?.kurang)
-    },
-    confidence: typeof preview.confidence === 'number' ? preview.confidence : null,
-    confidence_label: String(preview.confidence_label || '').trim()
+    }
   };
+}
+
+function toTeaserSnippet(text, maxWords = 8) {
+  const words = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+
+  if (!words.length) return '';
+
+  return `${words.slice(0, maxWords).join(' ')}...`;
 }
 
 function renderPreviewList(items, fallbackText) {
@@ -1159,13 +1228,22 @@ function renderPreviewBody(preview) {
     </div>`;
 }
 
-function renderPreviewConfidence(preview) {
+function buildPreviewTeaserQueue(preview) {
   const data = normalizePreview(preview);
-  if (!data) return '';
-  const score = typeof data.confidence === 'number' ? Math.round(data.confidence * 100) : null;
-  const label = data.confidence_label || 'tidak diketahui';
-  const scoreText = score === null ? '' : ` (${score}%)`;
-  return `<span class="ai-preview-pill">Kejelasan: ${escHtml(label)}${scoreText}</span>`;
+  if (!data) return [];
+
+  const parts = [];
+  if (data.interpretasi) parts.push(data.interpretasi);
+  data.potensi_ambigu.forEach(item => parts.push(item));
+  data.asumsi.forEach(item => parts.push(item));
+  data.checklist_konteks.kurang.forEach(item => parts.push(item));
+  data.checklist_konteks.dipakai.forEach(item => parts.push(item));
+
+  return parts.map(item => toTeaserSnippet(item)).filter(Boolean).slice(0, 8);
+}
+
+function buildHistoryPreviewTeaser(preview) {
+  return buildPreviewTeaserQueue(preview)[0] || 'Ringkasan siap...';
 }
 
 // ══════════════════════════════════════════
@@ -1177,15 +1255,87 @@ async function processStream(response, streamId, onDone) {
   const streamRow = document.getElementById(streamId);
   const previewEl = document.getElementById(`preview_${streamId}`);
   const previewBodyEl = document.getElementById(`preview_body_${streamId}`);
-  const previewConfEl = document.getElementById(`preview_conf_${streamId}`);
+  const previewStreamEl = document.getElementById(`preview_stream_${streamId}`);
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
   let fullText  = '';
   let buffer    = '';
   let previewData = null;
+  let previewTicker = null;
+  let previewStepTimer = null;
+  let streamError = null;
   let firstToken = true;
   let gotDone   = false;
   let renderScheduled = false;
+
+  function clearPreviewAnimation() {
+    if (previewTicker) {
+      clearInterval(previewTicker);
+      previewTicker = null;
+    }
+    if (previewStepTimer) {
+      clearTimeout(previewStepTimer);
+      previewStepTimer = null;
+    }
+  }
+
+  function startPreviewTicker(lines) {
+    if (!previewStreamEl) return;
+    clearPreviewAnimation();
+
+    const queue = Array.isArray(lines) ? lines.filter(Boolean) : [];
+    if (!queue.length) {
+      previewStreamEl.textContent = 'Sedang mengelola jawaban...';
+      previewStreamEl.style.display = 'block';
+      return;
+    }
+
+    let lineIndex = 0;
+    previewStreamEl.style.display = 'block';
+
+    function runLine() {
+      if (!previewStreamEl) return;
+
+      const teaserText = queue[lineIndex] || '';
+      let charIndex = 0;
+      previewStreamEl.textContent = '';
+
+      previewTicker = setInterval(() => {
+        if (charIndex < teaserText.length) {
+          charIndex += 1;
+          previewStreamEl.textContent = teaserText.slice(0, charIndex);
+          return;
+        }
+
+        clearInterval(previewTicker);
+        previewTicker = null;
+
+        previewStepTimer = setTimeout(() => {
+          if (!previewStreamEl) return;
+
+          previewStreamEl.textContent = '';
+          lineIndex += 1;
+
+          if (lineIndex < queue.length) {
+            previewStepTimer = setTimeout(runLine, 100);
+          } else {
+            previewStreamEl.textContent = 'Sedang mengelola jawaban...';
+            previewStepTimer = null;
+          }
+        }, 420);
+      }, 20);
+    }
+
+    runLine();
+  }
+
+  function stopPreviewTicker(finalText = '', hideTeaser = true) {
+    clearPreviewAnimation();
+    if (previewStreamEl) {
+      previewStreamEl.textContent = finalText;
+      if (hideTeaser) previewStreamEl.style.display = 'none';
+    }
+  }
 
   function showPreview(preview) {
     if (!previewEl || !previewBodyEl) return;
@@ -1193,9 +1343,9 @@ async function processStream(response, streamId, onDone) {
     if (!normalized) return;
     previewData = normalized;
     previewBodyEl.innerHTML = renderPreviewBody(normalized);
-    if (previewConfEl) previewConfEl.innerHTML = renderPreviewConfidence(normalized);
     previewEl.style.display = 'block';
-    previewEl.open = true;
+    previewEl.classList.remove('is-open');
+    startPreviewTicker(buildPreviewTeaserQueue(normalized));
     scrollBottom();
   }
 
@@ -1228,7 +1378,11 @@ async function processStream(response, streamId, onDone) {
     if (parsed.error) throw new Error(parsed.error);
 
     if (parsed.token) {
-      if (firstToken) { bubbleEl.innerHTML = ''; firstToken = false; }
+      if (firstToken) {
+        bubbleEl.innerHTML = '';
+        firstToken = false;
+        stopPreviewTicker('', true);
+      }
       fullText += parsed.token;
       scheduleStreamingRender();
     }
@@ -1240,6 +1394,7 @@ async function processStream(response, streamId, onDone) {
     if (parsed.done) {
       gotDone = true;
       flushStreamingRender(true);
+      stopPreviewTicker('', true);
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
@@ -1274,12 +1429,19 @@ async function processStream(response, streamId, onDone) {
     }
   } catch (e) {
     console.error('[processStream] Error:', e.message);
+    streamError = e;
+  }
+
+  if (streamError) {
+    stopPreviewTicker('', true);
+    throw streamError;
   }
 
   // FALLBACK: jika stream terputus tanpa event `done` tapi sudah ada teks
   if (!gotDone && fullText.trim()) {
     console.warn('[processStream] Stream ended without done event. Fallback triggered.');
     flushStreamingRender(true);
+    stopPreviewTicker('', true);
     actionsEl.style.display = 'flex';
     streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
     streamRow.setAttribute('data-preview', previewData ? encodeURIComponent(JSON.stringify(previewData)) : '');
@@ -1362,22 +1524,7 @@ async function sendMessage(text, files = []) {
     } catch (e) {
     console.error('❌ SendMessage Error:', e);
     clearTimeout(timeoutId);
-    const bubbleEl = document.getElementById(`bubble_${streamId}`);
-    if (bubbleEl) {
-      bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error')
-        ? '⚠️ Provider error – cek koneksi / API key'
-        : e.message;
-      bubbleEl.innerHTML = `
-        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
-        <button onclick="retryLastMessage(this)"
-          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
-                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
-          🔄 Coba lagi
-        </button>`;
-    }
-    const actionsEl = document.getElementById(`actions_${streamId}`);
-    if (actionsEl) actionsEl.style.display = 'flex';
+    renderStreamErrorUI(streamId, e.message);
   } finally {
     setSendBtn('send');
   }
@@ -1414,7 +1561,23 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 
   if (aiRow) {
     prepareAssistantRowForStreaming(aiRow, streamId);
+  } else if (assistantMessageId) {
+    // Jika ada assistantMessageId tapi aiRow tidak ada (error case), cari dan perbarui existing row
+    const rows = area.querySelectorAll('.msg-row.assistant');
+    for (let r of rows) {
+      if (r.getAttribute('data-id') === assistantMessageId) {
+        prepareAssistantRowForStreaming(r, streamId);
+        break;  // Hanya siapkan ulang, lanjut ke fetch
+      }
+    }
+    // Jika tidak ketemu, buat bubble baru
+    if (!document.getElementById(streamId)) {
+      const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+      scrollBottom();
+    }
   } else {
+    // Tidak ada aiRow dan tidak ada assistantMessageId, buat bubble baru
     const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
     scrollBottom();
@@ -1465,22 +1628,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 
     } catch (e) {
     console.error('❌ Regenerate Error:', e);
-    const bubbleEl = document.getElementById(`bubble_${streamId}`);
-    if (bubbleEl) {
-      bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error')
-        ? '⚠️ Provider error – cek koneksi / API key'
-        : e.message;
-      bubbleEl.innerHTML = `
-        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
-        <button onclick="retryLastMessage(this)"
-          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
-                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
-          🔄 Coba lagi
-        </button>`;
-    }
-    const actionsEl = document.getElementById(`actions_${streamId}`);
-    if (actionsEl) actionsEl.style.display = 'flex';
+    renderStreamErrorUI(streamId, e.message);
   } finally {
     setSendBtn('send');
   }
@@ -1498,8 +1646,9 @@ function retryLastMessage(btn) {
       const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
       const userMsgId = el.getAttribute('data-id') || null;
       if (raw) {
-        if (!aiMsgId) aiRow.remove();
-        executeRegenerate(raw, userMsgId, aiMsgId, aiMsgId ? aiRow : null);
+        // PENTING: Jangan remove aiRow jika aiMsgId null, agar bisa tetap di sesi yang sama
+        // Hanya perbarui eksisting bubble untuk retry
+        executeRegenerate(raw, userMsgId, aiMsgId, aiRow);
       }
       return;
     }
@@ -1647,22 +1796,7 @@ async function sendMessageBranched(text, parentId = null) {
 
     } catch (e) {
     console.error('❌ Branched Message Error:', e);
-    const bubbleEl = document.getElementById(`bubble_${streamId}`);
-    if (bubbleEl) {
-      bubbleEl.classList.remove('stream-cursor');
-      const errorMsg = e.message.includes('Provider returned error')
-        ? '⚠️ Provider error – cek koneksi / API key'
-        : e.message;
-      bubbleEl.innerHTML = `
-        <span style="color:#e74c3c;">⚠️ ${errorMsg}</span>
-        <button onclick="retryLastMessage(this)"
-          style="margin-left:12px;background:var(--blue-light);border:none;padding:4px 12px;
-                 border-radius:12px;cursor:pointer;font-size:13px;color:var(--blue-dark);">
-          🔄 Coba lagi
-        </button>`;
-    }
-    const actionsEl = document.getElementById(`actions_${streamId}`);
-    if (actionsEl) actionsEl.style.display = 'flex';
+    renderStreamErrorUI(streamId, e.message);
   } finally {
     setSendBtn('send');
   }
@@ -1840,14 +1974,13 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
 
   if (role === 'assistant') {
     const previewBlock = extra?.preview
-      ? `<details class="ai-preview" open>
-          <summary>
-            <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
-            <span class="ai-preview-confidence">${renderPreviewConfidence(extra.preview)}</span>
+      ? `<div class="ai-preview">
+          <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
+            <span class="ai-preview-summary-title">🧠AAI</span>
             <i class="fas fa-chevron-down ai-preview-chevron"></i>
-          </summary>
+          </button>
           <div class="ai-preview-body">${renderPreviewBody(extra.preview)}</div>
-        </details>`
+        </div>`
       : '';
 
     let sourcesHtml = '';
