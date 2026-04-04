@@ -11,6 +11,106 @@ const supabase = createClient(
 
 const MAIN_MODEL = "qwen/qwen3.6-plus:free";
 
+const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
+
+function uniqueList(items = []) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
+  const text = String(userMessage || '').trim();
+  const normalized = text.toLowerCase();
+  const personNames = uniqueList((allPersons || []).map(p => p?.name).filter(Boolean));
+
+  const potentials = [];
+  const assumptions = [];
+  const usedContext = [];
+  const missingContext = [];
+
+  if (!text) {
+    return {
+      show_preview: false,
+      confidence: 1,
+      confidence_label: 'tinggi',
+      reason_codes: [],
+      interpretasi: '',
+      potensi_ambigu: [],
+      asumsi: [],
+      checklist_konteks: { dipakai: [], kurang: [] },
+      preview_version: 1
+    };
+  }
+
+  const hasQuestion = /\?/.test(text) || /kenapa|bagaimana|gimana|tolong|bisa|jelaskan|buatkan/i.test(normalized);
+  const hasNamedPerson = personNames.some(name => normalized.includes(String(name).toLowerCase()));
+  const ambiguousTokens = AMBIGUOUS_TERMS.filter(term => normalized.includes(term));
+
+  if (hasQuestion) usedContext.push('Tujuan umum pesan terdeteksi sebagai pertanyaan/permintaan.');
+  if (currentPerson?.name) usedContext.push(`Pengirim pesan teridentifikasi: ${currentPerson.name}.`);
+  if (hasNamedPerson) usedContext.push('Ada penyebutan nama yang membantu memperjelas target.');
+
+  if (text.length < 18) {
+    potentials.push('Pesan sangat singkat sehingga maksud detail belum cukup jelas.');
+    missingContext.push('Tambahkan tujuan akhir yang diinginkan (contoh output atau hasil).');
+  }
+
+  if (!hasQuestion) {
+    potentials.push('Belum ada kata tanya/aksi yang jelas, sehingga AI bisa menebak tujuan.');
+    missingContext.push('Sebutkan tindakan yang diminta, misalnya analisa, perbaiki, atau buatkan.');
+  }
+
+  if (ambiguousTokens.length > 0 && !hasNamedPerson) {
+    potentials.push(`Ada kata rujukan umum (${ambiguousTokens.join(', ')}) tanpa referensi objek yang tegas.`);
+    missingContext.push('Sebutkan objek/subjek secara spesifik agar tidak salah tafsir.');
+  }
+
+  if (/dia|beliau|anaknya|ibunya|ayahnya/i.test(normalized) && !hasNamedPerson) {
+    potentials.push('Ada referensi orang tetapi nama belum disebut, bisa menimbulkan salah tangkap relasi.');
+    missingContext.push('Cantumkan nama orang terkait untuk menghindari ambigu relasi keluarga.');
+  }
+
+  if (/bug|error|masalah/i.test(normalized) && !/kode|file|baris|fungsi|api|database|query/i.test(normalized)) {
+    potentials.push('Masalah teknis disebutkan, tapi konteks sumber error belum lengkap.');
+    missingContext.push('Tambahkan potongan error, file terkait, atau langkah reproduksi.');
+  }
+
+  assumptions.push('AI akan memprioritaskan konteks terbaru di sesi ini bila tidak ada penjelasan tambahan.');
+  if (!hasNamedPerson && personNames.length > 0) {
+    assumptions.push('Jika ada rujukan orang tanpa nama, AI bisa salah memilih individu yang dimaksud.');
+  }
+
+  const reasonCodes = [];
+  if (text.length < 18) reasonCodes.push('too_short');
+  if (!hasQuestion) reasonCodes.push('missing_action');
+  if (ambiguousTokens.length > 0 && !hasNamedPerson) reasonCodes.push('polysemy');
+  if (/dia|beliau|anaknya|ibunya|ayahnya/i.test(normalized) && !hasNamedPerson) reasonCodes.push('missing_entity');
+  if (/bug|error|masalah/i.test(normalized) && !/kode|file|baris|fungsi|api|database|query/i.test(normalized)) reasonCodes.push('missing_technical_context');
+
+  const score = reasonCodes.length;
+  const showPreview = score > 0;
+  const confidence = Math.max(0.2, Math.min(0.95, 1 - score * 0.16));
+  const confidenceLabel = confidence >= 0.78 ? 'tinggi' : confidence >= 0.55 ? 'sedang' : 'rendah';
+
+  const interpretasi = hasQuestion
+    ? 'Saya menangkap bahwa kamu sedang meminta bantuan sesuai pesan di atas, namun beberapa detail bisa ditafsirkan lebih dari satu cara.'
+    : 'Saya menangkap ini sebagai pernyataan/permintaan umum, sehingga tujuan akhir bisa berbeda tergantung maksud yang kamu inginkan.';
+
+  return {
+    show_preview: showPreview,
+    confidence,
+    confidence_label: confidenceLabel,
+    reason_codes: reasonCodes,
+    interpretasi,
+    potensi_ambigu: uniqueList(potentials).slice(0, 4),
+    asumsi: uniqueList(assumptions).slice(0, 4),
+    checklist_konteks: {
+      dipakai: uniqueList(usedContext).slice(0, 4),
+      kurang: uniqueList(missingContext).slice(0, 4)
+    },
+    preview_version: 1
+  };
+}
+
 function calculateAge(dob) {
   if (!dob) return '?';
   const birth = new Date(dob);
@@ -71,7 +171,35 @@ export default async function handler(req, res) {
         .eq('session_id', session_id)
         .order('created_at', { ascending: true });
       if (error) throw error;
-      return res.status(200).json({ success: true, messages: messages || [] });
+
+      const { data: previews } = await supabase
+        .from('message_previews')
+        .select('id, user_message_id, assistant_message_id, preview_json, is_ambiguous, confidence, reason_codes, created_at')
+        .eq('session_id', session_id)
+        .eq('is_ambiguous', true)
+        .order('created_at', { ascending: true });
+
+      const previewByAssistant = new Map((previews || [])
+        .filter(p => p.assistant_message_id)
+        .map(p => [p.assistant_message_id, p]));
+      const previewByUser = new Map((previews || [])
+        .filter(p => p.user_message_id)
+        .map(p => [p.user_message_id, p]));
+
+      const enriched = (messages || []).map(msg => {
+        if (msg.role !== 'assistant') return msg;
+        const linked = previewByAssistant.get(msg.id) || previewByUser.get(msg.parent_id);
+        if (!linked) return msg;
+        return {
+          ...msg,
+          preview: linked.preview_json,
+          preview_id: linked.id,
+          preview_confidence: linked.confidence,
+          preview_reason_codes: linked.reason_codes || []
+        };
+      });
+
+      return res.status(200).json({ success: true, messages: enriched });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -327,11 +455,45 @@ ATURAN PENTING:
       finalUserMessageId = userMsgData.id;
     }
 
+    const previewPayload = analyzeAmbiguityPreview(userMessage, person, allPersons || []);
+    const shouldShowPreview = !!previewPayload.show_preview;
+    let previewRecordId = null;
+
+    if (shouldShowPreview) {
+      try {
+        const { data: previewInsert } = await supabase
+          .from('message_previews')
+          .insert({
+            session_id: currentSessionId,
+            user_message_id: finalUserMessageId,
+            assistant_message_id: null,
+            is_ambiguous: true,
+            confidence: previewPayload.confidence,
+            reason_codes: previewPayload.reason_codes || [],
+            preview_json: previewPayload
+          })
+          .select('id')
+          .single();
+        previewRecordId = previewInsert?.id || null;
+      } catch (previewInsertErr) {
+        console.error('[Preview] Gagal simpan preview audit:', previewInsertErr.message);
+      }
+    }
+
     // ── STREAMING ──
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
+
+    if (shouldShowPreview) {
+      res.write(`data: ${JSON.stringify({
+        preview: previewPayload,
+        preview_id: previewRecordId,
+        phase: 'preview'
+      })}\n\n`);
+      res.flush?.();
+    }
 
     const modelConfig = getModelConfig(personaList);
 
@@ -469,9 +631,22 @@ ATURAN PENTING:
         done: true,
         session_id: currentSessionId,
         message_id: aiMsgData?.id,
-        user_message_id: finalUserMessageId
+        user_message_id: finalUserMessageId,
+        preview_id: previewRecordId,
+        preview: shouldShowPreview ? previewPayload : null
       })}\n\n`);
       res.flush?.();
+
+      if (previewRecordId && aiMsgData?.id) {
+        try {
+          await supabase
+            .from('message_previews')
+            .update({ assistant_message_id: aiMsgData.id })
+            .eq('id', previewRecordId);
+        } catch (previewLinkErr) {
+          console.error('[Preview] Gagal link preview -> assistant:', previewLinkErr.message);
+        }
+      }
 
       // 3. File processing di background (setelah client sudah dapat `done`)
       try {

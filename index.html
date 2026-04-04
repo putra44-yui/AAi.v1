@@ -436,6 +436,84 @@ body::before {
 .typing-dot:nth-child(3) { animation-delay: .4s; }
 @keyframes typingPulse { 0%,100% { transform: scale(.6); opacity: .4; } 50% { transform: scale(1); opacity: 1; } }
 
+/* ── AI PREVIEW (AMBIGUITY) ── */
+.ai-preview {
+  width: 100%;
+  border: 1px solid rgba(90, 180, 212, 0.34);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(200,234,245,.38), rgba(255,255,255,.85));
+  box-shadow: var(--shadow-sm);
+  padding: 10px 12px;
+}
+.ai-preview summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue-dark);
+}
+.ai-preview summary::-webkit-details-marker { display: none; }
+.ai-preview-summary-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-preview-chevron {
+  color: var(--text-muted);
+  transition: transform .2s ease;
+}
+.ai-preview[open] .ai-preview-chevron { transform: rotate(180deg); }
+.ai-preview-body {
+  margin-top: 8px;
+  border-top: 1px dashed rgba(90, 180, 212, 0.28);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.ai-preview-block {
+  background: rgba(255,255,255,.86);
+  border: 1px solid rgba(90, 180, 212, 0.2);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.ai-preview-block-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue-dark);
+  margin-bottom: 4px;
+}
+.ai-preview ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.ai-preview li {
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.ai-preview-confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ai-preview-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(42,122,158,.12);
+  color: var(--blue-dark);
+}
+
 /* ── MSG ACTIONS ── */
 .msg-actions {
   display: flex; gap: 14px; margin-top: 8px;
@@ -951,6 +1029,14 @@ function buildStreamBubbleHTML(streamId, timeStr) {
           AAi <span class="version-tag">V.1</span>
         </div>
       </div>
+      <details class="ai-preview" id="preview_${streamId}" style="display:none;" open>
+        <summary>
+          <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
+          <span class="ai-preview-confidence" id="preview_conf_${streamId}">Menilai ambigu...</span>
+          <i class="fas fa-chevron-down ai-preview-chevron"></i>
+        </summary>
+        <div class="ai-preview-body" id="preview_body_${streamId}"></div>
+      </details>
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
           <div class="typing-dot"></div>
@@ -986,12 +1072,100 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
       <div class="typing-dot"></div>
       <div class="typing-dot"></div>
     </div>`;
+
+  let previewEl = aiRow.querySelector('.ai-preview');
+  if (!previewEl) {
+    previewEl = document.createElement('details');
+    previewEl.className = 'ai-preview';
+    previewEl.innerHTML = `
+      <summary>
+        <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
+        <span class="ai-preview-confidence">Menilai ambigu...</span>
+        <i class="fas fa-chevron-down ai-preview-chevron"></i>
+      </summary>
+      <div class="ai-preview-body"></div>`;
+    aiRow.insertBefore(previewEl, bubbleEl);
+  }
+  previewEl.id = `preview_${streamId}`;
+  previewEl.style.display = 'none';
+  previewEl.open = true;
+  const confEl = previewEl.querySelector('.ai-preview-confidence');
+  const bodyEl = previewEl.querySelector('.ai-preview-body');
+  if (confEl) {
+    confEl.id = `preview_conf_${streamId}`;
+    confEl.innerHTML = 'Menilai ambigu...';
+  }
+  if (bodyEl) {
+    bodyEl.id = `preview_body_${streamId}`;
+    bodyEl.innerHTML = '';
+  }
+
   aiRow.setAttribute('data-plain-text', '');
+  aiRow.setAttribute('data-preview', '');
   return { bubbleEl, actionsEl };
 }
 
 function renderStreamingContent(text) {
   return `<div class="streaming-plain">${escHtml(text)}</div>`;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function normalizePreview(preview) {
+  if (!preview || typeof preview !== 'object') return null;
+  return {
+    interpretasi: String(preview.interpretasi || '').trim(),
+    potensi_ambigu: asArray(preview.potensi_ambigu),
+    asumsi: asArray(preview.asumsi),
+    checklist_konteks: {
+      dipakai: asArray(preview.checklist_konteks?.dipakai),
+      kurang: asArray(preview.checklist_konteks?.kurang)
+    },
+    confidence: typeof preview.confidence === 'number' ? preview.confidence : null,
+    confidence_label: String(preview.confidence_label || '').trim()
+  };
+}
+
+function renderPreviewList(items, fallbackText) {
+  if (!items.length) return `<ul><li>${escHtml(fallbackText)}</li></ul>`;
+  return `<ul>${items.map(item => `<li>${escHtml(String(item))}</li>`).join('')}</ul>`;
+}
+
+function renderPreviewBody(preview) {
+  const data = normalizePreview(preview);
+  if (!data) return '';
+
+  return `
+    <div class="ai-preview-block">
+      <div class="ai-preview-block-title">Interpretasi AI</div>
+      <div style="font-size:13px;line-height:1.55;color:var(--text);">${escHtml(data.interpretasi || 'Interpretasi belum tersedia.')}</div>
+    </div>
+    <div class="ai-preview-block">
+      <div class="ai-preview-block-title">Potensi Ambigu</div>
+      ${renderPreviewList(data.potensi_ambigu, 'Tidak ada potensi ambigu yang signifikan.')}
+    </div>
+    <div class="ai-preview-block">
+      <div class="ai-preview-block-title">Asumsi AI</div>
+      ${renderPreviewList(data.asumsi, 'Tidak ada asumsi tambahan.')}
+    </div>
+    <div class="ai-preview-block">
+      <div class="ai-preview-block-title">Checklist Konteks</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Dipakai</div>
+      ${renderPreviewList(data.checklist_konteks.dipakai, 'Belum ada konteks yang dipakai.')}
+      <div style="font-size:12px;color:var(--text-muted);margin:8px 0 6px;">Kurang</div>
+      ${renderPreviewList(data.checklist_konteks.kurang, 'Tidak ada konteks penting yang hilang.')}
+    </div>`;
+}
+
+function renderPreviewConfidence(preview) {
+  const data = normalizePreview(preview);
+  if (!data) return '';
+  const score = typeof data.confidence === 'number' ? Math.round(data.confidence * 100) : null;
+  const label = data.confidence_label || 'tidak diketahui';
+  const scoreText = score === null ? '' : ` (${score}%)`;
+  return `<span class="ai-preview-pill">Kejelasan: ${escHtml(label)}${scoreText}</span>`;
 }
 
 // ══════════════════════════════════════════
@@ -1001,13 +1175,29 @@ async function processStream(response, streamId, onDone) {
   const bubbleEl  = document.getElementById(`bubble_${streamId}`);
   const actionsEl = document.getElementById(`actions_${streamId}`);
   const streamRow = document.getElementById(streamId);
+  const previewEl = document.getElementById(`preview_${streamId}`);
+  const previewBodyEl = document.getElementById(`preview_body_${streamId}`);
+  const previewConfEl = document.getElementById(`preview_conf_${streamId}`);
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
   let fullText  = '';
   let buffer    = '';
+  let previewData = null;
   let firstToken = true;
   let gotDone   = false;
   let renderScheduled = false;
+
+  function showPreview(preview) {
+    if (!previewEl || !previewBodyEl) return;
+    const normalized = normalizePreview(preview);
+    if (!normalized) return;
+    previewData = normalized;
+    previewBodyEl.innerHTML = renderPreviewBody(normalized);
+    if (previewConfEl) previewConfEl.innerHTML = renderPreviewConfidence(normalized);
+    previewEl.style.display = 'block';
+    previewEl.open = true;
+    scrollBottom();
+  }
 
   function flushStreamingRender(finalRender = false) {
     if (!bubbleEl) return;
@@ -1043,13 +1233,19 @@ async function processStream(response, streamId, onDone) {
       scheduleStreamingRender();
     }
 
+    if (parsed.preview) {
+      showPreview(parsed.preview);
+    }
+
     if (parsed.done) {
       gotDone = true;
       flushStreamingRender(true);
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-      onDone(parsed, fullText);
+      const finalPreview = previewData || normalizePreview(parsed.preview);
+      streamRow.setAttribute('data-preview', finalPreview ? encodeURIComponent(JSON.stringify(finalPreview)) : '');
+      onDone(parsed, fullText, finalPreview);
       scrollBottom();
     }
   }
@@ -1086,7 +1282,8 @@ async function processStream(response, streamId, onDone) {
     flushStreamingRender(true);
     actionsEl.style.display = 'flex';
     streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-    onDone({ done: true, session_id: null, message_id: null, user_message_id: null }, fullText);
+    streamRow.setAttribute('data-preview', previewData ? encodeURIComponent(JSON.stringify(previewData)) : '');
+    onDone({ done: true, session_id: null, message_id: null, user_message_id: null }, fullText, previewData);
     scrollBottom();
   }
 
@@ -1137,7 +1334,7 @@ async function sendMessage(text, files = []) {
       throw new Error(errMsg);
     }
 
-    await processStream(res, streamId, (parsed, fullText) => {
+    await processStream(res, streamId, (parsed, fullText, preview) => {
       if (parsed.session_id && !currentSessionId) {
         currentSessionId = parsed.session_id;
         localStorage.setItem('aai_last_session', currentSessionId);
@@ -1157,7 +1354,8 @@ async function sendMessage(text, files = []) {
       });
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
-        parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+        parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
+        preview: preview || null
       });
     });
 
@@ -1247,16 +1445,18 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
       throw new Error(errMsg);
     }
 
-    await processStream(res, streamId, (parsed, fullText) => {
+    await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedAssistantId = parsed.message_id || assistantMessageId;
       const existingAssistant = currentMessages.find(m => m.id === resolvedAssistantId);
       if (existingAssistant) {
         existingAssistant.content = fullText;
         existingAssistant.parent_id = userMessageId;
+        existingAssistant.preview = preview || null;
       } else {
         currentMessages.push({
           id: resolvedAssistantId, role: 'assistant', content: fullText,
-          parent_id: userMessageId, created_at: new Date().toISOString()
+          parent_id: userMessageId, created_at: new Date().toISOString(),
+          preview: preview || null
         });
       }
       if (userMessageId && resolvedAssistantId) activeVersionMap[userMessageId] = resolvedAssistantId;
@@ -1432,14 +1632,15 @@ async function sendMessageBranched(text, parentId = null) {
       throw new Error(errMsg);
     }
 
-    await processStream(res, streamId, (parsed, fullText) => {
+    await processStream(res, streamId, (parsed, fullText, preview) => {
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
         parent_id: parentId, created_at: new Date().toISOString()
       });
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
-        parent_id: parsed.user_message_id, created_at: new Date().toISOString()
+        parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
+        preview: preview || null
       });
       if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
     });
@@ -1617,9 +1818,10 @@ function renderMessageTree() {
   branch.forEach(m => {
     const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
     const idx      = siblings.findIndex(s => s.id === m.id);
+    const extra = m.role === 'assistant' && m.preview ? { preview: m.preview } : null;
     appendMessage(m.role, m.content, m.created_at, null, m.id, {
       total: siblings.length, current: idx + 1, siblings: siblings.map(s => s.id)
-    });
+    }, extra);
   });
   scrollBottom();
   setTimeout(initStickyCodeHeaders, 400);
@@ -1628,7 +1830,7 @@ function renderMessageTree() {
 // ══════════════════════════════════════════
 // APPEND MESSAGE
 // ══════════════════════════════════════════
-function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null) {
+function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null, extra = null) {
   const area = document.getElementById('chatArea');
   const time = timestamp
     ? new Date(timestamp).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })
@@ -1637,6 +1839,17 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
   let html = '';
 
   if (role === 'assistant') {
+    const previewBlock = extra?.preview
+      ? `<details class="ai-preview" open>
+          <summary>
+            <span class="ai-preview-summary-title">🧠 Preview Pemahaman AI</span>
+            <span class="ai-preview-confidence">${renderPreviewConfidence(extra.preview)}</span>
+            <i class="fas fa-chevron-down ai-preview-chevron"></i>
+          </summary>
+          <div class="ai-preview-body">${renderPreviewBody(extra.preview)}</div>
+        </details>`
+      : '';
+
     let sourcesHtml = '';
     if (metadata?.sources?.length) {
       sourcesHtml = `
@@ -1662,13 +1875,14 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
     html = `
-    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}">
+    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}">
       <div style="display:flex;align-items:center;gap:10px;">
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
         </div>
         <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi ${versionHtml}</div>
       </div>
+      ${previewBlock}
       <div class="bubble">${formatContent(content)}</div>
       ${sourcesHtml}
       <div class="msg-actions">

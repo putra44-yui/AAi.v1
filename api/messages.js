@@ -22,9 +22,36 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
+    const { data: previews } = await supabase
+      .from('message_previews')
+      .select('id, user_message_id, assistant_message_id, preview_json, is_ambiguous, confidence, reason_codes, created_at')
+      .eq('session_id', session_id)
+      .eq('is_ambiguous', true)
+      .order('created_at', { ascending: true });
+
+    const previewByAssistant = new Map((previews || [])
+      .filter(p => p.assistant_message_id)
+      .map(p => [p.assistant_message_id, p]));
+    const previewByUser = new Map((previews || [])
+      .filter(p => p.user_message_id)
+      .map(p => [p.user_message_id, p]));
+
+    const enriched = (messages || []).map(msg => {
+      if (msg.role !== 'assistant') return msg;
+      const linked = previewByAssistant.get(msg.id) || previewByUser.get(msg.parent_id);
+      if (!linked) return msg;
+      return {
+        ...msg,
+        preview: linked.preview_json,
+        preview_id: linked.id,
+        preview_confidence: linked.confidence,
+        preview_reason_codes: linked.reason_codes || []
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      messages: messages || [],
+      messages: enriched,
       session_id
     });
   } catch (err) {
