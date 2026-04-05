@@ -25,6 +25,8 @@ const CHECKPOINT_SUMMARY_START = '[SESSION_CHECKPOINT]';
 const CHECKPOINT_SUMMARY_END = '[/SESSION_CHECKPOINT]';
 
 const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
+const REASONING_STREAMING_TITLE = 'AAI sedang berpikir';
+const REASONING_FINAL_TITLE = 'AAI';
 
 function uniqueList(items = []) {
   return [...new Set(items.filter(Boolean))];
@@ -165,37 +167,115 @@ function parseMemoryInstructionTags(rawReply = '') {
   };
 }
 
-function buildMemoryContext(memories = []) {
-  if (!Array.isArray(memories) || memories.length === 0) return 'Tidak ada memori.';
+function humanizeMemoryLabel(input = '') {
+  return String(input || '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  const labelByType = {
-    pattern: 'Pattern',
-    kebiasaan: 'Kebiasaan',
-    cara_berpikir: 'Cara Berpikir',
-    preferensi: 'Preferensi',
-    emosi: 'Emosi',
-    fakta: 'Fakta'
+function buildMemoryBullet(memory = {}) {
+  const value = String(memory.value || '').trim();
+  const fallback = humanizeMemoryLabel(memory.key || 'memori tanpa detail');
+  return `- ${value || fallback}`;
+}
+
+function buildMemoryContext(memories = []) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return 'Belum ada memori personal yang relevan.';
+  }
+
+  const sections = [
+    { title: 'POLA PERILAKU', types: ['pattern', 'kebiasaan'] },
+    { title: 'CARA BERPIKIR', types: ['cara_berpikir'] },
+    { title: 'PREFERENSI', types: ['preferensi'] },
+    { title: 'EMOSI', types: ['emosi'] },
+    { title: 'FAKTA KUNCI', types: ['fakta'] }
+  ];
+
+  const blocks = [];
+  for (const section of sections) {
+    const rows = uniqueList(memories
+      .filter(memory => section.types.includes(normalizeMemoryType(memory.memory_type || 'fakta')))
+      .map(buildMemoryBullet));
+
+    if (!rows.length) continue;
+    blocks.push(`[${section.title}]\n${rows.join('\n')}`);
+  }
+
+  return blocks.join('\n\n') || 'Belum ada memori personal yang relevan.';
+}
+
+function buildIdentityContext(person = {}, currentAge = '?', familyContext = '', relationContext = '') {
+  return [
+    '[IDENTITAS]',
+    `Nama: ${person?.name || '-'}`,
+    `Peran: ${person?.role || '-'}`,
+    `Usia: ${currentAge || '?'}`,
+    '',
+    '[KELUARGA]',
+    familyContext || '-',
+    '',
+    '[RELASI KELUARGA]',
+    relationContext || 'Belum ada relasi.'
+  ].join('\n');
+}
+
+function buildConsistencyLock(person = {}, relevantSelection = {}) {
+  const typeLabels = {
+    pattern: 'pola perilaku',
+    kebiasaan: 'kebiasaan',
+    cara_berpikir: 'cara berpikir',
+    preferensi: 'preferensi',
+    emosi: 'emosi',
+    fakta: 'fakta kunci'
   };
 
-  const grouped = new Map();
-  for (const memory of memories) {
-    const type = normalizeMemoryType(memory.memory_type || 'fakta');
-    if (!grouped.has(type)) grouped.set(type, []);
+  const prioritizedTraits = uniqueList((relevantSelection.preferredTypes || [])
+    .map(type => typeLabels[normalizeMemoryType(type)])
+    .filter(Boolean));
 
-    const confidence = Number(memory.confidence || 0.7);
-    const confidenceLabel = confidence >= 0.85 ? 'tinggi' : confidence >= 0.65 ? 'sedang' : 'rendah';
-    grouped.get(type).push(`- [${confidenceLabel}] ${memory.key}: ${memory.value}`);
-  }
+  return [
+    '[CONSISTENCY LOCK]',
+    `Kamu adalah representasi AI untuk ${person?.name || 'user'} sebagai ${person?.role || 'anggota keluarga'}.`,
+    `Jawaban harus konsisten dengan memori terpilih, terutama pada: ${prioritizedTraits.join(', ') || 'identitas, pola perilaku, dan preferensi yang tersedia'}.`,
+    'Jika data kurang, gunakan inferensi minimal yang paling masuk akal dan jangan nyatakan sebagai fakta pasti.',
+    'Jangan membuat sifat, kebiasaan, emosi, atau preferensi yang bertentangan dengan memori yang tersedia.'
+  ].join('\n');
+}
 
-  const orderedTypes = ['pattern', 'kebiasaan', 'cara_berpikir', 'preferensi', 'emosi', 'fakta'];
-  const blocks = [];
-  for (const type of orderedTypes) {
-    const rows = grouped.get(type);
-    if (!rows?.length) continue;
-    blocks.push(`${labelByType[type]}:\n${rows.join('\n')}`);
-  }
+function buildFinalContextBlock({
+  userMessage = '',
+  person = {},
+  currentAge = '?',
+  familyContext = '',
+  relationContext = '',
+  relevantSelection = {},
+  experimentProfile = {},
+  recentHistory = [],
+  fileContext = ''
+}) {
+  const memoryText = buildMemoryContext(relevantSelection.items || []);
 
-  return blocks.join('\n\n') || 'Tidak ada memori.';
+  return [
+    buildIdentityContext(person, currentAge, familyContext, relationContext),
+    '',
+    buildConsistencyLock(person, relevantSelection),
+    '',
+    '[USER MESSAGE]',
+    userMessage || '-',
+    '',
+    '[RELEVANT MEMORY]',
+    `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
+    `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
+    `Jumlah memori terpilih: ${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
+    `Experiment mode: ${experimentProfile.mode || 'balanced'}`,
+    memoryText,
+    '',
+    '[LAST CHAT]',
+    buildLastChatContext(recentHistory),
+    ...(fileContext ? ['', '[LAMPIRAN FILE]', fileContext] : [])
+  ].join('\n');
 }
 
 function detectMemoryIntent(message = '') {
@@ -545,6 +625,7 @@ function applyWorksheetColumnWidths(ws, rows = []) {
 function createMemoryTagStreamFilter() {
   let buffer = '';
   let suppressingMemoryTag = false;
+  let suppressingClarifyBlock = false;
 
   return function filterChunk(chunk = '', flush = false) {
     if (chunk) buffer += chunk;
@@ -552,6 +633,18 @@ function createMemoryTagStreamFilter() {
     let visible = '';
 
     while (buffer.length > 0) {
+      // Handle [AAI_CLARIFY]...[/AAI_CLARIFY] blocks
+      if (suppressingClarifyBlock) {
+        const endIdx = buffer.indexOf(CLARIFY_BLOCK_END);
+        if (endIdx === -1) {
+          if (flush) buffer = '';
+          break;
+        }
+        buffer = buffer.slice(endIdx + CLARIFY_BLOCK_END.length);
+        suppressingClarifyBlock = false;
+        continue;
+      }
+
       if (suppressingMemoryTag) {
         const tagEndIndex = buffer.indexOf(']');
         if (tagEndIndex === -1) {
@@ -564,16 +657,25 @@ function createMemoryTagStreamFilter() {
         continue;
       }
 
-      const prefixCandidates = [MEMORY_TAG_PREFIX, MEMORY_FORGET_TAG_PREFIX]
-        .map(prefix => ({ prefix, index: buffer.indexOf(prefix) }))
+      // Check for all block/tag starts
+      const blockCandidates = [
+        { marker: CLARIFY_BLOCK_START, type: 'clarify' },
+        { marker: MEMORY_TAG_PREFIX, type: 'memory' },
+        { marker: MEMORY_FORGET_TAG_PREFIX, type: 'forget' }
+      ]
+        .map(item => ({ ...item, index: buffer.indexOf(item.marker) }))
         .filter(item => item.index !== -1)
         .sort((a, b) => a.index - b.index);
 
-      if (prefixCandidates.length > 0) {
-        const selected = prefixCandidates[0];
+      if (blockCandidates.length > 0) {
+        const selected = blockCandidates[0];
         visible += buffer.slice(0, selected.index);
-        buffer = buffer.slice(selected.index + selected.prefix.length);
-        suppressingMemoryTag = true;
+        buffer = buffer.slice(selected.index + selected.marker.length);
+        if (selected.type === 'clarify') {
+          suppressingClarifyBlock = true;
+        } else {
+          suppressingMemoryTag = true;
+        }
         continue;
       }
 
@@ -583,8 +685,12 @@ function createMemoryTagStreamFilter() {
         break;
       }
 
-      const maxPrefixLength = Math.max(MEMORY_TAG_PREFIX.length, MEMORY_FORGET_TAG_PREFIX.length);
-      const safeLength = Math.max(0, buffer.length - (maxPrefixLength - 1));
+      const maxMarkerLength = Math.max(
+        CLARIFY_BLOCK_START.length,
+        MEMORY_TAG_PREFIX.length,
+        MEMORY_FORGET_TAG_PREFIX.length
+      );
+      const safeLength = Math.max(0, buffer.length - (maxMarkerLength - 1));
       if (safeLength === 0) break;
 
       visible += buffer.slice(0, safeLength);
@@ -703,6 +809,248 @@ async function extractPdfText(buffer) {
   }
 }
 
+function collectMatchedTerms(text = '', phrases = []) {
+  const normalized = String(text || '').toLowerCase();
+  if (!normalized) return [];
+  return uniqueList((phrases || []).filter(term => normalized.includes(String(term).toLowerCase())));
+}
+
+function detectConversationEmotion(userMessage = '', recentHistory = []) {
+  const currentText = String(userMessage || '').toLowerCase();
+  const historyText = (recentHistory || [])
+    .slice(-4)
+    .map(row => String(row?.content || '').toLowerCase())
+    .join(' \n ');
+
+  const rules = [
+    {
+      label: 'sedih',
+      opening: 'Sepertinya perasaannya lagi agak berat.',
+      phrases: ['sedih', 'kecewa', 'nangis', 'galau', 'capek', 'lelah', 'drop', 'down', 'terpuruk', 'putus asa', 'stres']
+    },
+    {
+      label: 'kesal',
+      opening: 'Ada nada kesal yang cukup terasa di sini.',
+      phrases: ['marah', 'kesal', 'jengkel', 'dongkol', 'sebal', 'muak', 'geram', 'emosi']
+    },
+    {
+      label: 'cemas',
+      opening: 'Aku menangkap ada kebingungan atau kekhawatiran di balik pesan ini.',
+      phrases: ['cemas', 'khawatir', 'takut', 'bingung', 'panik', 'gimana ya', 'bagaimana ya']
+    },
+    {
+      label: 'mendesak',
+      opening: 'Nada pesannya terasa cukup buru-buru.',
+      phrases: ['segera', 'cepat', 'urgent', 'darurat', 'sekarang', 'asap']
+    },
+    {
+      label: 'senang',
+      opening: 'Nada pesannya terasa lebih ringan dan positif.',
+      phrases: ['senang', 'lega', 'bahagia', 'syukur', 'alhamdulillah', 'mantap', 'asik']
+    },
+    {
+      label: 'butuh_bantuan',
+      opening: 'Dia kelihatannya memang lagi butuh bantuan.',
+      phrases: ['tolong', 'bantu', 'bisa bantu', 'butuh bantuan']
+    }
+  ];
+
+  let best = {
+    label: 'netral',
+    opening: '',
+    evidence: [],
+    fromHistory: false,
+    score: 0
+  };
+
+  for (const rule of rules) {
+    const currentMatches = collectMatchedTerms(currentText, rule.phrases);
+    const historyMatches = collectMatchedTerms(historyText, rule.phrases);
+    const score = currentMatches.length * 2 + historyMatches.length * 0.75;
+
+    if (score <= best.score) continue;
+
+    best = {
+      label: rule.label,
+      opening: rule.opening,
+      evidence: uniqueList([...currentMatches, ...historyMatches]),
+      fromHistory: historyMatches.length > 0,
+      score
+    };
+  }
+
+  return best;
+}
+
+function detectReasoningIntent(userMessage = '', fileContext = '', targetPersona = '') {
+  const normalized = String(userMessage || '').toLowerCase();
+  const hasFileContext = !!String(fileContext || '').trim();
+
+  if (hasFileContext) {
+    return {
+      key: 'file',
+      step: 'Ada lampiran yang ikut masuk ke percakapan ini, jadi aku tidak boleh menjawab tanpa membacanya juga.'
+    };
+  }
+
+  if (
+    targetPersona === 'Coding' ||
+    /kode|bug|error|function|api|query|database|frontend|backend|html|css|javascript|js|python|sql|deploy|git|react|next|node|endpoint|route|request|response|json|compile|build|install|npm|yarn|vercel|server/i.test(normalized)
+  ) {
+    return {
+      key: 'technical',
+      step: 'Ini kelihatannya butuh jawaban teknis yang rapi dan langsung bisa dipakai.'
+    };
+  }
+
+  if (/sedih|curhat|nangis|galau|kecewa|capek|stres|cemas|khawatir|marah|kesal/i.test(normalized)) {
+    return {
+      key: 'emotional',
+      step: 'Di sini aku perlu jaga nada jawabanku supaya tetap empatik sebelum masuk ke inti saran.'
+    };
+  }
+
+  if (/buatkan|bikinkan|tulis|rancang|desain|susunkan/i.test(normalized)) {
+    return {
+      key: 'creation',
+      step: 'Dia tampaknya minta dibantu membuat sesuatu, jadi jawabanku harus konkret dan tidak muter-muter.'
+    };
+  }
+
+  if (/\?|kenapa|bagaimana|gimana|apa|jelaskan|tolong|bisa|cek|lihat|perbaiki|analisa/i.test(normalized)) {
+    return {
+      key: 'question',
+      step: 'Ini bentuknya pertanyaan atau permintaan, jadi aku perlu urai maksudnya dulu lalu jawab setahap demi setahap.'
+    };
+  }
+
+  return {
+    key: 'general',
+    step: 'Aku pilih jawaban yang paling berguna dulu supaya arah percakapannya tetap jelas.'
+  };
+}
+
+function buildReasoningSteps({
+  userMessage = '',
+  currentPerson = {},
+  allPersons = [],
+  recentHistory = [],
+  targetPersona = '',
+  ambiguityPayload = null,
+  fileContext = ''
+}) {
+  const text = String(userMessage || '').trim();
+  if (!text) return [];
+
+  const normalized = text.toLowerCase();
+  const speakerName = String(currentPerson?.name || '').trim() || 'Dia';
+  const personNames = uniqueList((allPersons || []).map(p => String(p?.name || '').trim()).filter(Boolean));
+  const mentionedPeople = personNames.filter(name => {
+    const loweredName = name.toLowerCase();
+    return loweredName && loweredName !== speakerName.toLowerCase() && normalized.includes(loweredName);
+  });
+  const relevantHistory = (recentHistory || []).filter(row => row?.content).slice(-4);
+  const lastUserHistory = [...relevantHistory]
+    .reverse()
+    .find(row => row.role === 'user' && String(row.content || '').trim());
+  const emotion = detectConversationEmotion(text, relevantHistory);
+  const intent = detectReasoningIntent(text, fileContext, targetPersona);
+  const ambiguityReasons = Array.isArray(ambiguityPayload?.reason_codes) ? ambiguityPayload.reason_codes : [];
+  const steps = [];
+
+  if (mentionedPeople.length > 0) {
+    steps.push(`${speakerName} sedang cerita soal ${mentionedPeople.slice(0, 2).join(' dan ')}. Aku perlu jaga supaya orang yang dimaksud tidak tertukar.`);
+  } else if (currentPerson?.name) {
+    steps.push(`${speakerName} sedang bicara padaku, jadi aku tangkap dulu apa yang paling dia butuhkan dari pesan ini.`);
+  } else {
+    steps.push('Ada orang yang sedang bicara padaku, jadi aku baca pelan-pelan dulu biar arah jawabannya pas.');
+  }
+
+  if (emotion.label !== 'netral') {
+    const evidence = emotion.evidence.length
+      ? ` Aku menangkapnya dari ${emotion.evidence.slice(0, 3).map(item => `"${item}"`).join(', ')}${emotion.fromHistory ? ' dan nada obrolan sebelumnya' : ''}.`
+      : emotion.fromHistory
+        ? ' Nuansa dari obrolan sebelumnya ikut menguatkan kesan ini.'
+        : '';
+    steps.push(`${emotion.opening}${evidence}`);
+  } else if (relevantHistory.length > 0) {
+    steps.push('Aku lihat dulu nada obrolan sebelumnya supaya jawabanku tidak meleset dari suasana percakapannya.');
+  } else if (/\?|tolong|bisa|jelaskan|buatkan|perbaiki|cek|lihat/i.test(normalized)) {
+    steps.push('Sepertinya dia memang sedang mencari bantuan, jadi aku fokus ke kebutuhan yang paling terasa dulu.');
+  }
+
+  if (String(fileContext || '').trim()) {
+    steps.push('Ada lampiran yang ikut masuk ke percakapan ini, jadi aku tidak boleh menjawab tanpa membacanya juga.');
+  } else if (lastUserHistory) {
+    const historySnippet = compactHistoryMessage(lastUserHistory.content, 90);
+    if (historySnippet && historySnippet !== '-') {
+      steps.push(`Aku masih ingat benang obrolan sebelumnya: "${historySnippet}". Itu kupakai supaya jawabanku nyambung.`);
+    }
+  }
+
+  if (ambiguityPayload?.show_preview) {
+    if (ambiguityReasons.includes('missing_entity') || ambiguityReasons.includes('polysemy')) {
+      steps.push('Masih ada rujukan yang bisa kebawa ke orang atau hal yang salah, jadi aku sengaja tidak asal menebak.');
+    } else {
+      steps.push('Ada sedikit ruang salah paham di pesan ini, jadi aku rapikan dulu tafsir yang paling masuk akal sebelum menjawab.');
+    }
+  }
+
+  if (intent.step) {
+    steps.push(intent.step);
+  }
+
+  if (targetPersona === 'Coding') {
+    steps.push('Karena ini terasa teknis, aku usahakan jawabannya langsung bisa dipakai, bukan cuma teori.');
+  } else if (intent.key === 'emotional') {
+    steps.push('Aku pilih jawaban yang tetap lembut, biar pesannya terasa menolong dulu sebelum memberi arah.');
+  }
+
+  if (steps.length < 2) {
+    steps.push('Aku ambil jalur jawaban yang paling aman dulu, lalu kalau perlu baru kuperjelas lebih jauh.');
+  }
+
+  return uniqueList(
+    steps
+      .map(step => String(step || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+  ).slice(0, 6);
+}
+
+function buildLegacyReasoningSteps(previewPayload = {}) {
+  const steps = [];
+  const interpretasi = String(previewPayload?.interpretasi || '').trim();
+  const usedContext = uniqueList(previewPayload?.checklist_konteks?.dipakai || []).slice(0, 1);
+  const missingContext = uniqueList(previewPayload?.checklist_konteks?.kurang || []).slice(0, 1);
+  const potentials = uniqueList(previewPayload?.potensi_ambigu || []).slice(0, 1);
+  const assumptions = uniqueList(previewPayload?.asumsi || []).slice(0, 1);
+
+  if (interpretasi) steps.push(interpretasi);
+  if (usedContext.length) steps.push(`Aku sempat memakai konteks ini saat membaca pesan: ${usedContext[0]}`);
+  if (potentials.length) steps.push(`Ada bagian yang sempat kubaca hati-hati: ${potentials[0]}`);
+  if (assumptions.length) steps.push(`Tanpa detail tambahan, sementara aku berpegangan pada ini: ${assumptions[0]}`);
+  if (missingContext.length) steps.push(`Kalau mau lebih presisi, bagian ini tadinya masih kurang jelas: ${missingContext[0]}`);
+
+  return uniqueList(steps.map(step => String(step || '').trim()).filter(Boolean)).slice(0, 5);
+}
+
+function buildClientPreviewPayload(previewPayload = null) {
+  if (!previewPayload || typeof previewPayload !== 'object') return null;
+
+  const reasoningSteps = Array.isArray(previewPayload.reasoning_steps)
+    ? previewPayload.reasoning_steps.map(step => String(step || '').trim()).filter(Boolean)
+    : buildLegacyReasoningSteps(previewPayload);
+
+  if (!reasoningSteps.length) return null;
+
+  return {
+    preview_version: Number(previewPayload.preview_version || 2),
+    title: String(previewPayload.title || REASONING_FINAL_TITLE).trim() || REASONING_FINAL_TITLE,
+    streaming_title: String(previewPayload.streaming_title || REASONING_STREAMING_TITLE).trim() || REASONING_STREAMING_TITLE,
+    reasoning_steps: reasoningSteps
+  };
+}
+
 function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
   const text = String(userMessage || '').trim();
   const normalized = text.toLowerCase();
@@ -731,9 +1079,10 @@ function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
   const hasNamedPerson = personNames.some(name => normalized.includes(String(name).toLowerCase()));
   const ambiguousTokens = AMBIGUOUS_TERMS.filter(term => normalized.includes(term));
 
-  if (hasQuestion) usedContext.push('Tujuan umum pesan terdeteksi sebagai pertanyaan/permintaan.');
-  if (currentPerson?.name) usedContext.push(`Pengirim pesan teridentifikasi: ${currentPerson.name}.`);
-  if (hasNamedPerson) usedContext.push('Ada penyebutan nama yang membantu memperjelas target.');
+  // PRIORITAS: Deteksi "siapa penanya" TERLEBIH DAHULU (FIRST)
+  if (currentPerson?.name) usedContext.push(`[FIRST] Penanya/pengirim: ${currentPerson.name} (AAI keluarga).`);
+  if (hasQuestion) usedContext.push('Tujuan: pertanyaan/permintaan terdeteksi.');
+  if (hasNamedPerson) usedContext.push('Ada penyebutan nama yang memperjelas target.');
 
   if (text.length < 18) {
     potentials.push('Pesan sangat singkat sehingga maksud detail belum cukup jelas.');
@@ -741,7 +1090,7 @@ function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
   }
 
   if (!hasQuestion) {
-    potentials.push('Belum ada kata tanya/aksi yang jelas, sehingga AI bisa menebak tujuan.');
+    potentials.push('Belum ada kata tanya/aksi yang jelas, sehingga AAI bisa menebak tujuan.');
     missingContext.push('Sebutkan tindakan yang diminta, misalnya analisa, perbaiki, atau buatkan.');
   }
 
@@ -760,9 +1109,9 @@ function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
     missingContext.push('Tambahkan potongan error, file terkait, atau langkah reproduksi.');
   }
 
-  assumptions.push('AI akan memprioritaskan konteks terbaru di sesi ini bila tidak ada penjelasan tambahan.');
+  assumptions.push('AAI akan memprioritaskan konteks terbaru di sesi ini bila tidak ada penjelasan tambahan.');
   if (!hasNamedPerson && personNames.length > 0) {
-    assumptions.push('Jika ada rujukan orang tanpa nama, AI bisa salah memilih individu yang dimaksud.');
+    assumptions.push('Jika ada rujukan orang tanpa nama, AAI bisa salah memilih individu yang dimaksud.');
   }
 
   const reasonCodes = [];
@@ -778,8 +1127,8 @@ function analyzeAmbiguityPreview(userMessage, currentPerson, allPersons = []) {
   const confidenceLabel = confidence >= 0.78 ? 'tinggi' : confidence >= 0.55 ? 'sedang' : 'rendah';
 
   const interpretasi = hasQuestion
-    ? 'Saya menangkap bahwa kamu sedang meminta bantuan sesuai pesan di atas, namun beberapa detail bisa ditafsirkan lebih dari satu cara.'
-    : 'Saya menangkap ini sebagai pernyataan/permintaan umum, sehingga tujuan akhir bisa berbeda tergantung maksud yang kamu inginkan.';
+    ? 'AAI menangkap bahwa Anda sedang meminta bantuan sesuai pesan di atas, namun beberapa detail bisa ditafsirkan lebih dari satu cara.'
+    : 'AAI menangkap ini sebagai pernyataan/permintaan umum, sehingga tujuan akhir bisa berbeda tergantung maksud yang Anda inginkan.';
 
   return {
     show_preview: showPreview,
@@ -950,7 +1299,6 @@ export default async function handler(req, res) {
         .from('message_previews')
         .select('id, user_message_id, assistant_message_id, preview_json, is_ambiguous, confidence, reason_codes, created_at')
         .eq('session_id', session_id)
-        .eq('is_ambiguous', true)
         .order('created_at', { ascending: true });
 
       const previewByAssistant = new Map((previews || [])
@@ -966,10 +1314,8 @@ export default async function handler(req, res) {
         if (!linked) return msg;
         return {
           ...msg,
-          preview: linked.preview_json,
-          preview_id: linked.id,
-          preview_confidence: linked.confidence,
-          preview_reason_codes: linked.reason_codes || []
+          preview: buildClientPreviewPayload(linked.preview_json),
+          preview_id: linked.id
         };
       });
 
@@ -1158,9 +1504,6 @@ export default async function handler(req, res) {
       minPreferredRelevance: experimentProfile.minPreferredRelevance,
       minOtherRelevance: experimentProfile.minOtherRelevance
     });
-    const relevantMemories = relevantSelection.items;
-    const memoryText = buildMemoryContext(relevantMemories);
-
     let targetAssistantMessageId = assistant_message_id || null;
     if (!targetAssistantMessageId && edit_message_id) {
       const { data: existingAssistant } = await supabase
@@ -1238,19 +1581,17 @@ export default async function handler(req, res) {
       ...recentHistory.map(m => ({ role: m.role, content: m.content }))
     ];
 
-    const contextualPriorityBlock = [
-      '[USER MESSAGE]',
-      userMessage || '-',
-      '',
-      '[RELEVANT MEMORY]',
-      `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
-      `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
-      `Experiment mode: ${experimentProfile.mode}`,
-      memoryText || 'Tidak ada memori.',
-      '',
-      '[LAST CHAT]',
-      buildLastChatContext(recentHistory)
-    ].join('\n');
+    const contextualPriorityBlock = buildFinalContextBlock({
+      userMessage,
+      person,
+      currentAge,
+      familyContext,
+      relationContext,
+      relevantSelection,
+      experimentProfile,
+      recentHistory,
+      fileContext
+    });
 
     // 4. Persona (sama)
     let targetPersona = persona_name;
@@ -1271,21 +1612,15 @@ export default async function handler(req, res) {
     const { data: personasData } = await supabase
       .from('ai_personas').select('name, system_prompt').in('name', personaList);
     const combinedSystem = personasData?.map(p => `=== GAYA: ${p.name} ===\n${p.system_prompt}`).join('\n\n') || '';
+    const runtimeContextPrompt = {
+      role: 'system',
+      content: `Konteks runtime (WAJIB jadi rujukan awal):\n${contextualPriorityBlock}`
+    };
 
     // 5. System prompt 
     const systemPrompt = {
       role: "system",
       content: `Kamu adalah AAi, AI keluarga yang cerdas dan ramah.
-
-Current speaker: ${person?.name} (${person?.role}, ${currentAge} tahun)
-
-Keluarga:\n${familyContext}
-
-Relasi:\n${relationContext}
-
-Konteks prioritas (WAJIB jadi rujukan awal):\n${contextualPriorityBlock}
-
-${fileContext}
 
 Persona aktif: ${personaList.join(' + ')}
 ${combinedSystem}
@@ -1375,29 +1710,43 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
       finalUserMessageId = userMsgData.id;
     }
 
-    const previewPayload = analyzeAmbiguityPreview(userMessage, person, allPersons || []);
-    const shouldShowPreview = !!previewPayload.show_preview;
+    const ambiguityPayload = analyzeAmbiguityPreview(userMessage, person, allPersons || []);
+    const previewPayload = {
+      preview_version: 2,
+      title: REASONING_FINAL_TITLE,
+      streaming_title: REASONING_STREAMING_TITLE,
+      reasoning_steps: buildReasoningSteps({
+        userMessage,
+        currentPerson: person,
+        allPersons: allPersons || [],
+        recentHistory,
+        targetPersona,
+        ambiguityPayload,
+        fileContext
+      }),
+      ambiguity: ambiguityPayload
+    };
+    const clientPreviewPayload = buildClientPreviewPayload(previewPayload);
+    const isAmbiguousPreview = !!ambiguityPayload.show_preview;
     let previewRecordId = null;
 
-    if (shouldShowPreview) {
-      try {
-        const { data: previewInsert } = await supabase
-          .from('message_previews')
-          .insert({
-            session_id: currentSessionId,
-            user_message_id: finalUserMessageId,
-            assistant_message_id: null,
-            is_ambiguous: true,
-            confidence: previewPayload.confidence,
-            reason_codes: previewPayload.reason_codes || [],
-            preview_json: previewPayload
-          })
-          .select('id')
-          .single();
-        previewRecordId = previewInsert?.id || null;
-      } catch (previewInsertErr) {
-        console.error('[Preview] Gagal simpan preview audit:', previewInsertErr.message);
-      }
+    try {
+      const { data: previewInsert } = await supabase
+        .from('message_previews')
+        .insert({
+          session_id: currentSessionId,
+          user_message_id: finalUserMessageId,
+          assistant_message_id: null,
+          is_ambiguous: isAmbiguousPreview,
+          confidence: ambiguityPayload.confidence,
+          reason_codes: ambiguityPayload.reason_codes || [],
+          preview_json: previewPayload
+        })
+        .select('id')
+        .single();
+      previewRecordId = previewInsert?.id || null;
+    } catch (previewInsertErr) {
+      console.error('[Preview] Gagal simpan preview audit:', previewInsertErr.message);
     }
 
     // ── STREAMING ──
@@ -1406,11 +1755,12 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    if (shouldShowPreview) {
+    if (clientPreviewPayload) {
       res.write(`data: ${JSON.stringify({
-        preview: previewPayload,
+        preview: clientPreviewPayload,
+        reasoning: clientPreviewPayload.reasoning_steps,
         preview_id: previewRecordId,
-        phase: 'preview'
+        phase: 'reasoning'
       })}\n\n`);
       res.flush?.();
     }
@@ -1460,11 +1810,12 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     const openRouterPayload = {
       messages: [
         systemPrompt,
+        runtimeContextPrompt,
         ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
         ...chatHistory,
         {
           role: 'user',
-          content: `${userMessage}${fileContext ? `\n\n📎 LAMPIRAN FILE:\n${fileContext}` : ''}`
+          content: userMessage
         }
       ],
       stream: true,
@@ -1634,7 +1985,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         message_id: aiMsgData?.id,
         user_message_id: finalUserMessageId,
         preview_id: previewRecordId,
-        preview: shouldShowPreview ? previewPayload : null,
+        preview: clientPreviewPayload,
         persona_used: targetPersona,
         model_used: modelUsed,
         retry_count: retryCount,

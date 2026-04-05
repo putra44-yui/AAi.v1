@@ -277,7 +277,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
       </div>
       <div class="ai-preview" id="preview_${streamId}" style="display:none;">
         <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
-          <span class="ai-preview-summary-title">🧠 Pemahaman AI</span>
+          <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
           <i class="fas fa-chevron-down ai-preview-chevron"></i>
         </button>
         <div class="ai-preview-body" id="preview_body_${streamId}"></div>
@@ -364,7 +364,7 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
     previewEl.className = 'ai-preview';
     previewEl.innerHTML = `
       <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
-        <span class="ai-preview-summary-title">🧠 Pemahaman AI</span>
+        <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
         <i class="fas fa-chevron-down ai-preview-chevron"></i>
       </button>
       <div class="ai-preview-body"></div>`;
@@ -373,6 +373,10 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
   previewEl.id = `preview_${streamId}`;
   previewEl.style.display = 'none';
   previewEl.classList.remove('is-open');
+  const previewTitleEl = previewEl.querySelector('.ai-preview-summary-title');
+  if (previewTitleEl) {
+    previewTitleEl.textContent = '🧠 AAI sedang berpikir';
+  }
   let teaserEl = aiRow.querySelector('.ai-live-teaser');
   if (!teaserEl) {
     teaserEl = document.createElement('div');
@@ -443,16 +447,43 @@ function asArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function buildLegacyReasoningSteps(preview = {}) {
+  const steps = [];
+  const interpretasi = String(preview?.interpretasi || '').trim();
+  const usedContext = asArray(preview?.checklist_konteks?.dipakai).slice(0, 1);
+  const missingContext = asArray(preview?.checklist_konteks?.kurang).slice(0, 1);
+  const potentials = asArray(preview?.potensi_ambigu).slice(0, 1);
+  const assumptions = asArray(preview?.asumsi).slice(0, 1);
+
+  if (interpretasi) steps.push(interpretasi);
+  if (usedContext.length) steps.push(`Aku sempat memakai konteks ini saat membaca pesan: ${usedContext[0]}`);
+  if (potentials.length) steps.push(`Ada bagian yang sempat kubaca hati-hati: ${potentials[0]}`);
+  if (assumptions.length) steps.push(`Tanpa detail tambahan, sementara aku berpegangan pada ini: ${assumptions[0]}`);
+  if (missingContext.length) steps.push(`Kalau mau lebih presisi, bagian ini tadinya masih kurang jelas: ${missingContext[0]}`);
+
+  return [...new Set(steps.map(step => String(step || '').trim()).filter(Boolean))].slice(0, 5);
+}
+
 function normalizePreview(preview) {
+  if (Array.isArray(preview)) {
+    const reasoningSteps = asArray(preview).map(step => String(step || '').trim()).filter(Boolean);
+    if (!reasoningSteps.length) return null;
+    return {
+      title: 'AAI',
+      streaming_title: 'AAI sedang berpikir',
+      reasoning_steps: reasoningSteps
+    };
+  }
+
   if (!preview || typeof preview !== 'object') return null;
+  const explicitSteps = asArray(preview.reasoning_steps).map(step => String(step || '').trim()).filter(Boolean);
+  const reasoningSteps = explicitSteps.length ? explicitSteps : buildLegacyReasoningSteps(preview);
+  if (!reasoningSteps.length) return null;
+
   return {
-    interpretasi: String(preview.interpretasi || '').trim(),
-    potensi_ambigu: asArray(preview.potensi_ambigu),
-    asumsi: asArray(preview.asumsi),
-    checklist_konteks: {
-      dipakai: asArray(preview.checklist_konteks?.dipakai),
-      kurang: asArray(preview.checklist_konteks?.kurang)
-    }
+    title: String(preview.title || 'AAI').trim() || 'AAI',
+    streaming_title: String(preview.streaming_title || 'AAI sedang berpikir').trim() || 'AAI sedang berpikir',
+    reasoning_steps: reasoningSteps
   };
 }
 
@@ -476,26 +507,16 @@ function renderPreviewList(items, fallbackText) {
 function renderPreviewBody(preview) {
   const data = normalizePreview(preview);
   if (!data) return '';
+  const reasoningItems = data.reasoning_steps.length
+    ? data.reasoning_steps
+    : ['AAI sedang merangkai jawaban dari konteks yang tersedia.'];
 
   return `
     <div class="ai-preview-block">
-      <div class="ai-preview-block-title">Interpretasi AI</div>
-      <div style="font-size:13px;line-height:1.55;color:var(--text);">${escHtml(data.interpretasi || 'Interpretasi belum tersedia.')}</div>
-    </div>
-    <div class="ai-preview-block">
-      <div class="ai-preview-block-title">Potensi Ambigu</div>
-      ${renderPreviewList(data.potensi_ambigu, 'Tidak ada potensi ambigu yang signifikan.')}
-    </div>
-    <div class="ai-preview-block">
-      <div class="ai-preview-block-title">Asumsi AI</div>
-      ${renderPreviewList(data.asumsi, 'Tidak ada asumsi tambahan.')}
-    </div>
-    <div class="ai-preview-block">
-      <div class="ai-preview-block-title">Checklist Konteks</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Dipakai</div>
-      ${renderPreviewList(data.checklist_konteks.dipakai, 'Belum ada konteks yang dipakai.')}
-      <div style="font-size:12px;color:var(--text-muted);margin:8px 0 6px;">Kurang</div>
-      ${renderPreviewList(data.checklist_konteks.kurang, 'Tidak ada konteks penting yang hilang.')}
+      <div class="ai-preview-block-title">Yang dipikirkan AAI</div>
+      <ol style="margin:0;padding-left:18px;font-size:13px;line-height:1.6;color:var(--text);">
+        ${reasoningItems.map(step => `<li style="margin-bottom:8px;">${escHtml(String(step))}</li>`).join('')}
+      </ol>
     </div>`;
 }
 
@@ -506,7 +527,7 @@ function buildPreviewPanelHTML(preview, isOpen = false) {
   return `
     <div class="ai-preview${isOpen ? ' is-open' : ''}">
       <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
-        <span class="ai-preview-summary-title">🧠 Pemahaman AI</span>
+        <span class="ai-preview-summary-title">🧠 ${escHtml(normalized.title || 'AAI')}</span>
         <i class="fas fa-chevron-down ai-preview-chevron"></i>
       </button>
       <div class="ai-preview-body">${renderPreviewBody(normalized)}</div>
@@ -517,14 +538,10 @@ function buildPreviewTeaserQueue(preview) {
   const data = normalizePreview(preview);
   if (!data) return [];
 
-  const parts = [];
-  if (data.interpretasi) parts.push(data.interpretasi);
-  data.potensi_ambigu.forEach(item => parts.push(item));
-  data.asumsi.forEach(item => parts.push(item));
-  data.checklist_konteks.kurang.forEach(item => parts.push(item));
-  data.checklist_konteks.dipakai.forEach(item => parts.push(item));
-
-  return parts.map(item => toTeaserSnippet(item)).filter(Boolean).slice(0, 8);
+  return data.reasoning_steps
+    .map(item => toTeaserSnippet(item, 12))
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function buildHistoryPreviewTeaser(preview) {
@@ -622,7 +639,20 @@ async function processStream(response, streamId, onDone) {
     }
   }
 
-  function showPreview(preview) {
+  function setPreviewTitle(preview, isStreaming = false) {
+    if (!previewEl) return;
+    const titleEl = previewEl.querySelector('.ai-preview-summary-title');
+    if (!titleEl) return;
+
+    const normalized = normalizePreview(preview);
+    const titleText = normalized
+      ? (isStreaming ? normalized.streaming_title : normalized.title)
+      : (isStreaming ? 'AAI sedang berpikir' : 'AAI');
+
+    titleEl.textContent = `🧠 ${titleText}`;
+  }
+
+  function showPreview(preview, isStreaming = true) {
     if (!previewEl || !previewBodyEl) return;
     const normalized = normalizePreview(preview);
     if (!normalized) return;
@@ -630,6 +660,7 @@ async function processStream(response, streamId, onDone) {
     previewBodyEl.innerHTML = renderPreviewBody(normalized);
     previewEl.style.display = 'block';
     previewEl.classList.remove('is-open');
+    setPreviewTitle(normalized, isStreaming);
     startPreviewTicker(buildPreviewTeaserQueue(normalized));
     scrollBottom();
   }
@@ -672,8 +703,14 @@ async function processStream(response, streamId, onDone) {
       scheduleStreamingRender();
     }
 
-    if (parsed.preview) {
-      showPreview(parsed.preview);
+    if (parsed.reasoning) {
+      showPreview({
+        title: 'AAI',
+        streaming_title: 'AAI sedang berpikir',
+        reasoning_steps: parsed.reasoning
+      }, true);
+    } else if (parsed.preview && !parsed.done) {
+      showPreview(parsed.preview, true);
     }
 
     if (parsed.done) {
@@ -685,6 +722,12 @@ async function processStream(response, streamId, onDone) {
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
       streamRow.setAttribute('data-persona', parsed.persona_used || '');
       const finalPreview = previewData || normalizePreview(parsed.preview);
+      if (finalPreview) {
+        previewData = finalPreview;
+        previewBodyEl.innerHTML = renderPreviewBody(finalPreview);
+        previewEl.style.display = 'block';
+        setPreviewTitle(finalPreview, false);
+      }
       streamRow.setAttribute('data-preview', finalPreview ? encodeURIComponent(JSON.stringify(finalPreview)) : '');
       onDone(parsed, fullText, finalPreview);
       scrollBottom();
