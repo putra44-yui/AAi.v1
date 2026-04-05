@@ -1183,7 +1183,13 @@ body.desktop-sidebar-hidden #topbarTitle {
   .sidebar.open { transform: translateX(0); box-shadow: 10px 0 30px rgba(0,0,0,.3); }
   .main { width: 100%; height: 100dvh; }
   .topbar { padding: 15px 20px; flex-wrap: wrap; }
-  .download-apk-btn { display: none; }
+  .download-apk-btn {
+    display: inline-flex;
+    margin-left: auto;
+    padding: 7px 11px;
+    font-size: 11px;
+    gap: 6px;
+  }
   .chat-area { padding: 20px 16px; align-items: stretch; }
   .input-area { padding: 15px; }
   .msg-row.assistant { width: 100%; max-width: 100%; min-width: 0; margin: 0; }
@@ -1385,7 +1391,7 @@ body.desktop-sidebar-hidden #topbarTitle {
     <span class="hamburger" onclick="toggleSidebar()">&#9776;</span>
     <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Ayaka dan Ayato</span>
     <span class="topbar-spacer"></span>
-    <a class="download-apk-btn" href="/downloads/app-release-signed.apk" download>
+    <a class="download-apk-btn" href="/downloads/app-debug.apk" download>
       <i class="fas fa-download"></i>
       Download APK
     </a>
