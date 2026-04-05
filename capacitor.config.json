@@ -1,0 +1,12 @@
+{
+  "appId": "id.aai.personal",
+  "appName": "AAi",
+  "webDir": "www",
+  "server": {
+    "url": "https://a-ai-rust.vercel.app",
+    "cleartext": false,
+    "allowNavigation": [
+      "a-ai-rust.vercel.app"
+    ]
+  }
+}

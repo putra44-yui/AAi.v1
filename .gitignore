@@ -1,2 +1,24 @@
-.vercel
+.vercel/
 .env*.local
+
+# Dependencies
+node_modules/
+
+# Web build output
+www/
+
+# Local and temporary folders
+.tmp/
+.chrome-tmp/
+
+# Gradle and Android build artifacts
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+
+# Local machine config and secrets
+local.properties
+android/local.properties
+*.keystore
+*.jks

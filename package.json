@@ -4,18 +4,26 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/cli": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
     "@supabase/supabase-js": "^2.101.0",
     "docx": "^9.6.1",
     "mammoth": "^1.12.0",
     "openai": "^6.33.0",
     "pdf-parse": "^2.4.5",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

@@ -174,28 +174,6 @@
     font-weight:600;
   }
 
-  .download-apk-link {
-    margin-top: 14px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    padding: 11px 12px;
-    border-radius: 12px;
-    text-decoration: none;
-    border: 1px solid rgba(126,200,227,.38);
-    background: linear-gradient(135deg, rgba(126,200,227,.22), rgba(255,255,255,.92));
-    color: var(--text);
-    font-size: 13.5px;
-    font-weight: 700;
-    transition: .2s;
-  }
-  .download-apk-link:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(90,180,212,.2);
-  }
-
   @keyframes fadeUp {
     from { opacity:0; transform:translateY(20px); }
     to   { opacity:1; transform:translateY(0); }
@@ -238,10 +216,6 @@
     <button class="login-btn" id="loginBtn" onclick="handleLogin()">
       Masuk ke AAi
     </button>
-
-    <a class="download-apk-link" href="/downloads/app-debug.apk" download>
-      <span>⬇</span> Download APK Android
-    </a>
 
     <div class="error-msg" id="errorMsg"></div>
 
@@ -314,7 +288,10 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then(registration => registration.update())
+        .catch(() => {});
     });
   }
 </script>

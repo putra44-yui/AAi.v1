@@ -2,7 +2,7 @@
 // STATE GLOBAL
 // ══════════════════════════════════════════
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
-if (!currentUser.id) window.location.href = '/login';
+if (!currentUser.id) window.location.href = '/login.html';
 if (currentUser.person_name || currentUser.username) {
   document.getElementById('cardUsername').textContent = currentUser.person_name || currentUser.username;
 }
@@ -1895,7 +1895,7 @@ async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
   if (!shouldLogout) return;
   localStorage.removeItem('aai_user');
-  window.location.href = '/login';
+  window.location.href = '/login.html';
 }
 
 // === STICKY HEADER + TRANSPARENT BACKGROUND ===
@@ -1981,6 +1981,7 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
+      .then(registration => registration.update())
       .catch(err => console.error('SW register gagal:', err));
   });
 }
