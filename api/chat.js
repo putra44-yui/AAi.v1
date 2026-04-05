@@ -1,7 +1,6 @@
 export const maxDuration = 300;
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
-import { PDFParse } from 'pdf-parse';
 import { createClient } from '@supabase/supabase-js';
 
 let Document, Packer, Paragraph, TextRun;
@@ -684,14 +683,23 @@ function buildOlderHistorySummary(messages = []) {
 }
 
 async function extractPdfText(buffer) {
-  const parser = new PDFParse({ data: buffer });
+  let parser = null;
 
   try {
+    // Lazy import to avoid serverless cold-start crash when optional DOM/canvas
+    // dependencies from pdf-parse are unavailable in Vercel runtime.
+    const { PDFParse } = await import('pdf-parse');
+    parser = new PDFParse({ data: buffer });
     const result = await parser.getText({ lineEnforce: true });
     const text = String(result?.text || '').replace(/\n{3,}/g, '\n\n').trim();
     return text;
+  } catch (error) {
+    console.warn('[PDF] Ekstraksi dilewati:', error?.message || error);
+    return '';
   } finally {
-    await parser.destroy().catch(() => {});
+    if (parser) {
+      await parser.destroy().catch(() => {});
+    }
   }
 }
 
