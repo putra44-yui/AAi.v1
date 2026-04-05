@@ -21,6 +21,139 @@ let currentUtterance = null;
 let isSpeaking       = false;
 let abortController  = null;
 let selectedFiles    = [];
+let msgboxState = null;
+
+function getMsgboxElements() {
+  return {
+    overlay: document.getElementById('msgbox'),
+    title: document.getElementById('msgboxTitle'),
+    text: document.getElementById('msgboxText'),
+    inputWrap: document.getElementById('msgboxInputWrap'),
+    input: document.getElementById('msgboxInput'),
+    confirmBtn: document.getElementById('msgboxConfirmBtn'),
+    cancelBtn: document.getElementById('msgboxCancelBtn')
+  };
+}
+
+function closeMsgbox(result = null) {
+  if (!msgboxState) return;
+  const { resolve, elements } = msgboxState;
+  elements.overlay.classList.remove('active');
+  elements.overlay.setAttribute('aria-hidden', 'true');
+  elements.confirmBtn.onclick = null;
+  elements.cancelBtn.onclick = null;
+  elements.overlay.onclick = null;
+  elements.input.onkeydown = null;
+  msgboxState = null;
+  resolve(result);
+}
+
+function openMsgbox(options = {}) {
+  const {
+    mode = 'alert',
+    title = 'Pesan',
+    message = '',
+    confirmText = 'OK',
+    cancelText = 'Batal',
+    defaultValue = '',
+    placeholder = ''
+  } = options;
+
+  return new Promise(resolve => {
+    const elements = getMsgboxElements();
+    if (!elements.overlay || !elements.title || !elements.text || !elements.confirmBtn || !elements.cancelBtn || !elements.inputWrap || !elements.input) {
+      resolve(mode === 'prompt' ? null : false);
+      return;
+    }
+
+    const isPrompt = mode === 'prompt';
+    const isConfirmLike = mode === 'confirm' || isPrompt;
+
+    elements.title.textContent = title;
+    elements.text.textContent = message;
+    elements.confirmBtn.textContent = confirmText;
+    elements.cancelBtn.textContent = cancelText;
+    elements.cancelBtn.style.display = isConfirmLike ? 'inline-flex' : 'none';
+    elements.inputWrap.style.display = isPrompt ? 'block' : 'none';
+    elements.input.value = isPrompt ? String(defaultValue || '') : '';
+    elements.input.placeholder = placeholder || '';
+
+    msgboxState = { resolve, mode, elements };
+
+    elements.confirmBtn.onclick = () => {
+      if (!msgboxState) return;
+      if (isPrompt) {
+        closeMsgbox(elements.input.value);
+        return;
+      }
+      closeMsgbox(true);
+    };
+
+    const cancelHandler = () => {
+      if (!msgboxState) return;
+      closeMsgbox(isPrompt ? null : false);
+    };
+
+    elements.cancelBtn.onclick = cancelHandler;
+    elements.overlay.onclick = event => {
+      if (event.target !== elements.overlay) return;
+      cancelHandler();
+    };
+
+    elements.input.onkeydown = event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        elements.confirmBtn.click();
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelHandler();
+      }
+    };
+
+    document.addEventListener('keydown', function onEsc(event) {
+      if (!msgboxState || msgboxState.elements !== elements) {
+        document.removeEventListener('keydown', onEsc);
+        return;
+      }
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      cancelHandler();
+      document.removeEventListener('keydown', onEsc);
+    });
+
+    elements.overlay.classList.add('active');
+    elements.overlay.setAttribute('aria-hidden', 'false');
+    setTimeout(() => {
+      if (!msgboxState || msgboxState.elements !== elements) return;
+      if (isPrompt) {
+        elements.input.focus();
+        elements.input.selectionStart = elements.input.selectionEnd = elements.input.value.length;
+      } else {
+        elements.confirmBtn.focus();
+      }
+    }, 20);
+  });
+}
+
+function showAlertMessage(message, title = 'Informasi') {
+  return openMsgbox({ mode: 'alert', title, message, confirmText: 'OK' });
+}
+
+function showConfirmMessage(message, title = 'Konfirmasi', confirmText = 'Ya', cancelText = 'Batal') {
+  return openMsgbox({ mode: 'confirm', title, message, confirmText, cancelText });
+}
+
+function showPromptMessage({
+  title = 'Masukkan Nilai',
+  message = '',
+  defaultValue = '',
+  placeholder = '',
+  confirmText = 'Simpan',
+  cancelText = 'Batal'
+} = {}) {
+  return openMsgbox({ mode: 'prompt', title, message, defaultValue, placeholder, confirmText, cancelText });
+}
 
 // ── Inisialisasi suara TTS ──
 if ('speechSynthesis' in window) {
@@ -1000,14 +1133,14 @@ function retryLastMessage(btn) {
 // ══════════════════════════════════════════
 // EDIT PESAN USER
 // ══════════════════════════════════════════
-function editUserMsg(btn) {
+async function editUserMsg(btn) {
   const row    = btn.closest('.msg-row.user');
   const bubble = row.querySelector('.bubble');
   const raw    = decodeURIComponent(row.dataset.raw || bubble.innerText);
   const msgId  = row.dataset.id;
 
   if (!msgId) {
-    alert('Pesan ini belum punya ID database. Refresh dulu lalu coba edit lagi.');
+    await showAlertMessage('Pesan ini belum punya ID database. Refresh dulu lalu coba edit lagi.', 'Tidak Bisa Edit');
     return;
   }
 
@@ -1082,7 +1215,7 @@ async function saveEdit(btn, msgId) {
       : null;
     executeRegenerate(newText, msgId, assistantMsgId, refreshedAssistantRow);
   } catch (e) {
-    alert('Gagal menyimpan perubahan: ' + e.message);
+    await showAlertMessage(`Gagal menyimpan perubahan: ${e.message}`, 'Edit Gagal');
     renderMessageTree();
   }
 }
@@ -1226,8 +1359,14 @@ function renderSidebar() {
 }
 
 async function renameSession(id, oldTitle) {
-  const newTitle = prompt("Judul baru:", oldTitle);
-  if (!newTitle?.trim() || newTitle === oldTitle) return;
+  const newTitle = await showPromptMessage({
+    title: 'Rename Session',
+    message: 'Masukkan judul baru untuk sesi ini.',
+    defaultValue: oldTitle,
+    placeholder: 'Contoh: Debug login flow'
+  });
+  if (newTitle === null) return;
+  if (!newTitle.trim() || newTitle === oldTitle) return;
   const idx = sessions.findIndex(s => s.id === id);
   if (idx !== -1) { sessions[idx].title = newTitle.trim(); renderSidebar(); }
   if (currentSessionId === id) document.getElementById('topbarTitle').textContent = newTitle.trim();
@@ -1361,7 +1500,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
           <img src="/ayaka.gif" alt="Ayaka">
         </div>
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">AAi ${versionHtml}</div>
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;"> ${versionHtml}</div>
       </div>
       ${previewBlock}
       <div class="bubble">${formatContent(content)}</div>
@@ -1715,7 +1854,7 @@ async function handleSend() {
 
   } catch (err) {
     console.error('❌ Gagal kirim:', err);
-    alert(err.message || 'Terjadi kesalahan.');
+    await showAlertMessage(err.message || 'Terjadi kesalahan.', 'Pengiriman Gagal');
     document.getElementById('filePreview').classList.remove('fading-out');
   } finally {
     sendBtn.disabled = false;
@@ -1752,11 +1891,11 @@ window.addEventListener('resize', () => {
 
   document.body.classList.remove('desktop-sidebar-hidden');
 });
-function logout() {
-  if (confirm("Yakin mau keluar?")) {
-    localStorage.removeItem('aai_user');
-    window.location.href = '/login';
-  }
+async function logout() {
+  const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
+  if (!shouldLogout) return;
+  localStorage.removeItem('aai_user');
+  window.location.href = '/login';
 }
 
 // === STICKY HEADER + TRANSPARENT BACKGROUND ===
@@ -1796,9 +1935,9 @@ function initStickyCodeHeaders() {
 // ══════════════════════════════════════════
 // COMPACT CHECKPOINT
 // ══════════════════════════════════════════
-function sendCompactCheckpoint() {
+async function sendCompactCheckpoint() {
   if (!currentSessionId) {
-    alert('Mulai obrolan terlebih dahulu.');
+    await showAlertMessage('Mulai obrolan terlebih dahulu.', 'Compact Belum Bisa Dipakai');
     return;
   }
   sendMessage('[COMPACT_CHECKPOINT_REQUEST]');

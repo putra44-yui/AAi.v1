@@ -2,6 +2,11 @@ export const maxDuration = 300;
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import { createClient } from '@supabase/supabase-js';
+import * as chatMemory from './_lib/chat-memory.js';
+import * as chatContext from './_lib/chat-context.js';
+import * as chatPreview from './_lib/chat-preview.js';
+import * as chatProvider from './_lib/chat-provider.js';
+import * as chatFiles from './_lib/chat-files.js';
 
 let Document, Packer, Paragraph, TextRun;
 const supabase = createClient(
@@ -1314,7 +1319,7 @@ export default async function handler(req, res) {
         if (!linked) return msg;
         return {
           ...msg,
-          preview: buildClientPreviewPayload(linked.preview_json),
+          preview: chatPreview.buildClientPreviewPayload(linked.preview_json),
           preview_id: linked.id
         };
       });
@@ -1376,7 +1381,12 @@ export default async function handler(req, res) {
       for (const f of files) {
         if (!f.base64) continue;
         try {
-          const url = await uploadFileToStorage(f.base64, f.name, f.type);
+          const url = await chatFiles.uploadFileToStorage({
+            supabase,
+            base64String: f.base64,
+            fileName: f.name,
+            mimeType: f.type
+          });
           uploadedUrls.push(url);
 
           const base64Data = f.base64.split(',')[1];
@@ -1403,7 +1413,7 @@ export default async function handler(req, res) {
           }
           // 4. PDF
           else if (mimeType === 'application/pdf' || fileNameLower.endsWith('.pdf')) {
-            const pdfText = await extractPdfText(buffer);
+            const pdfText = await chatFiles.extractPdfText(buffer);
             if (pdfText) {
               textContents.push(`📕 ${f.name} (PDF):\n${pdfText}`);
             } else {
@@ -1459,10 +1469,10 @@ export default async function handler(req, res) {
     const currentAge = calculateAge(person?.date_of_birth);
     const injectedMemoryLimit = parsePositiveIntEnv('AAI_MAX_INJECTED_MEMORIES', DEFAULT_MAX_INJECTED_MEMORIES);
     const relevantMemoryLimit = parsePositiveIntEnv('AAI_MAX_RELEVANT_MEMORIES', 24);
-    const memoryWeights = resolveMemoryScoreWeights();
+    const memoryWeights = chatMemory.resolveMemoryScoreWeights();
     const minPreferredRelevance = parseFloatEnv('AAI_MEMORY_MIN_RELEVANCE_PREFERRED', 0.18, 0, 1);
     const minOtherRelevance = parseFloatEnv('AAI_MEMORY_MIN_RELEVANCE_OTHER', 0.28, 0, 1);
-    const experimentProfile = resolveMemoryExperimentProfile(memory_experiment_mode, {
+    const experimentProfile = chatMemory.resolveMemoryExperimentProfile(memory_experiment_mode, {
       weights: memoryWeights,
       minPreferredRelevance,
       minOtherRelevance,
@@ -1498,7 +1508,7 @@ export default async function handler(req, res) {
       .order('priority_score', { ascending: false })
       .order('updated_at', { ascending: false })
       .limit(injectedMemoryLimit);
-    const relevantSelection = selectRelevantMemories(memories || [], userMessage, {
+    const relevantSelection = chatMemory.selectRelevantMemories(memories || [], userMessage, {
       limit: experimentProfile.relevantMemoryLimit,
       weights: experimentProfile.weights,
       minPreferredRelevance: experimentProfile.minPreferredRelevance,
@@ -1566,7 +1576,7 @@ export default async function handler(req, res) {
       : MAX_HISTORY_MESSAGES;
 
     const olderHistorySummary = checkpointScopedHistory.length > effectiveMaxHistory
-      ? buildOlderHistorySummary(checkpointScopedHistory.slice(0, -effectiveMaxHistory))
+      ? chatContext.buildOlderHistorySummary(checkpointScopedHistory.slice(0, -effectiveMaxHistory))
       : '';
 
     const recentHistory = checkpointScopedHistory.length > effectiveMaxHistory
@@ -1580,18 +1590,6 @@ export default async function handler(req, res) {
       ...(olderHistorySummary ? [{ role: 'system', content: olderHistorySummary }] : []),
       ...recentHistory.map(m => ({ role: m.role, content: m.content }))
     ];
-
-    const contextualPriorityBlock = buildFinalContextBlock({
-      userMessage,
-      person,
-      currentAge,
-      familyContext,
-      relationContext,
-      relevantSelection,
-      experimentProfile,
-      recentHistory,
-      fileContext
-    });
 
     // 4. Persona (sama)
     let targetPersona = persona_name;
@@ -1612,9 +1610,58 @@ export default async function handler(req, res) {
     const { data: personasData } = await supabase
       .from('ai_personas').select('name, system_prompt').in('name', personaList);
     const combinedSystem = personasData?.map(p => `=== GAYA: ${p.name} ===\n${p.system_prompt}`).join('\n\n') || '';
-    const runtimeContextPrompt = {
+
+    const systemIdentityPrompt = {
       role: 'system',
-      content: `Konteks runtime (WAJIB jadi rujukan awal):\n${contextualPriorityBlock}`
+      content: `Konteks identitas keluarga:\n${chatContext.buildIdentityContext(person, currentAge, familyContext, relationContext)}`
+    };
+
+    const systemConsistencyPrompt = {
+      role: 'system',
+      content: chatContext.buildConsistencyLock(person, relevantSelection)
+    };
+
+    const memoryContextText = chatMemory.buildMemoryContext(relevantSelection.items || []);
+    const systemMemoryContextPrompt = {
+      role: 'system',
+      content: [
+        '[RELEVANT MEMORY]',
+        `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
+        `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
+        `Jumlah memori terpilih: ${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
+        `Experiment mode: ${experimentProfile.mode || 'balanced'}`,
+        memoryContextText,
+        '',
+        '[LAST CHAT]',
+        chatContext.buildLastChatContext(recentHistory)
+      ].join('\n')
+    };
+
+    const emotionGuidance = chatPreview.buildRuntimeEmotionGuidance(userMessage, recentHistory);
+    const systemEmotionGuidancePrompt = {
+      role: 'system',
+      content: [
+        '[EMOTION GUIDE]',
+        `Primary emotion: ${emotionGuidance.primary_emotion || 'netral'}`,
+        `Secondary emotions: ${(emotionGuidance.secondary_emotions || []).join(', ') || '-'}`,
+        `Confidence: ${Number(emotionGuidance.confidence || 0).toFixed(2)}`,
+        `Mixed signal: ${emotionGuidance.mixed ? 'yes' : 'no'}`,
+        `Contradictory signal: ${emotionGuidance.contradiction ? 'yes' : 'no'}`,
+        `Needs caution: ${emotionGuidance.needs_caution ? 'yes' : 'no'}`,
+        `Evidence: ${(emotionGuidance.evidence || []).join(', ') || '-'}`,
+        emotionGuidance.summary,
+        'Gunakan panduan ini hanya untuk mengatur nada dan cara validasi. Jangan mengklaim emosi user sebagai fakta bila sinyalnya lemah, campuran, atau kontradiktif.'
+      ].join('\n')
+    };
+
+    const systemFinalInstructionPrompt = {
+      role: 'system',
+      content: [
+        'Konteks runtime (WAJIB jadi rujukan awal):',
+        '[USER MESSAGE]',
+        userMessage || '-',
+        ...(fileContext ? ['', '[LAMPIRAN FILE]', fileContext] : [])
+      ].join('\n')
     };
 
     // 5. System prompt 
@@ -1710,12 +1757,13 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
       finalUserMessageId = userMsgData.id;
     }
 
-    const ambiguityPayload = analyzeAmbiguityPreview(userMessage, person, allPersons || []);
+    const ambiguityPayload = chatPreview.analyzeAmbiguityPreview(userMessage, person, allPersons || []);
+    const emotionAnalysis = chatPreview.detectConversationEmotion(userMessage, recentHistory);
     const previewPayload = {
       preview_version: 2,
-      title: REASONING_FINAL_TITLE,
-      streaming_title: REASONING_STREAMING_TITLE,
-      reasoning_steps: buildReasoningSteps({
+      title: chatPreview.REASONING_FINAL_TITLE,
+      streaming_title: chatPreview.REASONING_STREAMING_TITLE,
+      reasoning_steps: chatPreview.buildReasoningSteps({
         userMessage,
         currentPerson: person,
         allPersons: allPersons || [],
@@ -1724,9 +1772,17 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         ambiguityPayload,
         fileContext
       }),
+      emotion: {
+        primary: emotionAnalysis.primary_emotion,
+        secondary: emotionAnalysis.secondary_emotions,
+        confidence: emotionAnalysis.confidence,
+        mixed: emotionAnalysis.mixed,
+        contradiction: emotionAnalysis.contradiction,
+        needs_caution: emotionAnalysis.needs_caution
+      },
       ambiguity: ambiguityPayload
     };
-    const clientPreviewPayload = buildClientPreviewPayload(previewPayload);
+    const clientPreviewPayload = chatPreview.buildClientPreviewPayload(previewPayload);
     const isAmbiguousPreview = !!ambiguityPayload.show_preview;
     let previewRecordId = null;
 
@@ -1765,7 +1821,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
       res.flush?.();
     }
 
-    const modelConfig = getModelConfig(personaList);
+    const modelConfig = chatProvider.getModelConfig(personaList);
     const effectiveModelConfig = consistency_mode
       ? {
           ...modelConfig,
@@ -1810,7 +1866,11 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     const openRouterPayload = {
       messages: [
         systemPrompt,
-        runtimeContextPrompt,
+        systemIdentityPrompt,
+        systemConsistencyPrompt,
+        systemMemoryContextPrompt,
+        systemEmotionGuidancePrompt,
+        systemFinalInstructionPrompt,
         ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
         ...chatHistory,
         {
@@ -1824,7 +1884,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
       top_p: effectiveModelConfig.top_p
     };
 
-    const providerResult = await callOpenRouterWithRetry({ apiKey, payload: openRouterPayload });
+    const providerResult = await chatProvider.callOpenRouterWithRetry({ apiKey, payload: openRouterPayload });
     if (!providerResult.ok) {
       const errorDetail = providerResult.errorBody || 'Unknown error';
       console.error('[OpenRouter] ERROR DETAIL:', {
@@ -1905,23 +1965,23 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
     if (fullReply.trim()) {
       // ── PARSE & STRIP MEMORY CONTROL TAGS ──
-      const memoryOps = parseMemoryInstructionTags(fullReply);
+      const memoryOps = chatMemory.parseMemoryInstructionTags(fullReply);
       const detectedMemories = memoryOps.memoryUpserts;
       const detectedForgetKeys = memoryOps.forgetKeys;
       let cleanReply = memoryOps.cleanReply;
 
-      const clarifyStripResult = stripClarifyControlBlocks(cleanReply);
+      const clarifyStripResult = chatContext.stripClarifyControlBlocks(cleanReply);
       cleanReply = clarifyStripResult.text.trimEnd();
       if (!cleanReply && clarifyStripResult.hadBlock) {
         cleanReply = 'Aku butuh beberapa detail tambahan dulu. Pilih opsi di kotak yang muncul, atau isi lainnya.';
       }
 
       const checkpointSummaryToPersist = isCompactCheckpointRequest
-        ? extractCheckpointSummary(cleanReply)
+        ? chatContext.extractCheckpointSummary(cleanReply)
         : '';
 
       if (isCompactCheckpointRequest) {
-        const checkpointStripResult = stripCheckpointControlBlocks(cleanReply);
+        const checkpointStripResult = chatContext.stripCheckpointControlBlocks(cleanReply);
         cleanReply = checkpointStripResult.text.trimEnd();
         if (!cleanReply && checkpointStripResult.hadBlock) {
           cleanReply = 'Checkpoint sesi berhasil diperbarui. Konteks lama sudah dipadatkan.';
@@ -1968,7 +2028,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
           await supabase
             .from('sessions')
             .update({
-              compact_checkpoint_summary: checkpointSummaryToPersist || compactHistoryMessage(cleanReply, 2600),
+              compact_checkpoint_summary: checkpointSummaryToPersist || chatContext.compactHistoryMessage(cleanReply, 2600),
               compact_checkpoint_message_id: aiMsgData.id,
               compact_checkpoint_at: new Date().toISOString()
             })
@@ -2017,18 +2077,18 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
 
         for (const mem of detectedMemories) {
           try {
-            const normalizedKey = normalizeMemoryKey(mem.key);
-            const normalizedType = normalizeMemoryType(mem.memoryType);
+            const normalizedKey = chatMemory.normalizeMemoryKey(mem.key);
+            const normalizedType = chatMemory.normalizeMemoryType(mem.memoryType);
             const exact = memoryPool.find(item =>
               item.status === 'active' &&
-              normalizeMemoryType(item.memory_type) === normalizedType &&
-              normalizeMemoryKey(item.key) === normalizedKey
+              chatMemory.normalizeMemoryType(item.memory_type) === normalizedType &&
+              chatMemory.normalizeMemoryKey(item.key) === normalizedKey
             );
 
             const fuzzy = exact || memoryPool.find(item => {
               if (item.status !== 'active') return false;
-              if (normalizeMemoryType(item.memory_type) !== normalizedType) return false;
-              return jaccardSimilarity(item.key, normalizedKey) >= 0.72;
+              if (chatMemory.normalizeMemoryType(item.memory_type) !== normalizedType) return false;
+              return chatMemory.jaccardSimilarity(item.key, normalizedKey) >= 0.72;
             });
 
             if (fuzzy?.id) {
@@ -2058,7 +2118,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
               status: 'active',
               confidence: 0.7,
               observation_count: 1,
-              priority_score: computePriorityScore(0.7, 1),
+              priority_score: chatMemory.computePriorityScore(0.7, 1),
               source_message_id: aiMsgData?.id
             };
 
@@ -2078,12 +2138,12 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         if (forgetIntentRequested && detectedForgetKeys.length > 0) {
           for (const rawKey of detectedForgetKeys) {
             try {
-              const normalizedForgetKey = normalizeMemoryKey(rawKey);
+              const normalizedForgetKey = chatMemory.normalizeMemoryKey(rawKey);
               const candidate = memoryPool.find(item => {
                 if (item.status !== 'active') return false;
-                const keySimilarity = jaccardSimilarity(item.key, normalizedForgetKey);
-                const valueSimilarity = jaccardSimilarity(item.value, normalizedForgetKey);
-                return normalizeMemoryKey(item.key) === normalizedForgetKey || keySimilarity >= 0.72 || valueSimilarity >= 0.78;
+                const keySimilarity = chatMemory.jaccardSimilarity(item.key, normalizedForgetKey);
+                const valueSimilarity = chatMemory.jaccardSimilarity(item.value, normalizedForgetKey);
+                return chatMemory.normalizeMemoryKey(item.key) === normalizedForgetKey || keySimilarity >= 0.72 || valueSimilarity >= 0.78;
               });
 
               if (!candidate?.id) continue;
@@ -2120,7 +2180,7 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         while ((match = fileRegex.exec(fileSourceText)) !== null) {
           hasFiles = true;
           const filename = match[1].trim();
-          const content = sanitizeGeneratedFileBlock(match[2]);
+          const content = chatFiles.sanitizeGeneratedFileBlock(match[2]);
           const ext = filename.split('.').pop().toLowerCase();
 
           let buffer;
@@ -2133,21 +2193,12 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
               buffer = Buffer.from(normalizedVba, 'utf-8');
             } 
             else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
-              const parsedSheets = parseSheetBlocks(content);
+              const parsedSheets = chatFiles.parseSheetBlocks(content);
               if (!parsedSheets.length) {
                 throw new Error('Konten tabel kosong. Gunakan format kolom dengan pemisah # di setiap baris.');
               }
 
-              const sheetsToBuild = buildSandingWorkbookSheets(parsedSheets);
-              const wb = XLSX.utils.book_new();
-
-              for (const sheet of sheetsToBuild) {
-                const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
-                applyWorksheetColumnWidths(ws, sheet.rows);
-                XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
-              }
-
-              buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
+              buffer = chatFiles.buildWorkbookBufferFromSheetBlocks(parsedSheets);
             } 
             else if (ext === 'docx') {
               const docx = await import('docx');
@@ -2220,7 +2271,7 @@ async function generateTitle(apiKey, userMessage, sessionId) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: MAIN_MODEL,
+        model: chatProvider.MAIN_MODEL,
         messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
       })

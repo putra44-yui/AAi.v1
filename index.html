@@ -853,6 +853,97 @@ body::before {
 .btn-confirm { background: #e74c3c; color: white; }
 .btn-confirm:hover { background: #c0392b; transform: scale(1.05); }
 
+.msgbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(30,42,68,.58);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100001;
+  opacity: 0;
+  pointer-events: none;
+  transition: .22s ease;
+}
+.msgbox-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msgbox-box {
+  width: min(92vw, 420px);
+  background: #fff;
+  border: 1px solid rgba(90,180,212,.3);
+  border-radius: 20px;
+  box-shadow: 0 22px 60px rgba(31,95,133,.24);
+  padding: 18px 18px 14px;
+  transform: translateY(8px) scale(.985);
+  transition: .22s ease;
+}
+.msgbox-overlay.active .msgbox-box {
+  transform: translateY(0) scale(1);
+}
+.msgbox-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--blue-dark);
+  margin-bottom: 7px;
+}
+.msgbox-text {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text);
+}
+.msgbox-input-wrap {
+  margin-top: 12px;
+}
+.msgbox-input {
+  width: 100%;
+  border: 1px solid rgba(90,180,212,.34);
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.msgbox-input:focus {
+  border-color: rgba(66,153,183,.7);
+  box-shadow: 0 0 0 3px rgba(90,180,212,.14);
+}
+.msgbox-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 14px;
+}
+.msgbox-btn {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: .2s;
+}
+.msgbox-btn.cancel {
+  background: #eef3f8;
+  color: var(--text);
+}
+.msgbox-btn.cancel:hover {
+  background: #e3ebf4;
+}
+.msgbox-btn.confirm {
+  background: linear-gradient(135deg, var(--blue-mid), #7dbfd8);
+  color: #fff;
+}
+.msgbox-btn.confirm:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(42,122,158,.24);
+}
+
 .clarify-modal-box {
   background: #fff;
   padding: 24px 22px;
@@ -1151,6 +1242,20 @@ body.desktop-sidebar-hidden #topbarTitle {
 </head>
 <body>
 
+<div class="msgbox-overlay" id="msgbox" aria-hidden="true">
+  <div class="msgbox-box" role="dialog" aria-modal="true" aria-labelledby="msgboxTitle" aria-describedby="msgboxText">
+    <div class="msgbox-title" id="msgboxTitle">Pesan</div>
+    <div class="msgbox-text" id="msgboxText"></div>
+    <div class="msgbox-input-wrap" id="msgboxInputWrap" style="display:none;">
+      <input type="text" id="msgboxInput" class="msgbox-input" autocomplete="off">
+    </div>
+    <div class="msgbox-actions">
+      <button type="button" class="msgbox-btn cancel" id="msgboxCancelBtn">Batal</button>
+      <button type="button" class="msgbox-btn confirm" id="msgboxConfirmBtn">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Hapus -->
 <div class="modal-overlay" id="deleteModal">
   <div class="modal-box">
@@ -1209,7 +1314,7 @@ body.desktop-sidebar-hidden #topbarTitle {
 <main class="main">
   <div class="topbar">
     <span class="hamburger" onclick="toggleSidebar()">&#9776;</span>
-    <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Keluarga Cerdas</span>
+    <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Ayaka dan Ayato</span>
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
