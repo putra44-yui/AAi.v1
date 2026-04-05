@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>AAi</title>
 <link rel="icon" type="image/gif" href="/ayaka.gif">
+<meta name="theme-color" content="#2a7a9e" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="AAi" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
 <!-- Highlight.js: syntax highlighting untuk code box -->
@@ -210,6 +216,28 @@ body::before {
   display: flex; align-items: center; gap: 16px;
   z-index: 20;
   min-height: 72px;
+}
+.topbar-spacer {
+  flex: 1;
+}
+.download-apk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(90,180,212,.35);
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--blue-dark);
+  background: linear-gradient(135deg, rgba(200,234,245,.75), rgba(255,255,255,.92));
+  box-shadow: 0 6px 16px rgba(90,180,212,.18);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.download-apk-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(90,180,212,.24);
 }
 .hamburger {
   display: block;
@@ -1155,14 +1183,53 @@ body.desktop-sidebar-hidden #topbarTitle {
   .sidebar.open { transform: translateX(0); box-shadow: 10px 0 30px rgba(0,0,0,.3); }
   .main { width: 100%; height: 100dvh; }
   .topbar { padding: 15px 20px; flex-wrap: wrap; }
+  .download-apk-btn { display: none; }
   .chat-area { padding: 20px 16px; align-items: stretch; }
   .input-area { padding: 15px; }
   .msg-row.assistant { width: 100%; max-width: 100%; min-width: 0; margin: 0; }
-  .assistant .bubble { font-size: 14px; }
+  .assistant .bubble {
+    font-size: 16.5px;
+    line-height: 1.72;
+  }
   .msg-row.user { width: 100%; max-width: 100%; margin: 0; }
   .msg-row.user > div { max-width: 90%; }
-  .user .bubble { padding: 12px 16px; border-radius: 20px; border-bottom-right-radius: 8px; font-size: 14px; }
+  .user .bubble {
+    padding: 12px 16px;
+    border-radius: 20px;
+    border-bottom-right-radius: 8px;
+    font-size: 16px;
+    line-height: 1.68;
+  }
   .msg-row.compact-bubble { width: auto; max-width: 88%; }
+  .bubble p,
+  .bubble li,
+  .bubble blockquote {
+    font-size: 1em;
+    line-height: 1.72;
+  }
+  .bubble ul,
+  .bubble ol {
+    padding-left: 24px;
+  }
+  .bubble h1,
+  .bubble h2,
+  .bubble h3 {
+    font-size: 1.14em;
+    line-height: 1.4;
+  }
+  .bubble table {
+    font-size: 15.5px;
+  }
+  .source-item,
+  .source-card {
+    font-size: 14.5px;
+  }
+  .ai-preview-toggle,
+  .ai-preview-summary-title,
+  .ai-preview li,
+  .ai-live-teaser {
+    font-size: 13.5px;
+  }
   .code-window { margin: 12px 0 16px; }
   .code-scroll-area { padding: 0 12px 18px 12px; }
   .input-wrap {
@@ -1176,6 +1243,8 @@ body.desktop-sidebar-hidden #topbarTitle {
     order: 1;
     width: 100%;
     flex-basis: 100%;
+    font-size: 16px;
+    line-height: 1.55;
     padding-right: 46px;
     padding-top: 5px;
     padding-bottom: 5px;
@@ -1315,6 +1384,11 @@ body.desktop-sidebar-hidden #topbarTitle {
   <div class="topbar">
     <span class="hamburger" onclick="toggleSidebar()">&#9776;</span>
     <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Ayaka dan Ayato</span>
+    <span class="topbar-spacer"></span>
+    <a class="download-apk-btn" href="/downloads/app-release-signed.apk" download>
+      <i class="fas fa-download"></i>
+      Download APK
+    </a>
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
