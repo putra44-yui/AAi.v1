@@ -161,6 +161,44 @@ create index if not exists idx_person_memory_updated on person_memory(person_id,
 create index if not exists idx_person_memory_priority on person_memory(person_id, status, priority_score desc, updated_at desc);
 create index if not exists idx_person_memory_type_status on person_memory(person_id, memory_type, status, updated_at desc);
 
+-- 9.1 PLANNING MEMORY (GLOBAL PER PERSON, USER-MANAGED)
+create table if not exists planning_memory (
+  id uuid primary key default uuid_generate_v4(),
+  person_id uuid not null references persons(id) on delete cascade,
+  title text not null,
+  content text default '',
+  category text default 'rencana',
+  tags text[] default '{}',
+  priority int default 0,
+  created_by uuid references users(id) on delete set null,
+  updated_by uuid references users(id) on delete set null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_planning_memory_person_updated on planning_memory(person_id, updated_at desc);
+create index if not exists idx_planning_memory_person_priority on planning_memory(person_id, priority desc, updated_at desc);
+create index if not exists idx_planning_memory_category on planning_memory(person_id, category, updated_at desc);
+create index if not exists idx_planning_memory_tags_gin on planning_memory using gin(tags);
+
+alter table planning_memory
+  add constraint chk_planning_memory_priority_range
+  check (priority >= -10 and priority <= 10);
+
+create or replace function update_planning_memory_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trigger_update_planning_memory on planning_memory;
+create trigger trigger_update_planning_memory
+before update on planning_memory
+for each row
+execute function update_planning_memory_updated_at();
+
 update person_memory
 set priority_score = least(0.99, greatest(0.05, coalesce(confidence, 0.7) * greatest(0.3, least(1.0, coalesce(observation_count, 1) / 5.0))))
 where priority_score is null or priority_score = 0.5;

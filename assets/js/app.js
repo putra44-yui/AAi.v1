@@ -2,7 +2,7 @@
 // STATE GLOBAL
 // ══════════════════════════════════════════
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
-if (!currentUser.id) window.location.href = '/login.html';
+if (!currentUser.id) window.location.href = '/login';
 if (currentUser.person_name || currentUser.username) {
   document.getElementById('cardUsername').textContent = currentUser.person_name || currentUser.username;
 }
@@ -22,6 +22,13 @@ let isSpeaking       = false;
 let abortController  = null;
 let selectedFiles    = [];
 let msgboxState = null;
+
+const PLANNING_COMMAND_PATTERNS = {
+  list: /(apa\s+(rencana|perencanaan)\s*(kita)?|tampilkan\s+(rencana|perencanaan)|list\s+rencana)/i,
+  save: /^(ingat\s+ini|catat\s+(rencana|ini)|simpan\s+rencana|ingat\s+rencana)\b/i,
+  delete: /^(hapus|delete)\s+rencana\b/i,
+  update: /^(update|ubah|edit)\s+rencana\b/i
+};
 
 function getMsgboxElements() {
   return {
@@ -153,6 +160,217 @@ function showPromptMessage({
   cancelText = 'Batal'
 } = {}) {
   return openMsgbox({ mode: 'prompt', title, message, defaultValue, placeholder, confirmText, cancelText });
+}
+
+function normalizePlanningText(input = '') {
+  return String(input || '').replace(/\s+/g, ' ').trim();
+}
+
+function splitTitleAndContent(raw = '') {
+  const text = String(raw || '').trim();
+  if (!text) return { title: '', content: '' };
+
+  const separator = text.match(/\s*\|\s*|\s*:\s*/);
+  if (separator) {
+    const index = separator.index;
+    const sepLength = separator[0].length;
+    const title = normalizePlanningText(text.slice(0, index));
+    const content = normalizePlanningText(text.slice(index + sepLength));
+    return { title, content };
+  }
+
+  return { title: normalizePlanningText(text), content: '' };
+}
+
+function parsePlanningCommand(rawText = '') {
+  const text = normalizePlanningText(rawText);
+  if (!text) return null;
+
+  if (PLANNING_COMMAND_PATTERNS.list.test(text)) {
+    return { type: 'list', query: text };
+  }
+
+  if (PLANNING_COMMAND_PATTERNS.save.test(text)) {
+    const payload = text.replace(PLANNING_COMMAND_PATTERNS.save, '').trim();
+    const parsed = splitTitleAndContent(payload);
+    return { type: 'save', title: parsed.title, content: parsed.content };
+  }
+
+  if (PLANNING_COMMAND_PATTERNS.delete.test(text)) {
+    const title = normalizePlanningText(text.replace(PLANNING_COMMAND_PATTERNS.delete, ''));
+    return { type: 'delete', title };
+  }
+
+  if (PLANNING_COMMAND_PATTERNS.update.test(text)) {
+    const payload = text.replace(PLANNING_COMMAND_PATTERNS.update, '').trim();
+    const [left = '', right = ''] = payload.split(/=>|->/);
+    const title = normalizePlanningText(left);
+    const next = splitTitleAndContent(right);
+    return {
+      type: 'update',
+      title,
+      nextTitle: next.title,
+      nextContent: next.content
+    };
+  }
+
+  return null;
+}
+
+async function planningApi(path, options = {}) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `Request gagal (${res.status})`);
+  }
+  return data;
+}
+
+function buildPlanningRecapMarkdown(items = [], query = '') {
+  const list = Array.isArray(items) ? items : [];
+  const title = query
+    ? '### Rencana Terkait Pertanyaanmu'
+    : '### Rencana Kita';
+
+  if (!list.length) {
+    return `${title}\n\nBelum ada rencana yang tersimpan.`;
+  }
+
+  const isShortSummary = list.length <= 3;
+  const summaryLabel = isShortSummary
+    ? 'Ini ringkasan singkat agar kamu bisa cek cepat. Kalau perlu, minta detail penuh.'
+    : 'Ini daftar rencana terbaru yang tersimpan.';
+
+  const lines = list.map((item, idx) => {
+    const name = normalizePlanningText(item.title || `Rencana ${idx + 1}`);
+    const body = normalizePlanningText(item.content || 'Tanpa catatan tambahan');
+    return `${idx + 1}. **${name}**\\n   - ${body}`;
+  });
+
+  return `${title}\n\n${summaryLabel}\n\n${lines.join('\n')}`;
+}
+
+async function handlePlanningCommand(rawText) {
+  const command = parsePlanningCommand(rawText);
+  if (!command) return false;
+
+  appendMessage('user', rawText);
+  scrollBottom();
+
+  try {
+    if (command.type === 'list') {
+      const data = await planningApi(`/api/planning-memory?user_id=${encodeURIComponent(currentUser.id)}`);
+      appendMessage('assistant', buildPlanningRecapMarkdown(data.items || [], command.query));
+      return true;
+    }
+
+    if (command.type === 'save') {
+      if (!command.title) {
+        const manualTitle = await showPromptMessage({
+          title: 'Simpan Rencana',
+          message: 'Masukkan judul rencana.',
+          placeholder: 'Contoh: Sprint minggu ini'
+        });
+
+        if (!manualTitle || !manualTitle.trim()) {
+          appendMessage('assistant', 'Penyimpanan dibatalkan karena judul rencana belum diisi.');
+          return true;
+        }
+
+        command.title = manualTitle.trim();
+      }
+
+      const saved = await planningApi('/api/planning-memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: currentUser.id,
+          title: command.title,
+          content: command.content || ''
+        })
+      });
+
+      appendMessage('assistant', `Rencana tersimpan: **${saved.item?.title || command.title}**`);
+      return true;
+    }
+
+    if (command.type === 'delete') {
+      if (!command.title) {
+        appendMessage('assistant', 'Format hapus: **hapus rencana <judul>**');
+        return true;
+      }
+
+      const data = await planningApi(`/api/planning-memory?user_id=${encodeURIComponent(currentUser.id)}&q=${encodeURIComponent(command.title)}&limit=10`);
+      const matches = (data.items || []).filter(item =>
+        normalizePlanningText(item.title).toLowerCase() === command.title.toLowerCase()
+      );
+      const target = matches[0] || (data.items || [])[0];
+
+      if (!target) {
+        appendMessage('assistant', `Rencana dengan kata kunci "${command.title}" tidak ditemukan.`);
+        return true;
+      }
+
+      const approved = await showConfirmMessage(
+        `Rencana "${target.title}" akan dihapus permanen. Lanjutkan?`,
+        'Hard Delete Rencana',
+        'Ya, Hapus',
+        'Batal'
+      );
+
+      if (!approved) {
+        appendMessage('assistant', 'Penghapusan dibatalkan.');
+        return true;
+      }
+
+      await planningApi(`/api/planning-memory/${encodeURIComponent(target.id)}?user_id=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE'
+      });
+
+      appendMessage('assistant', `Rencana **${target.title}** sudah dihapus permanen.`);
+      return true;
+    }
+
+    if (command.type === 'update') {
+      if (!command.title) {
+        appendMessage('assistant', 'Format update: **update rencana <judul lama> => <judul baru>: <catatan baru>**');
+        return true;
+      }
+
+      const search = await planningApi(`/api/planning-memory?user_id=${encodeURIComponent(currentUser.id)}&q=${encodeURIComponent(command.title)}&limit=10`);
+      const target = (search.items || []).find(item =>
+        normalizePlanningText(item.title).toLowerCase() === command.title.toLowerCase()
+      ) || (search.items || [])[0];
+
+      if (!target) {
+        appendMessage('assistant', `Rencana "${command.title}" tidak ditemukan untuk update.`);
+        return true;
+      }
+
+      const updatedTitle = command.nextTitle || target.title;
+      const updatedContent = typeof command.nextContent === 'string' && command.nextContent.trim()
+        ? command.nextContent
+        : target.content;
+
+      const updated = await planningApi(`/api/planning-memory/${encodeURIComponent(target.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: currentUser.id,
+          title: updatedTitle,
+          content: updatedContent
+        })
+      });
+
+      appendMessage('assistant', `Rencana berhasil diupdate menjadi **${updated.item?.title || updatedTitle}**.`);
+      return true;
+    }
+  } catch (error) {
+    appendMessage('assistant', `Gagal memproses perintah rencana: ${error.message}`);
+    return true;
+  }
+
+  return false;
 }
 
 // ── Inisialisasi suara TTS ──
@@ -1833,6 +2051,16 @@ async function handleSend() {
   sendBtn.innerHTML = '⏳';
 
   try {
+    if (selectedFiles.length === 0) {
+      const handled = await handlePlanningCommand(text);
+      if (handled) {
+        inp.value = '';
+        autoResize(inp);
+        updateMobileSendVisibility();
+        return;
+      }
+    }
+
     const oversized = selectedFiles.find(f => f.size > 2 * 1024 * 1024);
     if (oversized) throw new Error(`File "${oversized.name}" >2MB. Kompres dulu ya.`);
 
@@ -1895,7 +2123,7 @@ async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
   if (!shouldLogout) return;
   localStorage.removeItem('aai_user');
-  window.location.href = '/login.html';
+  window.location.href = '/login';
 }
 
 // === STICKY HEADER + TRANSPARENT BACKGROUND ===
@@ -1981,7 +2209,6 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')
-      .then(registration => registration.update())
       .catch(err => console.error('SW register gagal:', err));
   });
 }
