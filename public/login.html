@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AAi — Masuk</title>
+<meta name="theme-color" content="#2a7a9e" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="AAi" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --blue:        #7ec8e3;
+    --blue-light:  #c8eaf5;
+    --blue-mid:    #5ab4d4;
+    --pink:        #f7b8d0;
+    --pink-light:  #fde8f1;
+    --purple:      #c9a8e0;
+    --purple-light:#ede0f8;
+    --text:        #2d3557;
+    --text-muted:  #8b93b8;
+    --white:       #ffffff;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: #f9fbff;
+    color: var(--text);
+    min-height: 100dvh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    position: relative; overflow: hidden;
+  }
+
+  /* mesh bg */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 55% at 15% 25%, rgba(126,200,227,.22) 0%, transparent 70%),
+      radial-gradient(ellipse 45% 45% at 85% 75%, rgba(201,168,224,.18) 0%, transparent 70%),
+      radial-gradient(ellipse 35% 35% at 75% 10%, rgba(247,184,208,.15) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  /* floating orbs */
+  .orb {
+    position: fixed; border-radius: 50%; pointer-events: none; z-index: 0;
+    animation: drift linear infinite;
+    opacity: .35;
+  }
+  .orb1 { width:180px; height:180px; top:-60px; left:-60px; background: radial-gradient(circle, var(--blue) 0%, transparent 70%); animation-duration:18s; }
+  .orb2 { width:140px; height:140px; bottom:-40px; right:-40px; background: radial-gradient(circle, var(--pink) 0%, transparent 70%); animation-duration:22s; animation-direction:reverse; }
+  .orb3 { width:100px; height:100px; bottom:30%; left:5%; background: radial-gradient(circle, var(--purple) 0%, transparent 70%); animation-duration:26s; }
+
+  @keyframes drift {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33%      { transform: translate(20px,-15px) scale(1.05); }
+    66%      { transform: translate(-10px,20px) scale(.95); }
+  }
+
+  .card {
+    position: relative; z-index: 1;
+    background: rgba(255,255,255,.82);
+    backdrop-filter: blur(22px);
+    border: 1px solid rgba(126,200,227,.25);
+    border-radius: 28px;
+    padding: 44px 40px 40px;
+    width: 100%; max-width: 400px;
+    box-shadow: 0 8px 40px rgba(90,180,212,.13), 0 2px 10px rgba(90,180,212,.08);
+    animation: fadeUp .5s ease both;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 13px;
+    justify-content: center; margin-bottom: 32px;
+  }
+  .logo-icon {
+    width: 52px; height: 52px; border-radius: 16px;
+    background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 60%, var(--pink) 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 20px rgba(90,180,212,.35);
+    position: relative; overflow: hidden;
+  }
+  .logo-icon::after {
+    content:''; position:absolute; inset:0;
+    background: linear-gradient(135deg, rgba(255,255,255,.28) 0%, transparent 60%);
+  }
+  .logo-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    position: relative;
+    z-index: 1;
+  }
+  .logo-text { display:flex; flex-direction:column; line-height:1; }
+  .logo-name {
+    font-family:'Cormorant Garamond',serif; font-size:32px; font-weight:700;
+    background:linear-gradient(120deg,var(--blue-mid) 0%,var(--purple) 55%,var(--pink) 100%);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    letter-spacing:-.5px;
+  }
+  .logo-sub {
+    font-size:10.5px; color:var(--text-muted); font-weight:400;
+    letter-spacing:.8px; text-transform:uppercase; margin-top:2px;
+  }
+
+  .welcome {
+    text-align:center; margin-bottom:28px;
+  }
+  .welcome h1 {
+    font-family:'Cormorant Garamond',serif; font-size:22px; font-weight:600;
+    color:var(--text); margin-bottom:6px;
+  }
+  .welcome p { font-size:13.5px; color:var(--text-muted); line-height:1.55; }
+
+  .field { margin-bottom:18px; }
+  .field label {
+    display:block; font-size:12px; font-weight:600;
+    color:var(--text-muted); letter-spacing:.6px; text-transform:uppercase;
+    margin-bottom:7px;
+  }
+  .field input {
+    width:100%; padding:12px 16px;
+    border:1.5px solid rgba(126,200,227,.3);
+    border-radius:14px; background:rgba(255,255,255,.9);
+    font-family:'DM Sans',sans-serif; font-size:15px; color:var(--text);
+    outline:none; transition:border-color .2s, box-shadow .2s;
+  }
+  .field input:focus {
+    border-color:var(--blue);
+    box-shadow:0 0 0 3px rgba(126,200,227,.18);
+  }
+  .field input::placeholder { color:var(--text-muted); }
+
+  .login-btn {
+    width:100%; padding:13px;
+    background:linear-gradient(135deg,var(--blue-mid) 0%,var(--purple) 100%);
+    color:white; border:none; border-radius:14px;
+    font-family:'DM Sans',sans-serif; font-size:15px; font-weight:600;
+    cursor:pointer;
+    box-shadow:0 4px 16px rgba(90,180,212,.3);
+    transition:opacity .2s, transform .15s;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    margin-top:4px;
+  }
+  .login-btn:hover:not(:disabled) { opacity:.88; transform:translateY(-1px); }
+  .login-btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+  .login-btn .spinner {
+    width:16px; height:16px; border:2px solid rgba(255,255,255,.4);
+    border-top-color:white; border-radius:50%;
+    animation:spin .6s linear infinite;
+  }
+
+  .error-msg {
+    margin-top:12px; padding:10px 14px;
+    background:rgba(247,184,208,.25); border:1px solid rgba(247,184,208,.5);
+    border-radius:10px; font-size:13px; color:#b05070; text-align:center;
+    display:none;
+  }
+  .error-msg.show { display:block; animation:shake .35s ease; }
+
+  .footer-note {
+    text-align:center; margin-top:22px;
+    font-size:11.5px; color:var(--text-muted); line-height:1.6;
+  }
+  .footer-note span {
+    background:linear-gradient(120deg,var(--blue-mid),var(--purple));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    font-weight:600;
+  }
+
+  @keyframes fadeUp {
+    from { opacity:0; transform:translateY(20px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes shake {
+    0%,100% { transform:translateX(0); }
+    25%     { transform:translateX(-6px); }
+    75%     { transform:translateX(6px); }
+  }
+</style>
+</head>
+<body>
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+
+  <div class="card">
+    <div class="logo">
+      <div class="logo-icon">
+        <img src="/icons/icon-192.png" alt="Logo AAi" />
+      </div>
+      <div class="logo-text">
+        <span class="logo-name">AAi</span>
+        <span class="logo-sub">Ayaka &amp; Ayato AI</span>
+      </div>
+    </div>
+
+    <div class="welcome">
+      <h1>Selamat Datang 👋</h1>
+      <p>Masukkan username kamu untuk<br/>mulai mengobrol dengan AAi.</p>
+    </div>
+
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="usernameInput" autocomplete="username" autofocus
+             onkeydown="if(event.key==='Enter') handleLogin()" />
+    </div>
+
+    <button class="login-btn" id="loginBtn" onclick="handleLogin()">
+      Masuk ke AAi
+    </button>
+
+    <div class="error-msg" id="errorMsg"></div>
+
+    <div class="footer-note">
+      Dibuat dengan 💙 untuk<br/><span>Ayaka &amp; Ayato</span>
+    </div>
+  </div>
+
+<script>
+  // Kalau sudah login, langsung redirect
+  if (localStorage.getItem('aai_user')) {
+    window.location.href = '/';
+  }
+
+  async function handleLogin() {
+    const input = document.getElementById('usernameInput');
+    const btn   = document.getElementById('loginBtn');
+    const err   = document.getElementById('errorMsg');
+    const username = input.value.trim().toLowerCase();
+
+    if (!username) {
+      showError('Username tidak boleh kosong.');
+      return;
+    }
+
+    setLoading(true);
+    err.classList.remove('show');
+
+    try {
+      const res  = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Login gagal.');
+
+      // Simpan ke localStorage
+      localStorage.setItem('aai_user', JSON.stringify({
+        id: data.user.id,
+        username: data.user.username,
+        family_role: data.user.family_role || null,
+        person_name: data.user.person_name || data.user.username
+      }));
+      window.location.href = '/';
+
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function setLoading(v) {
+    const btn = document.getElementById('loginBtn');
+    btn.disabled = v;
+    btn.innerHTML = v
+      ? '<div class="spinner"></div> Memeriksa…'
+      : 'Masuk ke AAi';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('errorMsg');
+    el.textContent = msg;
+    el.classList.remove('show');
+    void el.offsetWidth; // reflow buat re-trigger animasi
+    el.classList.add('show');
+  }
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then(registration => registration.update())
+        .catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>

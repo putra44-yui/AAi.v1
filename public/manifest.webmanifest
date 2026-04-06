@@ -1,0 +1,26 @@
+{
+	"name": "AAi",
+	"short_name": "AAi",
+	"description": "Ayaka & Ayato AI Chat",
+	"lang": "id-ID",
+	"start_url": "/",
+	"scope": "/",
+	"display": "standalone",
+	"orientation": "portrait",
+	"background_color": "#f8fbff",
+	"theme_color": "#2a7a9e",
+	"icons": [
+		{
+			"src": "/icons/icon-192.png",
+			"sizes": "192x192",
+			"type": "image/png",
+			"purpose": "any maskable"
+		},
+		{
+			"src": "/icons/icon-512.png",
+			"sizes": "512x512",
+			"type": "image/png",
+			"purpose": "any maskable"
+		}
+	]
+}
