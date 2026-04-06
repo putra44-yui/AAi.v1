@@ -470,6 +470,51 @@ before update on file_generation_jobs
 for each row
 execute function update_file_generation_jobs_updated_at();
 
+-- =========================================
+-- PHASE 1: MEMORY LOCK GUARD
+-- =========================================
+create table if not exists memories (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references users(id) on delete cascade,
+  content text not null,
+  evidence_chain jsonb not null default '[]'::jsonb,
+  is_locked boolean not null default false,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_memories_user_created on memories(user_id, created_at desc);
+create index if not exists idx_memories_user_locked on memories(user_id, is_locked, created_at desc);
+create index if not exists idx_memories_evidence_chain_gin on memories using gin(evidence_chain);
+
+create table if not exists draft_memories (
+  id uuid primary key default uuid_generate_v4(),
+  memory_id uuid references memories(id) on delete set null,
+  user_id uuid not null references users(id) on delete cascade,
+  content text not null,
+  evidence_chain jsonb not null default '[]'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_draft_memories_user_created on draft_memories(user_id, created_at desc);
+create index if not exists idx_draft_memories_memory_id on draft_memories(memory_id);
+
+-- =========================================
+-- AUDIT TRAIL (FASE 0)
+-- =========================================
+create table if not exists audit_trail (
+  id uuid primary key default gen_random_uuid(),
+  trace_id text not null,
+  route text not null,
+  method text not null,
+  status_code int,
+  timestamp timestamptz default now(),
+  payload_summary text,
+  constraint audit_trail_trace_idx unique (trace_id, timestamp)
+);
+
+create index if not exists idx_audit_trail_trace on audit_trail(trace_id);
+create index if not exists idx_audit_trail_route on audit_trail(route);
+
 COMMIT;
 
 -- =========================================

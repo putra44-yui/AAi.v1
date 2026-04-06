@@ -872,6 +872,17 @@ function ensureVisibleAssistantReply(text = '', reason = 'unknown') {
   return 'Maaf, respons tadi tidak terbentuk sempurna. Coba kirim ulang pesanmu, ya.';
 }
 
+function recoverVisibleReplyFromRaw(rawReply = '') {
+  return String(rawReply || '')
+    .replace(/\[(MEMORY|MEMORY_FORGET|SUGGEST-FRIEND):[\s\S]*?\]/gi, '')
+    .replace(/\[AAI_CLARIFY\][\s\S]*?\[\/AAI_CLARIFY\]/gi, '')
+    .replace(/\[COMPACT_CHECKPOINT_SUMMARY\][\s\S]*?\[\/COMPACT_CHECKPOINT_SUMMARY\]/gi, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 async function enqueueFileGenerationJob({ sessionId, userId, messageId, sourceText, pendingText, fileCount }) {
   const { data, error } = await supabase
     .from('file_generation_jobs')
@@ -2520,6 +2531,13 @@ MENGHAPUS MEMORI:
         cleanReply = checkpointStripResult.text.trimEnd();
         if (!cleanReply && checkpointStripResult.hadBlock) {
           cleanReply = 'Checkpoint sesi berhasil diperbarui. Konteks lama sudah dipadatkan.';
+        }
+      }
+
+      if (!cleanReply.trim() && fullReply.trim()) {
+        const recoveredReply = recoverVisibleReplyFromRaw(fullReply);
+        if (recoveredReply) {
+          cleanReply = recoveredReply;
         }
       }
 

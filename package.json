@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
     "postinstall": "node scripts/fix-xlsx-tsconfig.cjs",
     "test": "echo \"Error: no test specified\" && exit 1",
     "cap:sync": "npx cap sync android",
@@ -12,16 +15,22 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@capacitor/android": "^8.3.0",
     "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@supabase/supabase-js": "^2.101.0",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "docx": "^9.6.1",
     "mammoth": "^1.12.0",
+    "next": "^16.2.2",
     "openai": "^6.33.0",
     "pdf-parse": "^2.4.5",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^6.0.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
