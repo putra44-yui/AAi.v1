@@ -24,6 +24,7 @@ let selectedFiles    = [];
 let msgboxState = null;
 let pendingFriendSuggestion = null;
 const pendingFileJobPollers = new Map();
+const REASONING_PREVIEW_ENABLED = false;
 
 const PLANNING_COMMAND_PATTERNS = {
   list: /(apa\s+(rencana|perencanaan)\s*(kita)?|tampilkan\s+(rencana|perencanaan)|list\s+rencana)/i,
@@ -793,6 +794,19 @@ function applyHighlight(code, lang) {
 // HELPER: buat HTML bubble AI saat streaming
 // ══════════════════════════════════════════
 function buildStreamBubbleHTML(streamId, timeStr) {
+  const previewPanelHtml = REASONING_PREVIEW_ENABLED
+    ? `<div class="ai-preview" id="preview_${streamId}" style="display:none;">
+        <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
+          <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
+          <i class="fas fa-chevron-down ai-preview-chevron"></i>
+        </button>
+        <div class="ai-preview-body" id="preview_body_${streamId}"></div>
+      </div>`
+    : '';
+  const teaserHtml = REASONING_PREVIEW_ENABLED
+    ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
+    : '';
+
   return `
     <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -803,14 +817,8 @@ function buildStreamBubbleHTML(streamId, timeStr) {
           AAi <span class="version-tag">V.1</span>
         </div>
       </div>
-      <div class="ai-preview" id="preview_${streamId}" style="display:none;">
-        <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
-          <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
-          <i class="fas fa-chevron-down ai-preview-chevron"></i>
-        </button>
-        <div class="ai-preview-body" id="preview_body_${streamId}"></div>
-      </div>
-      <div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>
+      ${previewPanelHtml}
+      ${teaserHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
           <div class="typing-dot"></div>
@@ -887,39 +895,44 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
     </div>`;
 
   let previewEl = aiRow.querySelector('.ai-preview');
-  if (!previewEl) {
-    previewEl = document.createElement('div');
-    previewEl.className = 'ai-preview';
-    previewEl.innerHTML = `
-      <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
-        <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
-        <i class="fas fa-chevron-down ai-preview-chevron"></i>
-      </button>
-      <div class="ai-preview-body"></div>`;
-  }
-  aiRow.insertBefore(previewEl, bubbleEl);
-  previewEl.id = `preview_${streamId}`;
-  previewEl.style.display = 'none';
-  previewEl.classList.remove('is-open');
-  const previewTitleEl = previewEl.querySelector('.ai-preview-summary-title');
-  if (previewTitleEl) {
-    previewTitleEl.textContent = '🧠 AAI sedang berpikir';
-  }
   let teaserEl = aiRow.querySelector('.ai-live-teaser');
-  if (!teaserEl) {
-    teaserEl = document.createElement('div');
-    teaserEl.className = 'ai-live-teaser';
-  }
-  aiRow.insertBefore(teaserEl, bubbleEl);
-  const bodyEl = previewEl.querySelector('.ai-preview-body');
-  if (teaserEl) {
-    teaserEl.id = `preview_stream_${streamId}`;
-    teaserEl.innerHTML = '';
-    teaserEl.style.display = 'none';
-  }
-  if (bodyEl) {
-    bodyEl.id = `preview_body_${streamId}`;
-    bodyEl.innerHTML = '';
+  if (REASONING_PREVIEW_ENABLED) {
+    if (!previewEl) {
+      previewEl = document.createElement('div');
+      previewEl.className = 'ai-preview';
+      previewEl.innerHTML = `
+        <button type="button" class="ai-preview-toggle" onclick="togglePreview(this)">
+          <span class="ai-preview-summary-title">🧠 AAI sedang berpikir</span>
+          <i class="fas fa-chevron-down ai-preview-chevron"></i>
+        </button>
+        <div class="ai-preview-body"></div>`;
+    }
+    aiRow.insertBefore(previewEl, bubbleEl);
+    previewEl.id = `preview_${streamId}`;
+    previewEl.style.display = 'none';
+    previewEl.classList.remove('is-open');
+    const previewTitleEl = previewEl.querySelector('.ai-preview-summary-title');
+    if (previewTitleEl) {
+      previewTitleEl.textContent = '🧠 AAI sedang berpikir';
+    }
+    if (!teaserEl) {
+      teaserEl = document.createElement('div');
+      teaserEl.className = 'ai-live-teaser';
+    }
+    aiRow.insertBefore(teaserEl, bubbleEl);
+    const bodyEl = previewEl.querySelector('.ai-preview-body');
+    if (teaserEl) {
+      teaserEl.id = `preview_stream_${streamId}`;
+      teaserEl.innerHTML = '';
+      teaserEl.style.display = 'none';
+    }
+    if (bodyEl) {
+      bodyEl.id = `preview_body_${streamId}`;
+      bodyEl.innerHTML = '';
+    }
+  } else {
+    previewEl?.remove();
+    teaserEl?.remove();
   }
   aiRow.setAttribute('data-plain-text', '');
   aiRow.setAttribute('data-preview', '');
@@ -933,7 +946,8 @@ function renderStreamingContent(text) {
     .replace(/\[MEMORY:[^\]]+\]/gi,
       '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(42,122,158,.12);color:#1f5f85;font-weight:600;">Memori diperbarui</span>')
     .replace(/\[MEMORY_FORGET:[^\]]+\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>');
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>')
+    .replace(/\r\n?|\n/g, '<br>');
 
   return `<div class="streaming-plain">${safeText}</div>`;
 }
@@ -973,6 +987,7 @@ function extractFriendSuggestionTags(rawText = '') {
 }
 
 function togglePreview(btn) {
+  if (!REASONING_PREVIEW_ENABLED) return;
   const panel = btn.closest('.ai-preview');
   if (!panel) return;
   panel.classList.toggle('is-open');
@@ -1226,6 +1241,7 @@ function renderPreviewBody(preview) {
 }
 
 function buildPreviewPanelHTML(preview, isOpen = false) {
+  if (!REASONING_PREVIEW_ENABLED) return '';
   const normalized = normalizePreview(preview);
   if (!normalized) return '';
 
@@ -1377,6 +1393,7 @@ async function processStream(response, streamId, onDone) {
   }
 
   function showPreview(preview, isStreaming = true) {
+    if (!REASONING_PREVIEW_ENABLED) return;
     if (!previewEl || !previewBodyEl) return;
     const normalized = normalizePreview(preview);
     if (!normalized) return;
@@ -1465,13 +1482,13 @@ async function processStream(response, streamId, onDone) {
       scheduleStreamingRender();
     }
 
-    if (parsed.reasoning) {
+    if (REASONING_PREVIEW_ENABLED && parsed.reasoning) {
       showPreview({
         title: 'AAI',
         streaming_title: 'AAI sedang berpikir',
         reasoning_steps: parsed.reasoning
       }, true);
-    } else if (parsed.preview && !parsed.done) {
+    } else if (REASONING_PREVIEW_ENABLED && parsed.preview && !parsed.done) {
       showPreview(parsed.preview, true);
     }
 
@@ -1499,7 +1516,9 @@ async function processStream(response, streamId, onDone) {
       streamRow.setAttribute('data-id', parsed.message_id || '');
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
       streamRow.setAttribute('data-persona', parsed.persona_used || '');
-      const finalPreview = previewData || normalizePreview(parsed.preview);
+      const finalPreview = REASONING_PREVIEW_ENABLED
+        ? (previewData || normalizePreview(parsed.preview))
+        : null;
       if (finalPreview) {
         previewData = finalPreview;
         previewBodyEl.innerHTML = renderPreviewBody(finalPreview);

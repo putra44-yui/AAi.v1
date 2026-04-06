@@ -1,4 +1,5 @@
 {
+  "framework": "nextjs",
   "rewrites": [
     { "source": "/login", "destination": "/login.html" }
   ],
@@ -39,10 +40,5 @@
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
       ]
     }
-  ],
-  "functions": {
-    "api/**/*.js": {
-      "maxDuration": 300
-    }
-  }
+  ]
 }
