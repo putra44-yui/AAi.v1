@@ -101,6 +101,23 @@ ATURAN DETEKSI & MANAJEMEN TEMAN (DISABLED FOR TESTING):
 - Jika fitur ini di-disable, JANGAN output tag [SUGGEST-FRIEND:...].
 ```
 
+## Reasoning Preview Toggle
+
+Reasoning preview sekarang bisa dikontrol lewat environment variable dan default-nya nonaktif untuk mengurangi overhead payload/UI.
+
+- `AAI_REASONING_PREVIEW_ENABLED=true` -> reasoning preview aktif (generate, simpan, kirim SSE, render UI).
+- `AAI_REASONING_PREVIEW_ENABLED=false` atau tidak diset -> reasoning preview nonaktif total.
+
+Saat nonaktif:
+- Endpoint chat tidak generate `reasoning_steps`.
+- SSE tidak mengirim event reasoning preview.
+- Endpoint history tidak melakukan enrichment preview.
+- UI tidak merender panel "AAI sedang berpikir".
+
+Rollback cepat:
+1. Set `AAI_REASONING_PREVIEW_ENABLED=true` di Vercel/Supabase env.
+2. Redeploy.
+
 ## Performance Considerations
 
 - Friend context fetch: ~50-100ms (new database query)
