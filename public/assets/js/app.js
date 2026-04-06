@@ -1269,6 +1269,25 @@ function buildHistoryPreviewTeaser(preview) {
   return buildPreviewTeaserQueue(preview)[0] || 'Ringkasan siap...';
 }
 
+async function ensureSessionVisibleInSidebar(sessionId, maxAttempts = 6, delayMs = 900) {
+  if (!sessionId) return false;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await loadSessions();
+    const found = sessions.find(item => item.id === sessionId);
+    if (found) {
+      document.getElementById('topbarTitle').textContent = found.title || 'AAi';
+      return true;
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return false;
+}
+
 // ══════════════════════════════════════════
 // HELPER: proses stream SSE
 // ══════════════════════════════════════════
@@ -1298,11 +1317,7 @@ async function processStream(response, streamId, onDone) {
     currentSessionId = parsed.session_id;
     sessionSynced = true;
     localStorage.setItem('aai_last_session', currentSessionId);
-    setTimeout(async () => {
-      await loadSessions();
-      const s = sessions.find(item => item.id === currentSessionId);
-      if (s) document.getElementById('topbarTitle').textContent = s.title;
-    }, 2500);
+    void ensureSessionVisibleInSidebar(currentSessionId);
   }
   let previewStepTimer = null;
   let streamError = null;
@@ -1633,14 +1648,11 @@ async function sendMessage(text, files = []) {
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
-      if (parsed.session_id && !currentSessionId) {
-        currentSessionId = parsed.session_id;
+      const resolvedSessionId = parsed.session_id || currentSessionId;
+      if (resolvedSessionId) {
+        currentSessionId = resolvedSessionId;
         localStorage.setItem('aai_last_session', currentSessionId);
-        setTimeout(async () => {
-          await loadSessions();
-          const s = sessions.find(s => s.id === currentSessionId);
-          if (s) document.getElementById('topbarTitle').textContent = s.title;
-        }, 2500);
+        void ensureSessionVisibleInSidebar(currentSessionId);
       }
       const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
       if (userRows.length > 0)
