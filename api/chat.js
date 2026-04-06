@@ -7,8 +7,7 @@ import * as chatContext from './_lib/chat-context.js';
 import * as chatPreview from './_lib/chat-preview.js';
 import * as chatProvider from './_lib/chat-provider.js';
 import * as chatFiles from './_lib/chat-files.js';
-
-let Document, Packer, Paragraph, TextRun;
+import * as speechStyle from './_lib/speech-style.js';
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -105,6 +104,32 @@ function jaccardSimilarity(a = '', b = '') {
   return union === 0 ? 0 : intersection / union;
 }
 
+function isMeaningfulMemoryConflict(existingValue = '', incomingValue = '') {
+  const left = normalizeMemoryText(existingValue);
+  const right = normalizeMemoryText(incomingValue);
+  if (!left || !right) return false;
+  if (left === right) return false;
+  if (left.includes(right) || right.includes(left)) return false;
+  if (left.length < 12 || right.length < 12) return false;
+
+  const similarity = jaccardSimilarity(left, right);
+  return similarity < 0.22;
+}
+
+function buildConflictVariantKey(baseKey = '', memoryPool = []) {
+  const normalizedBase = normalizeMemoryKey(baseKey || 'memori');
+  const usedKeys = new Set((memoryPool || [])
+    .map(item => normalizeMemoryKey(item?.key || ''))
+    .filter(Boolean));
+
+  for (let idx = 2; idx <= 99; idx += 1) {
+    const candidate = `${normalizedBase}_v${idx}`;
+    if (!usedKeys.has(candidate)) return candidate;
+  }
+
+  return `${normalizedBase}_${Date.now()}`;
+}
+
 function parseMemoryTagPayload(payload = '') {
   const raw = String(payload || '').trim();
   if (!raw) return null;
@@ -169,6 +194,69 @@ function parseMemoryInstructionTags(rawReply = '') {
     cleanReply: cleanReply.trimEnd(),
     memoryUpserts: uniqueList(memoryUpserts.map(m => JSON.stringify(m))).map(item => JSON.parse(item)),
     forgetKeys: uniqueList(forgetKeys)
+  };
+}
+
+/**
+ * Levenshtein distance for fuzzy name matching.
+ */
+function levenshtein(s, t) {
+  const m = s.length, n = t.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = s[i - 1] === t[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Returns true if two name strings are similar enough to be the same person.
+ * Tolerates minor typos and casing differences.
+ */
+function isSimilarName(a = '', b = '') {
+  a = a.toLowerCase().trim();
+  b = b.toLowerCase().trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return true;
+  // Allow up to 2 edit-distance for short names, or 20% for longer ones
+  const threshold = maxLen <= 5 ? 2 : Math.floor(maxLen * 0.2);
+  return levenshtein(a, b) <= threshold;
+}
+
+/**
+ * Parses friend suggestion tags from AI response.
+ * Format: [SUGGEST-FRIEND:name=Yosi;intro_msg=...]
+ * Returns: { cleanReply, friendSuggestions: [{name, intro_msg}, ...] }
+ */
+function parseFriendSuggestionTags(rawReply = '') {
+  const text = String(rawReply || '');
+  const friendSuggestions = [];
+
+  const cleanReply = text.replace(/\[SUGGEST-FRIEND:([\s\S]*?)\](?=\s*(?:\[|$))/g, (_, payload) => {
+    // Parse name=X;intro_msg=Y format
+    const nameMatch = /name=([^;]+)/.exec(payload);
+    const introMatch = /intro_msg=([^;]+)/.exec(payload);
+
+    if (nameMatch) {
+      friendSuggestions.push({
+        name: decodeURIComponent(nameMatch[1]).trim(),
+        intro_msg: introMatch ? decodeURIComponent(introMatch[1]).trim() : ''
+      });
+    }
+    return '';
+  });
+
+  return {
+    cleanReply: cleanReply.trimEnd(),
+    friendSuggestions: uniqueList(friendSuggestions.map(f => JSON.stringify(f))).map(item => JSON.parse(item))
   };
 }
 
@@ -769,6 +857,108 @@ function compactHistoryMessage(content = '', maxChars = HISTORY_SUMMARY_MAX_CHAR
   return `${normalized.slice(0, maxChars - 3)}...`;
 }
 
+function ensureVisibleAssistantReply(text = '', reason = 'unknown') {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (cleaned) return cleaned;
+
+  console.warn('[Response] Empty assistant reply after sanitization.', { reason });
+  return 'Maaf, respons tadi tidak terbentuk sempurna. Coba kirim ulang pesanmu, ya.';
+}
+
+async function enqueueFileGenerationJob({ sessionId, userId, messageId, sourceText, pendingText, fileCount }) {
+  const { data, error } = await supabase
+    .from('file_generation_jobs')
+    .insert({
+      session_id: sessionId,
+      user_id: userId || null,
+      message_id: messageId,
+      status: 'pending',
+      source_text: sourceText,
+      pending_text: pendingText,
+      file_count: Number(fileCount || 0)
+    })
+    .select('id, message_id, session_id, status, file_count, created_at')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+function isDuplicateMemoryEvidenceError(error = null) {
+  const message = String(error?.message || '').toLowerCase();
+  return (error?.code === '23505' && message.includes('person_memory_evidence'))
+    || message.includes('uq_person_memory_evidence_context')
+    || message.includes('unique_context_hash');
+}
+
+async function findMemoryEvidenceByContextHash(personId, uniqueContextHash) {
+  if (!personId || !uniqueContextHash) return null;
+
+  const { data, error } = await supabase
+    .from('person_memory_evidence')
+    .select('id, memory_id, evidence_status, reliability_score')
+    .eq('person_id', personId)
+    .eq('unique_context_hash', uniqueContextHash)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function insertMemoryEvidence(payload = {}) {
+  const { data, error } = await supabase
+    .from('person_memory_evidence')
+    .insert(payload)
+    .select('id, memory_id, evidence_status, reliability_score, unique_context_hash')
+    .single();
+
+  if (error) {
+    if (isDuplicateMemoryEvidenceError(error)) {
+      return { data: null, duplicate: true };
+    }
+    throw error;
+  }
+
+  return { data, duplicate: false };
+}
+
+async function countValidatedMemoryEvidence(memoryId) {
+  if (!memoryId) return 0;
+
+  const { count, error } = await supabase
+    .from('person_memory_evidence')
+    .select('id', { count: 'exact', head: true })
+    .eq('memory_id', memoryId)
+    .eq('evidence_status', 'validated');
+
+  if (error) throw error;
+  return Number(count || 0);
+}
+
+async function writeLegacyAuditEntries(entries = []) {
+  const rows = (Array.isArray(entries) ? entries : [])
+    .filter(Boolean)
+    .map(entry => ({
+      person_id: entry.person_id || null,
+      memory_id: entry.memory_id || null,
+      evidence_id: entry.evidence_id || null,
+      session_id: entry.session_id || null,
+      source_message_id: entry.source_message_id || null,
+      event_type: String(entry.event_type || entry.type || 'memory_event').trim() || 'memory_event',
+      reason_code: entry.reason_code || entry.reason || null,
+      payload: entry.payload && typeof entry.payload === 'object' ? entry.payload : {}
+    }));
+
+  if (!rows.length) return;
+
+  try {
+    const { error } = await supabase.from('legacy_audit_log').insert(rows);
+    if (error) throw error;
+  } catch (error) {
+    console.error('[LegacyAudit] Gagal simpan log:', error.message);
+  }
+}
+
 function buildOlderHistorySummary(messages = []) {
   if (!Array.isArray(messages) || messages.length === 0) return '';
 
@@ -1167,7 +1357,7 @@ function getModelConfig(personaList) {
     'Coding':          { temperature: 0.0, max_tokens: 52000,  top_p: 0.85 },
     'Kritikus Brutal': { temperature: 0.3, max_tokens: 3000,  top_p: 0.85 },
     'Santai':          { temperature: 0.8, max_tokens: 1500,  top_p: 0.95 },
-    'Rosalia':         { temperature: 0.95, max_tokens: 1000, top_p: 0.95 }, 
+    'Rosalia':         { temperature: 0.95, max_tokens: 2200, top_p: 0.95 }, 
     'Auto':            { temperature: 0.7, max_tokens: 3000,  top_p: 0.9  }
   };
   return configs[persona] || configs['Auto'];
@@ -1267,24 +1457,6 @@ async function callOpenRouterWithRetry({ apiKey, payload }) {
     fallbackUsed: true
   };
 }
-
-// ✅ HELPER: Upload Base64 ke Supabase Storage
-async function uploadFileToStorage(base64String, fileName, mimeType) {
-  const base64 = base64String.split(',')[1];
-  const buffer = Buffer.from(base64, 'base64');
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const filePath = `uploads/${Date.now()}-${safeName}`;
-  
-  const { error } = await supabase.storage
-    .from('aai-files')
-    .upload(filePath, buffer, { contentType: mimeType, upsert: false });
-  if (error) throw new Error(`Gagal upload: ${error.message}`);
-  
-  const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
-  return publicUrl;
-}
-
-
 
 export default async function handler(req, res) {
 
@@ -1479,8 +1651,8 @@ export default async function handler(req, res) {
       relevantMemoryLimit
     });
 
-    // 2. Family context (sama seperti sebelumnya)
-    const { data: allPersons } = await supabase.from('persons').select('name, date_of_birth, role');
+    // 2. Family context
+    const { data: allPersons } = await supabase.from('persons').select('id, name, date_of_birth, role');
     const familyContext = (allPersons || []).map(p => {
       const age = calculateAge(p.date_of_birth);
       const dob = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : 'tidak diketahui';
@@ -1500,20 +1672,46 @@ export default async function handler(req, res) {
       .filter(Boolean)
       .join('\n') || 'Belum ada relasi.';
 
-    const { data: memories } = await supabase
-      .from('person_memory')
-      .select('id, key, value, confidence, observation_count, updated_at, priority_score, memory_type, category, status')
-      .eq('person_id', user.person_id)
-      .eq('status', 'active')
-      .order('priority_score', { ascending: false })
-      .order('updated_at', { ascending: false })
-      .limit(injectedMemoryLimit);
-    const relevantSelection = chatMemory.selectRelevantMemories(memories || [], userMessage, {
-      limit: experimentProfile.relevantMemoryLimit,
-      weights: experimentProfile.weights,
-      minPreferredRelevance: experimentProfile.minPreferredRelevance,
-      minOtherRelevance: experimentProfile.minOtherRelevance
-    });
+    // Fetch active memories, dropped traces, and child memories in parallel
+    const childPersonIds = (allPersons || [])
+      .filter(p => p.role === 'anak' && p.id)
+      .map(p => p.id);
+
+    const [memoriesResult, droppedResult, ...childMemoryResults] = await Promise.all([
+      supabase
+        .from('person_memory')
+        .select('id, key, value, confidence, observation_count, updated_at, priority_score, memory_type, category, status')
+        .eq('person_id', user.person_id)
+        .eq('status', 'active')
+        .order('priority_score', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .limit(injectedMemoryLimit),
+      supabase
+        .from('person_memory')
+        .select('key, value')
+        .eq('person_id', user.person_id)
+        .eq('status', 'dropped')
+        .order('updated_at', { ascending: false })
+        .limit(12),
+      ...childPersonIds.map(childId =>
+        supabase
+          .from('person_memory')
+          .select('key, value, memory_type')
+          .eq('person_id', childId)
+          .eq('status', 'active')
+          .order('priority_score', { ascending: false })
+          .order('updated_at', { ascending: false })
+          .limit(15)
+      )
+    ]);
+
+    const { data: memories } = memoriesResult;
+    const droppedMemories = (droppedResult.data || []).filter(m => m.key || m.value);
+    const childMemoriesData = childPersonIds.map((childId, idx) => {
+      const childPerson = (allPersons || []).find(p => p.id === childId);
+      return { name: childPerson?.name || 'Anak', memories: childMemoryResults[idx]?.data || [] };
+    }).filter(c => c.memories.length > 0);
+
     let targetAssistantMessageId = assistant_message_id || null;
     if (!targetAssistantMessageId && edit_message_id) {
       const { data: existingAssistant } = await supabase
@@ -1591,6 +1789,44 @@ export default async function handler(req, res) {
       ...recentHistory.map(m => ({ role: m.role, content: m.content }))
     ];
 
+    // ── SPEECH PATTERN PROFILE ──
+    // Dihitung dari histori sesi terbaru + pesan saat ini.
+    // Tidak butuh DB extra — cukup dari recentHistory yang sudah di-load.
+    const speechProfile = speechStyle.buildSpeechProfile(recentHistory, userMessage);
+    const speechStyleBlock = speechStyle.buildSpeechStyleBlock(speechProfile, person?.name || 'User');
+    const emotionGuidance = chatPreview.buildRuntimeEmotionGuidance(userMessage, recentHistory);
+    const relevantSelection = chatMemory.selectRelevantMemories(memories || [], userMessage, {
+      limit: experimentProfile.relevantMemoryLimit,
+      weights: experimentProfile.weights,
+      minPreferredRelevance: experimentProfile.minPreferredRelevance,
+      minOtherRelevance: experimentProfile.minOtherRelevance,
+      speechProfile,
+      emotionHints: emotionGuidance,
+      recurrentTopics: speechProfile?.recurrentTopics || [],
+      familyNames: (allPersons || []).map(p => p.name).filter(Boolean)
+    });
+
+    const cognitiveProfile = (memories || []).reduce((acc, memory) => {
+      const normalizedKey = chatMemory.normalizeMemoryKey(memory?.key || '');
+      if (!normalizedKey || acc[normalizedKey]) return acc;
+      if (!['profil_mbti', 'pola_pikir_inti', 'prinsip_keputusan', 'nilai_hidup'].includes(normalizedKey)) {
+        return acc;
+      }
+      const value = String(memory?.value || '').trim();
+      if (!value) return acc;
+      acc[normalizedKey] = value;
+      return acc;
+    }, {});
+
+    const userMbtiUpper = String(
+      cognitiveProfile.profil_mbti ||
+      (/\bintp(?:-[at])?\b/i.test(userMessage) ? 'INTP-A' : '')
+    ).trim().toUpperCase();
+    const isIntpUser = userMbtiUpper.startsWith('INTP');
+    const isRosaliaUser = /rosalia/i.test(String(person?.name || ''));
+    const talksAboutRosalia = /\brosalia\b|\bistri\b|\bsayang\b/i.test(userMessage);
+    const isFastDecisionContext = /kode|coding|bug|deploy|urgent|deadline|cepat|sekarang|produksi|server|incident|keputusan\s+cepat|decision-fast|kerja|work/i.test(msgLower);
+
     // 4. Persona (sama)
     let targetPersona = persona_name;
     if (targetPersona === 'Auto') {
@@ -1606,6 +1842,7 @@ export default async function handler(req, res) {
     let personaList = [targetPersona];
     if (!consistency_mode && /sayang|cinta/i.test(msgLower) && targetPersona !== 'Rosalia')
       personaList = ['Santai', 'Rosalia'];
+    const shouldUseSocratic = isIntpUser && !isFastDecisionContext && targetPersona !== 'Coding';
 
     const { data: personasData } = await supabase
       .from('ai_personas').select('name, system_prompt').in('name', personaList);
@@ -1627,6 +1864,9 @@ export default async function handler(req, res) {
       content: [
         '[RELEVANT MEMORY]',
         `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
+        `Lapisan intent: ${(relevantSelection.intents || []).join(', ') || '-'}`,
+        `Emotional intent: ${relevantSelection.emotionalIntent || 'netral'}`,
+        `Timing intent: ${relevantSelection.timingIntent || 'rutin'}`,
         `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
         `Jumlah memori terpilih: ${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
         `Experiment mode: ${experimentProfile.mode || 'balanced'}`,
@@ -1637,7 +1877,6 @@ export default async function handler(req, res) {
       ].join('\n')
     };
 
-    const emotionGuidance = chatPreview.buildRuntimeEmotionGuidance(userMessage, recentHistory);
     const systemEmotionGuidancePrompt = {
       role: 'system',
       content: [
@@ -1654,6 +1893,49 @@ export default async function handler(req, res) {
       ].join('\n')
     };
 
+    const systemIntentSignalsPrompt = {
+      role: 'system',
+      content: [
+        '[INTENT LAYERS]',
+        `Primary intent: ${relevantSelection.intent || 'general'}`,
+        `Intent layers: ${(relevantSelection.intents || []).join(', ') || '-'}`,
+        `Emotional intent: ${relevantSelection.emotionalIntent || 'netral'}`,
+        `Timing intent: ${relevantSelection.timingIntent || 'rutin'}`,
+        `Relation focus: ${relevantSelection.relationSignals?.hasRelationFocus ? 'yes' : 'no'}`,
+        `Mentioned relations: ${((relevantSelection.relationSignals?.mentionedNames || []).concat(relevantSelection.relationSignals?.signals || [])).join(', ') || '-'}`,
+        `Reasoning hints: ${(relevantSelection.reasoning || []).join(' | ') || '-'}`,
+        '',
+        '[ROUTINE SIGNALS]',
+        `Dominant time slot: ${speechProfile?.dominantTimeSlot || 'tidak_diketahui'}`,
+        `Current time slot: ${speechProfile?.currentTimeSlot || 'tidak_diketahui'}`,
+        `Time anomaly: ${speechProfile?.timeAnomaly ? 'yes' : 'no'}`,
+        `Style shift: ${(speechProfile?.styleShift || []).join(', ') || '-'}`,
+        `Recurrent topics: ${(speechProfile?.recurrentTopics || []).join(', ') || '-'}`,
+        'Gunakan blok ini untuk memilih fokus respons dan memori: jika ada anomali waktu, perubahan gaya, atau fokus relasi, prioritaskan memori pola, emosi, dan relasi yang paling relevan.'
+      ].join('\n')
+    };
+
+    const cognitiveStyleContent = [
+      '[COGNITIVE PROFILE USER]',
+      `MBTI: ${userMbtiUpper || '-'}`,
+      `Core thinking: ${cognitiveProfile.pola_pikir_inti || '-'}`,
+      `Decision principle: ${cognitiveProfile.prinsip_keputusan || '-'}`,
+      `Core values: ${cognitiveProfile.nilai_hidup || '-'}`,
+      '',
+      '[COGNITIVE RESPONSE RULES]',
+      'Untuk user INTP: prioritaskan Socratic questioning, eksplorasi logic-first, dan framing filosofis bila relevan.',
+      `Ask 1-2 reflective questions ONLY when shouldUseSocratic true. Current mode: ${shouldUseSocratic ? 'enabled' : 'disabled'}.`,
+      'Untuk konteks coding/work/urgent: skip reflective mode dan berikan langkah aksi langsung.',
+      'Hindari tone yang terlalu manis ala ENFP untuk user INTP.',
+      ...((isRosaliaUser || talksAboutRosalia)
+        ? ['Validasi dulu, lalu logika. Jika user menunjukkan mode analitis/Ti (minta alasan/struktur), beri kerangka logis ringkas setelah validasi.']
+        : [])
+    ].join('\n');
+
+    const systemCognitiveStylePrompt = cognitiveStyleContent.trim()
+      ? { role: 'system', content: cognitiveStyleContent }
+      : null;
+
     const systemFinalInstructionPrompt = {
       role: 'system',
       content: [
@@ -1663,6 +1945,12 @@ export default async function handler(req, res) {
         ...(fileContext ? ['', '[LAMPIRAN FILE]', fileContext] : [])
       ].join('\n')
     };
+
+    // Block pola komunikasi — hanya diinjeksi jika ada data (≥1 sample)
+    const systemSpeechStylePrompt = speechStyleBlock ? {
+      role: 'system',
+      content: speechStyleBlock
+    } : null;
 
     // 5. System prompt 
     const systemPrompt = {
@@ -1674,23 +1962,18 @@ ${combinedSystem}
 
 ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji, respons panjang dan detail.
-- Bantu pekerjaan konsep sulit, excel, coding, dll.
-- untuk user bernama teguh ketika meminta perbaiki bug, membuat fitur atau coding selain ia bukan bertanya apa penyebabnya atau bukan mode diskusi :
-      1.utamakan memberikan coding, dibanding penjelasan panjang untuk hemat token jika user = teguh. 
-      2.teguh sedang merancang sistem ai dan ux sebagai pemula, berikan coding terbaik untuk jangka panjang, bukan solusi cepat yang mungkin bikin masalah di kemudian hari.
-      3. planingnya memanfaatkan ai yang ada dalam membangun sistem ai, ketika ia sudah punya modal, ia akan mengganti otak nya menjadi versi server lokal.
-      4. jika teguh meminta sesuatu fitur atau suatu hal yang tidak begitu penting, berikan penjelasan atau opsi alternatif lebih baik yang berguna untuk masa depan.
+- Kamu adalah AAi, namamu AAi, panggil dirimu AAi, kamu di rancang oleh teguh dengan berbagai hal, terutama yang berhubungan dengan teknologi, pemrograman, dan kehidupan sehari-hari.
 - untuk user rosalia :
       1. utamakan bahasa yang lembut, penuh kasih sayang, dan dukungan emosional serta dengan candaan.
-      2. bantu dia belajar dunia teknologi dan pemrograman dengan cara yang menyenangkan, tanpa membuatnya merasa kewalahan.
+      2. bantu dia belajar dunia teknologi dan pemrograman, mengelola konten dengan cara yang menyenangkan, tanpa membuatnya merasa kewalahan.
 - Jangan gunakan panggilan gw, lu, gue, lo. Utamakan nama, "kamu" atau sayang.
 - Jawab langsung dan lengkap. DILARANG memotong jawaban di tengah.
 - Jika ada URL gambar/file di atas, sebutkan bahwa file berhasil diterima dan berikan link jika relevan.
 - Jika user melampirkan file/teks, WAJIB konfirmasi dulu: "File [nama] berhasil dibaca. Berikut ringkasannya:" sebelum menjawab pertanyaan utama.
 - Jika user melampirkan file .js/.mjs/.cjs, baca sebagai kode JavaScript dan gunakan isinya sebagai konteks utama.
 - Lampiran gambar/file hanya konteks. Jangan otomatis menganggap user ingin generate file; nilai dulu tujuan dari isi percakapannya.
-- Jika user minta buat file, WAJIB gunakan format: [FILE_START:nama_file.ext] (isi konten) [FILE_END]. Gunakan .txt untuk teks, .xlsb untuk tabel (pisahkan kolom dengan tanda #, BUKAN koma), .docx untuk dokumen.
-- Untuk file .xlsb, gunakan format tabel rapi dengan header di baris pertama. Jika ada 2 dataset/sheet, gunakan format ini agar backend bisa auto-sanding:
+- Jika user minta buat file, WAJIB gunakan format: [FILE_START:nama_file.ext] (isi konten) [FILE_END]. Gunakan .txt untuk teks, .xlsx untuk tabel default (pisahkan kolom dengan tanda #, BUKAN koma), .docx untuk dokumen. Gunakan .xlsb hanya jika user minta eksplisit format biner Excel atau untuk workflow macro/VBA.
+- Untuk file spreadsheet (.xlsx, .xlsb, atau .xls), gunakan format tabel rapi dengan header di baris pertama. Jika ada 2 dataset/sheet, gunakan format ini agar backend bisa auto-sanding:
   [[SHEET:Data_A]]
   kolom1#kolom2#kolom3
   ...
@@ -1704,28 +1987,72 @@ ATURAN PENTING:
   {"title":"Perlu data lanjutan","description":"...","submit_label":"Lanjutkan Dengan Jawaban Ini","questions":[{"key":"tujuan","label":"...","options":["A. ...","B. ...","C. ..."]}]}
   [/AAI_CLARIFY]
 - Aturan blok klarifikasi:
-  1) JSON wajib valid, tanpa trailing comma, tanpa komentar, tanpa markdown.
-  2) Isi 1-4 pertanyaan, tiap pertanyaan 2-4 opsi singkat.
-  3) key wajib huruf kecil + underscore.
-  4) Gunakan mekanisme ini untuk file, kode, gambar, atau percakapan umum jika konteks masih kurang.
-  5) Jika memakai blok ini, JANGAN beri hasil final dulu. Tunggu jawaban user berikutnya.
+  1) Gunakan [AAI_CLARIFY] HANYA jika ambiguitas benar-benar menghalangi jawaban bermakna.
+  2) Untuk konteks emosi/curhat, JANGAN langsung klarifikasi; berikan dulu respons empatik yang utuh.
+  3) Jika tetap perlu klarifikasi, berikan dulu jawaban substantif minimal 6 kalimat + minimal 1 langkah konkret, BARU tambahkan blok [AAI_CLARIFY].
+  4) JSON wajib valid, tanpa trailing comma, tanpa komentar, tanpa markdown.
+  5) Isi 1-4 pertanyaan, tiap pertanyaan 2-4 opsi singkat; key wajib huruf kecil + underscore.
   6) Jika memakai blok ini, JANGAN tambahkan tag [MEMORY:...] di respons itu.
 - Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download.
 - Jangan abaikan konten lampiran. Gunakan sebagai konteks utama jika relevan.
 - Jika user minta macro/VBA, WAJIB buat 2 file terpisah:
   1. [FILE_START:data_nama.xlsb] (data tabel, pisah kolom dengan #) [FILE_END]
   2. [FILE_START:macro_nama.bas] (kode VBA lengkap, tanpa markdown) [FILE_END]
-- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download + instruksi singkat: "Alt+F11 → File → Import Module → pilih .bas → Run".
+- Setelah generate, AI tidak perlu menjelaskan proses teknis. Langsung berikan link download + instruksi singkat: "Buka file .xlsb di Excel desktop → Alt+F11 → File → Import Module → pilih .bas → Run".
 
-ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
-- Kamu sedang mengenal ${person?.name} dari awal. Setiap percakapan adalah kesempatan untuk belajar tentangnya.
-- Jika kamu mendeteksi memori baru tentang ${person?.name} (pattern, kebiasaan, cara berpikir, preferensi, emosi, fakta), sisipkan tag memori terstruktur di AKHIR responmu:
+ATURAN DETEKSI & MANAJEMEN TEMAN (PENTING):
+- Jika seseorang yang tidak dikenal memperkenalkan diri sebagai teman dengan pola seperti:
+  * "Aku teman [nama pemilik akun], namaku [nama teman]"
+  * "Namaku [nama], aku teman [nama pemilik akun]"
+  * "Saya [nama], teman dari [nama pemilik akun]"
+  * Atau variasi serupa dengan "teman", "sahabat"
+- LANGKAH PERTAMA (WAJIB): Cek konteks [TEMAN-TEMAN YANG DIKENAL] terlebih dahulu.
+  * Jika nama tersebut (atau nama serupa/mirip) SUDAH ADA di daftar teman, JANGAN output tag [SUGGEST-FRIEND:...].
+  * Sambut mereka dengan hangat menggunakan memori yang sudah tersimpan.
+  * Jika ada memori tentang mereka, ceritakan hal-hal yang kamu ingat.
+- LANGKAH KEDUA (hanya jika benar-benar tidak dikenal): Terima perkenalan dengan hangat, lalu sisipkan tag:
+  [SUGGEST-FRIEND:name=[nama_teman];intro_msg=[excerpt pesan perkenalan, max 100 karakter]]
+- Tag [SUGGEST-FRIEND:...] adalah instruksi sistem internal, JANGAN tampilkan ke user, letakkan di paling akhir respons.
+- Jika seseorang memperkenalkan diri HANYA dengan nama ("aku [nama]", "saya [nama]") tanpa kata "teman" atau "sahabat" – JANGAN langsung buat tag. Tanya atau cek dulu apakah mereka dikenal.
+- Ingat: tujuan tag ini agar sistem bisa menyarankan ke user untuk menyimpan teman baru, sehingga AI bisa mengingat mereka ke depannya.
+
+ATURAN MEMORI & PENGENALAN POLA (SANGAT PENTING – SELALU IKUTI):
+Visi: kamu sedang membangun representasi digital ${person?.name}. Setiap percakapan adalah data.
+Prioritas utama: rekam POLA dan INSIGHT yang bermakna, bukan sekadar fakta permukaan.
+
+APA YANG WAJIB DIREKAM (pilih yang paling signifikan, maks 3 per respons):
+1. Pola perilaku & kebiasaan: rutinitas, cara merespons situasi serupa, reaksi berulang.
+2. Cara berpikir: bagaimana ia mengambil keputusan, apa yang diprioritaskan, logika atau perasaan?
+3. Pola emosi: emosi apa yang muncul dalam konteks apa, bagaimana ia mengekspresikannya.
+4. Preferensi: apa yang ia sukai/tidak sukai, apa yang membuatnya nyaman/tidak nyaman.
+5. Fakta kunci: informasi konkret penting (pekerjaan, hobi, pencapaian, kekhawatiran besar).
+6. Sinyal relasi: bagaimana ia berbicara tentang orang-orang terdekat (nada, frekuensi, emosi).
+
+CARA MEREKAM:
+- Sisipkan tag memori terstruktur di AKHIR respons:
   [MEMORY:type=pattern;category=komunikasi;key=gaya_jawab;value=suka langsung ke inti]
-- memory type wajib salah satu: pattern, kebiasaan, cara_berpikir, preferensi, emosi, fakta.
-- Maksimal 3 tag [MEMORY:...] per respons.
-- Jika isi memori mirip dengan memori lama, tetap gunakan key yang paling relevan agar sistem melakukan update, bukan menambah duplikat.
-- Jika user meminta melupakan sesuatu, gunakan tag:
-  [MEMORY_FORGET:key=nama_memori]
+- type wajib salah satu: pattern, kebiasaan, cara_berpikir, preferensi, emosi, fakta.
+- Maksimal 3 tag [MEMORY:...] per respons. Pilih yang paling baru dan bermakna.
+- Jika isi mirip memori lama (lihat [RELEVANT MEMORY]), gunakan key yang SAMA agar update bukan duplikat.
+- JANGAN rekam ulang hal yang sudah ada dan tidak berubah.
+- JANGAN rekam saat menggunakan blok [AAI_CLARIFY] (tunggu jawaban user dulu).
+
+KEY BAKU untuk identitas personal (WAJIB konsisten, jangan buat variasi key lain):
+  nama panggilan  → key=nama_panggilan
+  nama lengkap    → key=nama_lengkap
+  tanggal lahir   → key=tanggal_lahir
+  tempat lahir    → key=tempat_lahir
+  domisili        → key=domisili
+  MBTI            → key=profil_mbti
+  pola pikir      → key=pola_pikir_inti
+  prinsip keputusan → key=prinsip_keputusan
+  nilai hidup     → key=nilai_hidup
+
+Jika user koreksi data identitas, gunakan key baku yang sama agar nilai lama ter-update otomatis.
+
+MENGHAPUS MEMORI:
+- Jika user meminta melupakan sesuatu, WAJIB jalankan: [MEMORY_FORGET:key=nama_memori]
+- Hapus memori yang relevan, jangan yang lain.
 - Tag [MEMORY:...] dan [MEMORY_FORGET:...] adalah instruksi sistem internal, JANGAN tampilkan ke user, letakkan di paling akhir respons.`
     };
 
@@ -1811,11 +2138,23 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
+    // Send init event immediately so client always has session_id even if timeout
+    res.write(`data: ${JSON.stringify({
+      session_id: currentSessionId,
+      user_message_id: finalUserMessageId,
+      phase: 'init'
+    })}
+
+`);
+    res.flush?.();
+
     if (clientPreviewPayload) {
       res.write(`data: ${JSON.stringify({
         preview: clientPreviewPayload,
         reasoning: clientPreviewPayload.reasoning_steps,
         preview_id: previewRecordId,
+        session_id: currentSessionId,
+        user_message_id: finalUserMessageId,
         phase: 'reasoning'
       })}\n\n`);
       res.flush?.();
@@ -1862,6 +2201,60 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         }
       : null;
 
+    // ── FRIEND MEMORY INJECTION ──
+    let systemFriendContextPrompt = null;
+    let knownFriendsData = []; // hoisted so post-processing guard can access it
+    try {
+      knownFriendsData = await chatContext.fetchFriendsWithMemories(supabase, person.id, 5) || [];
+      // ALWAYS build friend context block (even if empty) so LLM knows what to reference
+      const friendContextText = chatContext.buildFriendContextBlock(knownFriendsData);
+      systemFriendContextPrompt = {
+        role: 'system',
+        content: friendContextText
+      };
+    } catch (friendErr) {
+      console.error('[Friend Memory] Error fetching friend memories:', friendErr);
+      // Fallback to empty friends context
+      systemFriendContextPrompt = {
+        role: 'system',
+        content: chatContext.buildFriendContextBlock([])
+      };
+    }
+
+    // ── DROPPED MEMORY BLOCK ──
+    // Memori yang pernah diminta user untuk dilupakan, tapi jejak tetap tersedia
+    let systemDroppedMemoryPrompt = null;
+    if (droppedMemories.length > 0) {
+      const droppedLines = droppedMemories
+        .map(m => `- ${m.key}: ${m.value}`)
+        .slice(0, 8);
+      systemDroppedMemoryPrompt = {
+        role: 'system',
+        content: `[JEJAK MEMORI YANG PERNAH DILEPAS]\nMemori berikut pernah diminta dilupakan user. Jejak datanya masih tersimpan ringan.\nGunakan HANYA jika user tanya soal hal yang sudah dilupakan dengan sebutan seperti 'masih ingat soal X?', 'apa kau masih ingat', atau mempertanyakan hal lupa.\nSaat itu, sebutkan: "Aku masih ingat sedikit jejaknya — [data]." Jangan bawa sewaktu tidak ditanya.\n${droppedLines.join('\\n')}`
+      };
+    }
+
+    // ── CHILD MEMORY BLOCK (untuk parents) ──
+    // Data anak yang di-share antara kedua orang tua
+    let systemChildMemoryPrompt = null;
+    const userRole = person?.role || '';
+    const isParent = userRole === 'ayah' || userRole === 'ibu';
+    if (isParent && childMemoriesData.length > 0) {
+      const childLines = childMemoriesData
+        .flatMap(child => {
+          const headerLine = `${child.name}:`;
+          const memLines = (child.memories || [])
+            .slice(0, 5)
+            .map(m => `  - ${m.value || m.key}`);
+          return [headerLine, ...memLines];
+        })
+        .slice(0, 25);
+      systemChildMemoryPrompt = {
+        role: 'system',
+        content: `[DATA BERSAMA — CATATAN ANAK]\nData berikut dicatat salah satu orang tua dan berlaku untuk kedua orang tua. Jika ada info baru tentang anak, simpan dengan key baku.\n${childLines.join('\\n')}`
+      };
+    }
+
         // ── OPENROUTER CALL + RETRY/FALLBACK ──
     const openRouterPayload = {
       messages: [
@@ -1869,7 +2262,13 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         systemIdentityPrompt,
         systemConsistencyPrompt,
         systemMemoryContextPrompt,
+        ...(systemFriendContextPrompt ? [systemFriendContextPrompt] : []),
         systemEmotionGuidancePrompt,
+        systemIntentSignalsPrompt,
+        ...(systemCognitiveStylePrompt ? [systemCognitiveStylePrompt] : []),
+        ...(systemDroppedMemoryPrompt ? [systemDroppedMemoryPrompt] : []),
+        ...(systemChildMemoryPrompt ? [systemChildMemoryPrompt] : []),
+        ...(systemSpeechStylePrompt ? [systemSpeechStylePrompt] : []),
         systemFinalInstructionPrompt,
         ...(compactInstructionPrompt ? [compactInstructionPrompt] : []),
         ...chatHistory,
@@ -1896,7 +2295,11 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         errorDetail
       });
 
-      res.write(`data: ${JSON.stringify({ error: `Provider returned error - ${providerResult.status} ${errorDetail}` })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        error: `Provider returned error - ${providerResult.status} ${errorDetail}`,
+        session_id: currentSessionId,
+        user_message_id: finalUserMessageId
+      })}\n\n`);
       res.end();
       return;
     }
@@ -1963,17 +2366,77 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
     }
 
     // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
-    if (fullReply.trim()) {
+    if (true) {
       // ── PARSE & STRIP MEMORY CONTROL TAGS ──
       const memoryOps = chatMemory.parseMemoryInstructionTags(fullReply);
-      const detectedMemories = memoryOps.memoryUpserts;
+      const memoryQuality = chatMemory.filterMemoryUpserts(memoryOps.memoryUpserts, { maxItems: 3 });
+      let detectedMemories = memoryQuality.accepted;
+      const rejectedMemoryCandidates = memoryQuality.rejected;
       const detectedForgetKeys = memoryOps.forgetKeys;
       let cleanReply = memoryOps.cleanReply;
+      const clarifyPolicy = chatContext.analyzeClarifyBehavior(fullReply, cleanReply, userMessage);
+
+      if (!clarifyPolicy.allowMemoryWrite && detectedMemories.length > 0) {
+        for (const mem of detectedMemories) {
+          rejectedMemoryCandidates.push({
+            key: chatMemory.normalizeMemoryKey(mem.key),
+            reason: 'blocked_due_clarify'
+          });
+        }
+        detectedMemories = [];
+      }
+
+      // ── PARSE & STRIP FRIEND SUGGESTION TAGS ──
+      const friendOps = parseFriendSuggestionTags(cleanReply);
+      let friendSuggestions = friendOps.friendSuggestions;
+      cleanReply = friendOps.cleanReply;
+
+      // ── SERVER-SIDE GUARD: suppress suggestions for already-known persons ──
+      if (friendSuggestions.length > 0) {
+        const knownNames = knownFriendsData.map(f => f.name);
+        const filtered = [];
+        for (const suggestion of friendSuggestions) {
+          const sugName = suggestion.name;
+          // Check against in-memory friend list with fuzzy matching
+          const alreadyKnownFriend = knownNames.some(kn => isSimilarName(kn, sugName));
+          if (alreadyKnownFriend) {
+            console.log(`[Friend Guard] Suppressed duplicate suggestion for already-known: "${sugName}"`);
+            continue;
+          }
+          // Also check persons table directly (catches edge cases where friendsData was empty)
+          const { data: existingPersons } = await supabase
+            .from('persons')
+            .select('id, name')
+            .ilike('name', sugName)
+            .limit(1);
+          if (existingPersons?.length > 0) {
+            console.log(`[Friend Guard] Suppressed suggestion – "${sugName}" already in persons table`);
+            continue;
+          }
+          filtered.push(suggestion);
+        }
+        friendSuggestions = filtered;
+      }
+
+      // If friend suggestions detected, send event to client
+      if (friendSuggestions && friendSuggestions.length > 0) {
+        for (const suggestion of friendSuggestions) {
+          res.write(`data: ${JSON.stringify({
+            type: 'friend-suggestion',
+            friend_name: suggestion.name,
+            intro_message: suggestion.intro_msg,
+            phase: 'friend-detected'
+          })}\n\n`);
+        }
+        res.flush?.();
+      }
 
       const clarifyStripResult = chatContext.stripClarifyControlBlocks(cleanReply);
       cleanReply = clarifyStripResult.text.trimEnd();
       if (!cleanReply && clarifyStripResult.hadBlock) {
-        cleanReply = 'Aku butuh beberapa detail tambahan dulu. Pilih opsi di kotak yang muncul, atau isi lainnya.';
+        cleanReply = clarifyPolicy.isEmotionalContext
+          ? 'Aku dengerin kamu. Kita pelan-pelan dulu ya, aku bantu dari hal paling penting yang kamu rasakan sekarang, lalu kita lanjutkan langkah kecil yang paling aman.'
+          : 'Aku butuh beberapa detail tambahan dulu. Pilih opsi di kotak yang muncul, atau isi lainnya.';
       }
 
       const checkpointSummaryToPersist = isCompactCheckpointRequest
@@ -1987,6 +2450,9 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
           cleanReply = 'Checkpoint sesi berhasil diperbarui. Konteks lama sudah dipadatkan.';
         }
       }
+
+      cleanReply = ensureVisibleAssistantReply(cleanReply, fullReply.trim() ? 'sanitized_empty' : 'provider_empty');
+      const sourceReplyForFiles = cleanReply;
 
       // 1. Simpan dulu ke DB (clean reply tanpa memory tags)
       let aiMsgData;
@@ -2038,12 +2504,64 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
         }
       }
 
+      const pendingFileState = chatFiles.buildPendingFileReply(sourceReplyForFiles);
+      let finalReplyForClient = cleanReply;
+      let fileJobMeta = null;
+      let shouldUseInlineFileProcessing = false;
+
+      if (pendingFileState.hasFiles && aiMsgData?.id) {
+        finalReplyForClient = ensureVisibleAssistantReply(pendingFileState.pendingReply, 'file_pending');
+
+        try {
+          const queuedJob = await enqueueFileGenerationJob({
+            sessionId: currentSessionId,
+            userId: user.id,
+            messageId: aiMsgData.id,
+            sourceText: sourceReplyForFiles,
+            pendingText: finalReplyForClient,
+            fileCount: pendingFileState.files.length
+          });
+
+          await supabase
+            .from('messages')
+            .update({ content: finalReplyForClient })
+            .eq('id', aiMsgData.id);
+
+          aiMsgData = { ...aiMsgData, content: finalReplyForClient };
+          fileJobMeta = {
+            id: queuedJob.id,
+            message_id: queuedJob.message_id,
+            session_id: queuedJob.session_id,
+            status: queuedJob.status,
+            file_count: queuedJob.file_count,
+            created_at: queuedJob.created_at
+          };
+        } catch (fileJobErr) {
+          console.error('[FileJob] Gagal enqueue, fallback ke inline processing:', fileJobErr.message);
+          shouldUseInlineFileProcessing = true;
+
+          try {
+            await supabase
+              .from('messages')
+              .update({ content: finalReplyForClient })
+              .eq('id', aiMsgData.id);
+
+            aiMsgData = { ...aiMsgData, content: finalReplyForClient };
+          } catch (pendingUpdateErr) {
+            console.error('[FileJob] Gagal update placeholder file:', pendingUpdateErr.message);
+          }
+        }
+      }
+
       // 2. Kirim event `done` ke client SEGERA
       res.write(`data: ${JSON.stringify({
         done: true,
         session_id: currentSessionId,
         message_id: aiMsgData?.id,
         user_message_id: finalUserMessageId,
+        final_text: finalReplyForClient,
+        replace_stream_text: finalReplyForClient !== cleanReply,
+        file_job: fileJobMeta,
         preview_id: previewRecordId,
         preview: clientPreviewPayload,
         persona_used: targetPersona,
@@ -2066,76 +2584,317 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
       }
 
       // ── UPSERT/ARCHIVE MEMORI AI SECARA BACKGROUND ──
-      if ((detectedMemories.length > 0 || detectedForgetKeys.length > 0) && user.person_id) {
+      if ((detectedMemories.length > 0 || detectedForgetKeys.length > 0 || rejectedMemoryCandidates.length > 0) && user.person_id) {
+        const memoryAuditEvents = [];
+        const buildAuditEvent = (event = {}) => ({
+          person_id: user.person_id,
+          session_id: currentSessionId,
+          source_message_id: event.source_message_id || aiMsgData?.id || null,
+          ...event
+        });
         const { data: existingMemories } = await supabase
           .from('person_memory')
-          .select('id, key, value, memory_type, category, status, observation_count')
+          .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope')
           .eq('person_id', user.person_id)
           .in('status', ['active', 'archived']);
 
         const memoryPool = Array.isArray(existingMemories) ? [...existingMemories] : [];
 
+        if (rejectedMemoryCandidates.length > 0) {
+          for (const rejected of rejectedMemoryCandidates) {
+            memoryAuditEvents.push(buildAuditEvent({
+              event_type: 'memory_rejected',
+              reason_code: rejected.reason || 'unknown',
+              payload: {
+                key: rejected.key || null
+              }
+            }));
+          }
+        }
+
         for (const mem of detectedMemories) {
           try {
             const normalizedKey = chatMemory.normalizeMemoryKey(mem.key);
             const normalizedType = chatMemory.normalizeMemoryType(mem.memoryType);
+            const normalizedValue = String(mem.value || '').trim();
+            const normalizedCategory = String(mem.category || 'umum').trim().toLowerCase().slice(0, 60) || 'umum';
+            const memoryInput = {
+              key: normalizedKey,
+              value: normalizedValue,
+              memoryType: normalizedType,
+              category: normalizedCategory
+            };
+            const memoryScope = chatMemory.resolveMemoryScope(memoryInput);
             const exact = memoryPool.find(item =>
               item.status === 'active' &&
               chatMemory.normalizeMemoryType(item.memory_type) === normalizedType &&
               chatMemory.normalizeMemoryKey(item.key) === normalizedKey
             );
 
-            const fuzzy = exact || memoryPool.find(item => {
+            const sameValueMatch = exact || memoryPool.find(item => {
+              if (item.status !== 'active') return false;
+              if (chatMemory.normalizeMemoryType(item.memory_type) !== normalizedType) return false;
+              return chatMemory.jaccardSimilarity(item.value, normalizedValue) >= 0.86;
+            });
+
+            const fuzzy = sameValueMatch || memoryPool.find(item => {
               if (item.status !== 'active') return false;
               if (chatMemory.normalizeMemoryType(item.memory_type) !== normalizedType) return false;
               return chatMemory.jaccardSimilarity(item.key, normalizedKey) >= 0.72;
             });
 
-            if (fuzzy?.id) {
+            const persistedKey = sameValueMatch?.id
+              ? chatMemory.normalizeMemoryKey(sameValueMatch.key)
+              : normalizedKey;
+            const conflictDetected = fuzzy?.id ? isMeaningfulMemoryConflict(fuzzy.value, normalizedValue) : false;
+            const evidenceAssessment = chatMemory.assessMemoryEvidence(memoryInput, emotionGuidance, speechProfile);
+            const evidenceStatusOverride = conflictDetected && memoryScope === 'stable' ? 'conflict' : '';
+            const evidencePayload = chatMemory.buildMemoryEvidenceRecord({
+              personId: user.person_id,
+              memoryId: fuzzy?.id || null,
+              memory: memoryInput,
+              sourceMessageId: aiMsgData?.id,
+              sessionId: currentSessionId,
+              userMessage,
+              recentHistory,
+              emotionGuidance,
+              speechProfile,
+              statusOverride: evidenceStatusOverride
+            });
+            const existingEvidence = await findMemoryEvidenceByContextHash(user.person_id, evidencePayload.unique_context_hash);
+
+            if (existingEvidence?.id) {
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'memory_evidence_duplicate_context',
+                memory_id: existingEvidence.memory_id || fuzzy?.id || null,
+                evidence_id: existingEvidence.id,
+                reason_code: 'duplicate_context_hash',
+                payload: {
+                  key: normalizedKey,
+                  value: normalizedValue,
+                  memory_type: normalizedType,
+                  memory_scope: memoryScope
+                }
+              }));
+              console.log(`[Memory][Evidence] Duplicate context skipped for "${normalizedKey}"`);
+              continue;
+            }
+
+            if (conflictDetected && memoryScope === 'stable' && fuzzy?.id) {
+              const { data: insertedConflictEvidence } = await insertMemoryEvidence({
+                ...evidencePayload,
+                memory_id: fuzzy.id,
+                evidence_status: 'conflict'
+              });
+
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'stable_memory_conflict_detected',
+                memory_id: fuzzy.id,
+                evidence_id: insertedConflictEvidence?.id || null,
+                reason_code: 'stable_conflict_pending_review',
+                payload: {
+                  key: normalizedKey,
+                  old_value: fuzzy.value,
+                  new_value: normalizedValue,
+                  memory_scope: memoryScope,
+                  reliability_score: evidencePayload.reliability_score,
+                  emotional_state: evidencePayload.emotional_state,
+                  style_signals: evidencePayload.style_signals
+                }
+              }));
+              console.log(`[Memory][Conflict] Stable memory conflict deferred for "${normalizedKey}"`);
+              continue;
+            }
+
+            if (evidencePayload.evidence_status !== 'validated') {
+              const { data: insertedProvisionalEvidence } = await insertMemoryEvidence({
+                ...evidencePayload,
+                memory_id: fuzzy?.id || null
+              });
+
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'memory_evidence_deferred',
+                memory_id: fuzzy?.id || null,
+                evidence_id: insertedProvisionalEvidence?.id || null,
+                reason_code: (evidenceAssessment.reasonCodes || []).join('|') || 'provisional_evidence',
+                payload: {
+                  key: normalizedKey,
+                  value: normalizedValue,
+                  memory_type: normalizedType,
+                  memory_scope: memoryScope,
+                  evidence_status: evidencePayload.evidence_status,
+                  reliability_score: evidencePayload.reliability_score,
+                  emotional_state: evidencePayload.emotional_state,
+                  style_signals: evidencePayload.style_signals
+                }
+              }));
+              console.log(`[Memory][Evidence] Deferred low-reliability memory "${normalizedKey}"`);
+              continue;
+            }
+
+            if (fuzzy?.id && !conflictDetected) {
+              const effectiveScope = fuzzy.memory_scope || memoryScope;
+              const { data: insertedEvidence, duplicate } = await insertMemoryEvidence({
+                ...evidencePayload,
+                memory_id: fuzzy.id,
+                memory_key: persistedKey,
+                memory_scope: effectiveScope
+              });
+
+              if (duplicate) {
+                memoryAuditEvents.push(buildAuditEvent({
+                  event_type: 'memory_evidence_duplicate_context',
+                  memory_id: fuzzy.id,
+                  reason_code: 'duplicate_context_hash_race',
+                  payload: {
+                    key: persistedKey,
+                    value: normalizedValue,
+                    memory_type: normalizedType,
+                    memory_scope: effectiveScope
+                  }
+                }));
+                continue;
+              }
+
+              const validatedEvidenceCount = await countValidatedMemoryEvidence(fuzzy.id);
+              const aggregateMetrics = chatMemory.computeEvidenceBackedMetrics({
+                validatedEvidenceCount,
+                memoryScope: effectiveScope
+              });
+
               await supabase.from('person_memory')
                 .update({
-                  key: normalizedKey,
-                  value: mem.value,
+                  key: persistedKey,
+                  value: normalizedValue,
                   memory_type: normalizedType,
-                  category: mem.category || 'umum',
+                  category: normalizedCategory,
                   status: 'active',
+                  memory_scope: effectiveScope,
+                  observation_count: aggregateMetrics.observationCount,
+                  confidence: aggregateMetrics.confidence,
+                  priority_score: aggregateMetrics.priorityScore,
                   source_message_id: aiMsgData?.id,
                   deleted_at: null,
                   deleted_by: null,
                   deletion_reason: null
                 })
                 .eq('id', fuzzy.id);
-              console.log(`[Memory] Update "${normalizedKey}" for person ${user.person_id}`);
+
+              const poolIdx = memoryPool.findIndex(item => item.id === fuzzy.id);
+              if (poolIdx >= 0) {
+                memoryPool[poolIdx] = {
+                  ...memoryPool[poolIdx],
+                  key: persistedKey,
+                  value: normalizedValue,
+                  memory_type: normalizedType,
+                  category: normalizedCategory,
+                  status: 'active',
+                  memory_scope: effectiveScope,
+                  observation_count: aggregateMetrics.observationCount,
+                  confidence: aggregateMetrics.confidence
+                };
+              }
+
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'memory_updated',
+                memory_id: fuzzy.id,
+                evidence_id: insertedEvidence?.id || null,
+                reason_code: 'validated_evidence',
+                payload: {
+                  key: persistedKey,
+                  memory_scope: effectiveScope,
+                  observation_count: aggregateMetrics.observationCount,
+                  confidence: aggregateMetrics.confidence,
+                  reliability_score: evidencePayload.reliability_score
+                }
+              }));
+              console.log(`[Memory] Update "${persistedKey}" for person ${user.person_id}`);
               continue;
             }
 
+            const variantKey = conflictDetected ? buildConflictVariantKey(normalizedKey, memoryPool) : normalizedKey;
+            const insertMetrics = chatMemory.computeEvidenceBackedMetrics({
+              validatedEvidenceCount: 1,
+              memoryScope
+            });
             const insertPayload = {
               person_id: user.person_id,
-              key: normalizedKey,
-              value: mem.value,
+              key: variantKey,
+              value: normalizedValue,
               memory_type: normalizedType,
-              category: mem.category || 'umum',
+              category: conflictDetected ? 'konflik' : normalizedCategory,
               status: 'active',
-              confidence: 0.7,
-              observation_count: 1,
-              priority_score: chatMemory.computePriorityScore(0.7, 1),
+              memory_scope: memoryScope,
+              confidence: insertMetrics.confidence,
+              observation_count: insertMetrics.observationCount,
+              priority_score: insertMetrics.priorityScore,
               source_message_id: aiMsgData?.id
             };
 
             const { data: insertedMemory } = await supabase
               .from('person_memory')
               .insert(insertPayload)
-              .select('id, key, value, memory_type, category, status, observation_count')
+              .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope')
               .single();
 
             if (insertedMemory) memoryPool.push(insertedMemory);
-            console.log(`[Memory] Insert "${normalizedKey}" for person ${user.person_id}`);
+
+            const { data: insertedEvidence, duplicate } = await insertMemoryEvidence({
+              ...evidencePayload,
+              memory_id: insertedMemory?.id || null,
+              memory_key: insertedMemory?.key || variantKey,
+              category: insertedMemory?.category || insertPayload.category,
+              memory_scope: insertedMemory?.memory_scope || memoryScope
+            });
+
+            if (duplicate) {
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'memory_evidence_duplicate_context',
+                memory_id: insertedMemory?.id || null,
+                reason_code: 'duplicate_context_after_insert',
+                payload: {
+                  key: insertedMemory?.key || variantKey,
+                  value: normalizedValue,
+                  memory_type: normalizedType,
+                  memory_scope: memoryScope
+                }
+              }));
+            }
+
+            memoryAuditEvents.push(buildAuditEvent({
+              event_type: conflictDetected ? 'memory_conflict_variant_created' : 'memory_inserted',
+              memory_id: insertedMemory?.id || null,
+              evidence_id: insertedEvidence?.id || null,
+              reason_code: conflictDetected ? 'validated_conflict_variant' : 'validated_evidence',
+              payload: conflictDetected
+                ? {
+                    base_key: normalizedKey,
+                    variant_key: insertedMemory?.key || variantKey,
+                    old_value: fuzzy?.value || null,
+                    new_value: normalizedValue,
+                    memory_scope: memoryScope
+                  }
+                : {
+                    key: insertedMemory?.key || variantKey,
+                    memory_scope: memoryScope,
+                    confidence: insertMetrics.confidence
+                  }
+            }));
+            console.log(`[Memory] Insert "${insertedMemory?.key || variantKey}" for person ${user.person_id}`);
           } catch (memErr) {
             console.error(`[Memory] Gagal upsert "${mem.key}":`, memErr.message);
+            memoryAuditEvents.push(buildAuditEvent({
+              event_type: 'memory_processing_failed',
+              reason_code: 'upsert_failed',
+              payload: {
+                key: chatMemory.normalizeMemoryKey(mem?.key || ''),
+                message: memErr.message
+              }
+            }));
           }
         }
 
-        if (forgetIntentRequested && detectedForgetKeys.length > 0) {
+        if (detectedForgetKeys.length > 0) {
           for (const rawKey of detectedForgetKeys) {
             try {
               const normalizedForgetKey = chatMemory.normalizeMemoryKey(rawKey);
@@ -2151,7 +2910,8 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
               await supabase
                 .from('person_memory')
                 .update({
-                  status: 'archived',
+                  status: 'dropped',
+                  priority_score: 0.02,
                   deletion_reason: 'user_forget_command',
                   deleted_by: user.id,
                   source_message_id: aiMsgData?.id
@@ -2160,97 +2920,59 @@ ATURAN MEMORI (SANGAT PENTING – SELALU IKUTI):
                 .eq('status', 'active');
 
               const poolIdx = memoryPool.findIndex(item => item.id === candidate.id);
-              if (poolIdx >= 0) memoryPool[poolIdx].status = 'archived';
-              console.log(`[Memory] Archive "${candidate.key}" for person ${user.person_id}`);
+              if (poolIdx >= 0) memoryPool[poolIdx].status = 'dropped';
+              memoryAuditEvents.push(buildAuditEvent({
+                event_type: 'memory_dropped',
+                memory_id: candidate.id,
+                reason_code: 'user_forget_command',
+                payload: {
+                  key: candidate.key
+                }
+              }));
+              console.log(`[Memory] Drop "${candidate.key}" for person ${user.person_id}`);
             } catch (forgetErr) {
               console.error(`[Memory] Gagal archive "${rawKey}":`, forgetErr.message);
             }
           }
         }
+
+        if (memoryAuditEvents.length > 0) {
+          await writeLegacyAuditEntries(memoryAuditEvents);
+          console.log('[Memory][Audit]', JSON.stringify({
+            person_id: user.person_id,
+            session_id: currentSessionId,
+            assistant_message_id: aiMsgData?.id || null,
+            event_count: memoryAuditEvents.length,
+            events: memoryAuditEvents
+          }));
+        }
       }
 
-      // 3. File processing di background (setelah client sudah dapat `done`)
-      try {
-        const fileRegex = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
-        let match;
-        let processedReply = cleanReply;
-        let hasFiles = false;
-        const fileSourceText = cleanReply;
+      // 3. File processing fallback (hanya jika queue/job belum siap)
+      if (shouldUseInlineFileProcessing) {
+        try {
+          const fallbackResult = await chatFiles.processGeneratedFiles({
+            supabase,
+            sourceText: sourceReplyForFiles
+          });
 
-        while ((match = fileRegex.exec(fileSourceText)) !== null) {
-          hasFiles = true;
-          const filename = match[1].trim();
-          const content = chatFiles.sanitizeGeneratedFileBlock(match[2]);
-          const ext = filename.split('.').pop().toLowerCase();
+          if (fallbackResult.hasFiles && aiMsgData?.id) {
+            await supabase.from('messages')
+              .update({ content: fallbackResult.processedReply })
+              .eq('id', aiMsgData.id);
+          }
+        } catch (fileErr) {
+          console.error('File processing fallback error:', fileErr.message);
 
-          let buffer;
-          try {
-            if (ext === 'txt') {
-              buffer = Buffer.from(content, 'utf-8');
-            } 
-            else if (ext === 'bas' || ext === 'vba') {
-              const normalizedVba = content.replace(/\n/g, '\r\n');
-              buffer = Buffer.from(normalizedVba, 'utf-8');
-            } 
-            else if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
-              const parsedSheets = chatFiles.parseSheetBlocks(content);
-              if (!parsedSheets.length) {
-                throw new Error('Konten tabel kosong. Gunakan format kolom dengan pemisah # di setiap baris.');
-              }
-
-              buffer = chatFiles.buildWorkbookBufferFromSheetBlocks(parsedSheets);
-            } 
-            else if (ext === 'docx') {
-              const docx = await import('docx');
-              Document = docx.Document;
-              Packer = docx.Packer;
-              Paragraph = docx.Paragraph;
-              TextRun = docx.TextRun;
-              const paragraphs = content.split('\n').map(line =>
-                new Paragraph({ children: [new TextRun({ text: line, font: 'Arial', size: 24 })] })
-              );
-              const doc = new Document({ sections: [{ children: paragraphs }] });
-              buffer = await Packer.toBuffer(doc);
-            } else {
-              buffer = Buffer.from(content, 'utf-8');
-            }
-
-            const filePath = `generations/${Date.now()}-${filename}`;
-            const mimeMap = {
-              'xlsb': 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
-              'bas': 'text/plain',
-              'vba': 'text/plain',
-              'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            };
-
-            const { error } = await supabase.storage.from('aai-files').upload(filePath, buffer, {
-              contentType: mimeMap[ext] || 'text/plain',
-              upsert: false
-            });
-
-            if (!error) {
-              const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
-              processedReply = processedReply.replace(match[0], `📥 **[Download ${filename}](${publicUrl})**`);
-            } else {
-              processedReply = processedReply.replace(match[0], `⚠️ Gagal upload: ${error.message}`);
-            }
-          } catch (e) {
-            console.error(`⚠️ Gagal generate ${filename}:`, e.message);
-            processedReply = processedReply.replace(match[0], `⚠️ Error: ${e.message}`);
+          if (aiMsgData?.id) {
+            const failedReply = chatFiles.buildFailedFileReply(finalReplyForClient, fileErr.message);
+            await supabase.from('messages')
+              .update({ content: failedReply })
+              .eq('id', aiMsgData.id)
+              .catch(() => {});
           }
         }
-
-        // Update DB dengan versi yang sudah diproses (file links)
-        if (hasFiles && aiMsgData?.id) {
-          await supabase.from('messages')
-            .update({ content: processedReply })
-            .eq('id', aiMsgData.id);
-        }
-      } catch (fileErr) {
-        console.error("File processing error:", fileErr.message);
       }
-    } else {
-      res.write(`data: ${JSON.stringify({ error: 'Respons kosong dari model.' })}\n\n`);
     }
 
     res.end();
@@ -2270,16 +2992,25 @@ async function generateTitle(apiKey, userMessage, sessionId) {
     const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({
         model: chatProvider.MAIN_MODEL,
         messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
       })
     });
+    if (!r.ok) {
+      throw new Error(`Title API ${r.status} ${r.statusText}`);
+    }
     const d = await r.json();
     const title = d.choices?.[0]?.message?.content?.replace(/["'.]/g, '').trim();
     if (title) {
       await supabase.from('sessions').update({ title }).eq('id', sessionId);
     }
-  } catch {}
+  } catch (err) {
+    console.error('[Title] Gagal generate judul sesi:', {
+      sessionId,
+      message: err?.message || String(err)
+    });
+  }
 }

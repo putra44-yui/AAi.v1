@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "postinstall": "node scripts/fix-xlsx-tsconfig.cjs",
     "test": "echo \"Error: no test specified\" && exit 1",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android"

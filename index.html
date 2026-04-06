@@ -1332,6 +1332,37 @@ body.desktop-sidebar-hidden #topbarTitle {
   </div>
 </div>
 
+<!-- Friend Suggestion Modal (NEW) -->
+<div class="modal-overlay" id="friendSuggestionModal">
+  <div class="clarify-modal-box">
+    <div class="clarify-title" id="friendSugTitle">Kenali Teman Baru</div>
+    <div class="clarify-desc" id="friendSugDesc"></div>
+    <div style="margin: 16px 0; padding: 12px; background: rgba(90,180,212,.08); border-left: 3px solid #5ab4d4; border-radius: 8px;">
+      <div style="font-size: 12px; font-weight: 600; color: var(--blue-dark); margin-bottom: 8px;">Pesan Perkenalan:</div>
+      <div id="friendSugContext" style="font-size: 13px; color: var(--text); line-height: 1.5; font-style: italic;"></div>
+    </div>
+    <div class="clarify-actions">
+      <button class="clarify-btn cancel" onclick="rejectFriendSuggestion()">Nanti Saja</button>
+      <button class="clarify-btn confirm" onclick="confirmFriendSuggestion()">Ya, Ingat Teman Ini</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="clarifyModal">
+  <div class="clarify-modal-box">
+    <div class="clarify-title" id="clarifyTitle">Perlu Detail Tambahan</div>
+    <div class="clarify-desc" id="clarifyDesc">Pilih opsi yang paling sesuai atau isi lainnya agar hasilnya lebih tepat.</div>
+    <div class="clarify-top-actions">
+      <button class="clarify-btn ghost" id="clarifyPresetBtn" onclick="applyPreviousClarifyPreset()">Gunakan Preset Sebelumnya</button>
+    </div>
+    <div class="clarify-grid" id="clarifyQuestions"></div>
+    <div class="clarify-actions">
+      <button class="clarify-btn cancel" onclick="closeClarifyModal()">Nanti Saja</button>
+      <button class="clarify-btn confirm" id="clarifyConfirmBtn" onclick="confirmClarifyAndSend()">Lanjutkan Dengan Jawaban Ini</button>
+    </div>
+  </div>
+</div>
+
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
     <a class="logo" href="/">

@@ -22,10 +22,14 @@ let isSpeaking       = false;
 let abortController  = null;
 let selectedFiles    = [];
 let msgboxState = null;
+let pendingFriendSuggestion = null;
+const pendingFileJobPollers = new Map();
 
 const PLANNING_COMMAND_PATTERNS = {
   list: /(apa\s+(rencana|perencanaan)\s*(kita)?|tampilkan\s+(rencana|perencanaan)|list\s+rencana)/i,
   save: /^(ingat\s+ini|catat\s+(rencana|ini)|simpan\s+rencana|ingat\s+rencana)\b/i,
+  saveFromContext: /^(catat|ingat|simpan)\s+(ya|itu|deh|aja|dong)\s*[.!?]*$/i,
+  saveFromContextAlt: /^(ok|oke)\s+(catat|ingat|simpan)\s*[.!?]*$/i,
   delete: /^(hapus|delete)\s+rencana\b/i,
   update: /^(update|ubah|edit)\s+rencana\b/i
 };
@@ -182,6 +186,127 @@ function splitTitleAndContent(raw = '') {
   return { title: normalizePlanningText(text), content: '' };
 }
 
+function stripPlanningMarkdown(raw = '') {
+  return String(raw || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/[_*#>~-]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countPlanningListItems(raw = '') {
+  return String(raw || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => /^(\d+\.|[-*•])\s+/.test(line)).length;
+}
+
+function hasPlanningKeywords(raw = '') {
+  const text = stripPlanningMarkdown(raw).toLowerCase();
+  const keywords = [
+    'rencana', 'plan', 'planning', 'langkah', 'tahap', 'tahapan', 'roadmap', 'prioritas',
+    'jadwal', 'timeline', 'milestone', 'checklist', 'todo', 'to do', 'aksi', 'target',
+    'deadline', 'eksekusi', 'strategi'
+  ];
+  return keywords.filter(keyword => text.includes(keyword)).length;
+}
+
+function isPlanningRequestText(raw = '') {
+  const text = stripPlanningMarkdown(raw).toLowerCase();
+  const phrases = [
+    'buat rencana', 'bikin rencana', 'susun rencana', 'buat plan', 'bikin plan', 'susun plan',
+    'rangkum rencana', 'ringkas rencana', 'jadikan rencana', 'ubah jadi rencana',
+    'action plan', 'roadmap', 'langkah-langkah', 'langkah langkah', 'checklist', 'todo',
+    'to do', 'prioritas', 'timeline', 'jadwal', 'tahapan', 'strategi'
+  ];
+  return phrases.some(phrase => text.includes(phrase));
+}
+
+function isPlanningLikeContent(raw = '') {
+  const text = String(raw || '').trim();
+  if (!text) return false;
+
+  const normalized = stripPlanningMarkdown(text).toLowerCase();
+  const keywordHits = hasPlanningKeywords(text);
+  const listItems = countPlanningListItems(text);
+  const hasPlanningHeading = /^(#{1,3}|\*\*)\s*(rencana|plan|roadmap|langkah|prioritas|timeline|jadwal|checklist|tahapan)\b/im.test(text);
+  const hasActionLanguage = /(langkah|tahap|prioritas|jadwal|target|deadline|milestone|aksi|eksekusi)/.test(normalized);
+
+  return hasPlanningHeading
+    || listItems >= 3
+    || (listItems >= 2 && keywordHits >= 1)
+    || (keywordHits >= 2 && hasActionLanguage);
+}
+
+function extractPlanningTitle(raw = '') {
+  const text = String(raw || '').trim();
+  if (!text) return 'Rencana dari percakapan';
+
+  const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
+  if (headingMatch) {
+    return normalizePlanningText(stripPlanningMarkdown(headingMatch[1])).slice(0, 80) || 'Rencana dari percakapan';
+  }
+
+  const boldMatch = text.match(/^\*\*([^*]+)\*\*/m);
+  if (boldMatch) {
+    return normalizePlanningText(stripPlanningMarkdown(boldMatch[1])).slice(0, 80) || 'Rencana dari percakapan';
+  }
+
+  const firstStructuredLine = text
+    .split('\n')
+    .map(line => line.trim())
+    .find(line => /^(\d+\.|[-*•])\s+/.test(line));
+
+  if (firstStructuredLine) {
+    const lineTitle = normalizePlanningText(stripPlanningMarkdown(firstStructuredLine.replace(/^(\d+\.|[-*•])\s+/, '')));
+    if (lineTitle) return lineTitle.slice(0, 80);
+  }
+
+  const fallback = normalizePlanningText(stripPlanningMarkdown(text)).slice(0, 60);
+  return fallback ? `${fallback}${fallback.length >= 60 ? '...' : ''}` : 'Rencana dari percakapan';
+}
+
+function getPlanningContextCandidate() {
+  const recentMessages = currentMessages.slice(-8);
+  const lastAssistant = [...recentMessages].reverse().find(message =>
+    message.role === 'assistant' && normalizePlanningText(message.content)
+  );
+
+  if (!lastAssistant) return null;
+
+  const recentUserMessages = recentMessages
+    .filter(message => message.role === 'user')
+    .slice(-3);
+
+  const assistantLooksLikePlan = isPlanningLikeContent(lastAssistant.content);
+  const userAskedForPlan = recentUserMessages.some(message => isPlanningRequestText(message.content));
+
+  if (!assistantLooksLikePlan && !userAskedForPlan) {
+    return null;
+  }
+
+  return {
+    title: extractPlanningTitle(lastAssistant.content),
+    content: lastAssistant.content,
+    sourceId: lastAssistant.id || null
+  };
+}
+
+async function savePlanningItem(title, content) {
+  return planningApi('/api/planning-memory', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_id: currentUser.id,
+      title,
+      content: content || ''
+    })
+  });
+}
+
 function parsePlanningCommand(rawText = '') {
   const text = normalizePlanningText(rawText);
   if (!text) return null;
@@ -194,6 +319,10 @@ function parsePlanningCommand(rawText = '') {
     const payload = text.replace(PLANNING_COMMAND_PATTERNS.save, '').trim();
     const parsed = splitTitleAndContent(payload);
     return { type: 'save', title: parsed.title, content: parsed.content };
+  }
+
+  if (PLANNING_COMMAND_PATTERNS.saveFromContext.test(text) || PLANNING_COMMAND_PATTERNS.saveFromContextAlt.test(text)) {
+    return { type: 'saveFromContext' };
   }
 
   if (PLANNING_COMMAND_PATTERNS.delete.test(text)) {
@@ -250,6 +379,51 @@ function buildPlanningRecapMarkdown(items = [], query = '') {
   return `${title}\n\n${summaryLabel}\n\n${lines.join('\n')}`;
 }
 
+function shouldAttachSaveSummary(content = '') {
+  const text = String(content || '').trim();
+  if (!text) return false;
+
+  const lineCount = text.split('\n').map(line => line.trim()).filter(Boolean).length;
+  const listCount = countPlanningListItems(text);
+  return text.length > 220 || lineCount > 4 || listCount >= 3;
+}
+
+function buildInlinePlanSummary(content = '') {
+  const text = String(content || '').trim();
+  if (!text) return '';
+
+  const lines = text.split('\n').map(line => normalizePlanningText(stripPlanningMarkdown(line))).filter(Boolean);
+  const structuredLines = lines
+    .filter(line => /^\d+\.|^[-*•]/.test(line) || /^(langkah|tahap|prioritas|aksi|target|jadwal|timeline)/i.test(line))
+    .slice(0, 2)
+    .map(line => line.replace(/^(\d+\.|[-*•])\s+/, ''));
+
+  if (structuredLines.length) {
+    return structuredLines.map((line, idx) => `${idx + 1}. ${line}`).join('\n');
+  }
+
+  const plain = normalizePlanningText(stripPlanningMarkdown(text));
+  if (!plain) return '';
+  return plain.length > 180 ? `${plain.slice(0, 180)}...` : plain;
+}
+
+function buildSaveConfirmationMessage(title, content = '') {
+  const safeTitle = normalizePlanningText(title || 'Rencana tanpa judul');
+  const shouldSummary = shouldAttachSaveSummary(content);
+  const summary = shouldSummary ? buildInlinePlanSummary(content) : '';
+
+  if (!summary) {
+    return `Baik, sudah saya simpan rencananya: **${safeTitle}**. Kalau mau, nanti kita bisa rapikan lagi jadi versi yang lebih detail.`;
+  }
+
+  return [
+    `Baik, sudah saya simpan rencananya: **${safeTitle}**.`,
+    '',
+    'Berikut ringkasan singkatnya supaya cepat dicek:',
+    summary
+  ].join('\n');
+}
+
 async function handlePlanningCommand(rawText) {
   const command = parsePlanningCommand(rawText);
   if (!command) return false;
@@ -266,31 +440,34 @@ async function handlePlanningCommand(rawText) {
 
     if (command.type === 'save') {
       if (!command.title) {
-        const manualTitle = await showPromptMessage({
-          title: 'Simpan Rencana',
-          message: 'Masukkan judul rencana.',
-          placeholder: 'Contoh: Sprint minggu ini'
-        });
-
-        if (!manualTitle || !manualTitle.trim()) {
-          appendMessage('assistant', 'Penyimpanan dibatalkan karena judul rencana belum diisi.');
+        const contextualCandidate = getPlanningContextCandidate();
+        if (!contextualCandidate) {
+          appendMessage('assistant', 'Aku belum melihat rencana yang jelas di konteks terakhir. Kalau memang mau simpan plan, minta aku buat atau rangkum rencana dulu, atau tulis langsung: **ingat ini Judul: isi rencana**.');
           return true;
         }
 
-        command.title = manualTitle.trim();
+        const savedFromContext = await savePlanningItem(contextualCandidate.title, contextualCandidate.content);
+        const finalTitle = savedFromContext.item?.title || contextualCandidate.title;
+        appendMessage('assistant', buildSaveConfirmationMessage(finalTitle, contextualCandidate.content));
+        return true;
       }
 
-      const saved = await planningApi('/api/planning-memory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: currentUser.id,
-          title: command.title,
-          content: command.content || ''
-        })
-      });
+      const saved = await savePlanningItem(command.title, command.content || '');
+      const finalTitle = saved.item?.title || command.title;
+      appendMessage('assistant', buildSaveConfirmationMessage(finalTitle, command.content || ''));
+      return true;
+    }
 
-      appendMessage('assistant', `Rencana tersimpan: **${saved.item?.title || command.title}**`);
+    if (command.type === 'saveFromContext') {
+      const contextualCandidate = getPlanningContextCandidate();
+      if (!contextualCandidate) {
+        appendMessage('assistant', 'Kalimat itu tidak kusimpan sebagai plan karena konteks terakhir bukan rencana. Kalau mau, suruh aku susun atau rangkum rencana dulu, lalu balas singkat: **catat ya**.');
+        return true;
+      }
+
+      const saved = await savePlanningItem(contextualCandidate.title, contextualCandidate.content);
+      const finalTitle = saved.item?.title || contextualCandidate.title;
+      appendMessage('assistant', buildSaveConfirmationMessage(finalTitle, contextualCandidate.content));
       return true;
     }
 
@@ -327,7 +504,7 @@ async function handlePlanningCommand(rawText) {
         method: 'DELETE'
       });
 
-      appendMessage('assistant', `Rencana **${target.title}** sudah dihapus permanen.`);
+      appendMessage('assistant', `Siap, rencana **${target.title}** sudah saya hapus permanen. Kalau kamu mau, saya bisa bantu susun versi barunya sekarang supaya alurnya tetap rapi.`);
       return true;
     }
 
@@ -750,7 +927,49 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
 }
 
 function renderStreamingContent(text) {
-  return `<div class="streaming-plain">${escHtml(text)}</div>`;
+  const safeText = escHtml(String(text || ''))
+    .replace(/\[SUGGEST-FRIEND:[^\]]+\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(90,180,212,.14);color:#1f5f85;font-weight:600;">Teman baru terdeteksi</span>')
+    .replace(/\[MEMORY:[^\]]+\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(42,122,158,.12);color:#1f5f85;font-weight:600;">Memori diperbarui</span>')
+    .replace(/\[MEMORY_FORGET:[^\]]+\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>');
+
+  return `<div class="streaming-plain">${safeText}</div>`;
+}
+
+function safeDecodeURIComponent(input = '') {
+  try {
+    return decodeURIComponent(String(input || '').trim());
+  } catch {
+    return String(input || '').trim();
+  }
+}
+
+function extractFriendSuggestionTags(rawText = '') {
+  const text = String(rawText || '');
+  const suggestions = [];
+
+  const cleanText = text.replace(/\[SUGGEST-FRIEND:([\s\S]*?)\]/gi, (_, payloadRaw) => {
+    const payload = String(payloadRaw || '');
+    const nameMatch = /\bname\s*=\s*([^;\]]+)/i.exec(payload);
+    const introMatch = /\bintro_msg\s*=\s*([^;\]]+)/i.exec(payload);
+
+    if (nameMatch) {
+      const name = safeDecodeURIComponent(nameMatch[1]);
+      const intro = introMatch ? safeDecodeURIComponent(introMatch[1]) : '';
+      if (name) suggestions.push({ name, intro });
+    }
+
+    return '';
+  });
+
+  return {
+    cleanText: cleanText
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd(),
+    suggestions
+  };
 }
 
 function togglePreview(btn) {
@@ -776,7 +995,7 @@ function getFriendlyProviderErrorMessage(rawMessage) {
   return msg;
 }
 
-function renderStreamErrorUI(streamId, errorMessage) {
+function renderStreamErrorUI(streamId, errorMessage, retryMeta = null) {
   const bubbleEl = document.getElementById(`bubble_${streamId}`);
   if (!bubbleEl) return;
 
@@ -792,6 +1011,141 @@ function renderStreamErrorUI(streamId, errorMessage) {
 
   const actionsEl = document.getElementById(`actions_${streamId}`);
   if (actionsEl) actionsEl.style.display = 'flex';
+
+  const aiRow = bubbleEl.closest('.msg-row.assistant');
+  if (!aiRow || !retryMeta) return;
+
+  const sessionId = retryMeta.session_id || retryMeta.sessionId || null;
+  const userMessageId = retryMeta.user_message_id || retryMeta.userMessageId || null;
+
+  if (sessionId) {
+    aiRow.setAttribute('data-retry-session-id', sessionId);
+    if (!currentSessionId) {
+      currentSessionId = sessionId;
+      localStorage.setItem('aai_last_session', currentSessionId);
+    }
+  }
+
+  if (userMessageId) {
+    aiRow.setAttribute('data-retry-user-message-id', userMessageId);
+    let prev = aiRow.previousElementSibling;
+    while (prev) {
+      if (prev.classList.contains('user')) {
+        if (!(prev.getAttribute('data-id') || '').trim()) {
+          prev.setAttribute('data-id', userMessageId);
+        }
+        break;
+      }
+      prev = prev.previousElementSibling;
+    }
+  }
+}
+
+function clearFileJobPoller(jobId) {
+  const timer = pendingFileJobPollers.get(jobId);
+  if (timer) {
+    clearTimeout(timer);
+    pendingFileJobPollers.delete(jobId);
+  }
+}
+
+function updateAssistantMessageContent(messageId, content) {
+  if (!messageId) return;
+
+  const normalizedContent = String(content || '').trim();
+  const current = currentMessages.find(message => message.id === messageId);
+  if (current) current.content = normalizedContent;
+
+  const row = document.querySelector(`.msg-row.assistant[data-id="${messageId}"]`);
+  if (!row) return;
+
+  const bubble = row.querySelector('.bubble');
+  if (bubble) {
+    bubble.classList.remove('stream-cursor');
+    bubble.innerHTML = formatContent(normalizedContent);
+  }
+
+  row.setAttribute('data-plain-text', encodeURIComponent(normalizedContent));
+}
+
+async function fetchFileJobStatus(jobId) {
+  const res = await fetch(`/api/file-jobs?job_id=${encodeURIComponent(jobId)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function triggerFileJobProcessing(jobId) {
+  const res = await fetch('/api/file-jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: jobId })
+  });
+
+  if (!res.ok && res.status !== 500) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  return res.json().catch(() => null);
+}
+
+function scheduleFileJobPoll(jobId, messageId, attempt = 0) {
+  clearFileJobPoller(jobId);
+
+  const delay = attempt < 5 ? 1500 : 3000;
+  const timer = setTimeout(async () => {
+    try {
+      const payload = await fetchFileJobStatus(jobId);
+      const job = payload?.job;
+      if (!job) throw new Error('Job payload kosong');
+
+      if (job.status === 'ready' || job.status === 'failed') {
+        clearFileJobPoller(jobId);
+        if (job.content) {
+          updateAssistantMessageContent(messageId || job.message_id, job.content);
+        }
+        return;
+      }
+
+      scheduleFileJobPoll(jobId, messageId || job.message_id, attempt + 1);
+    } catch (error) {
+      console.error('[FileJobPoll] Error:', error.message);
+      if (attempt < 8) {
+        scheduleFileJobPoll(jobId, messageId, attempt + 1);
+      } else {
+        clearFileJobPoller(jobId);
+      }
+    }
+  }, delay);
+
+  pendingFileJobPollers.set(jobId, timer);
+}
+
+function startFileJobLifecycle(job, messageId = null) {
+  const jobId = job?.id;
+  if (!jobId) return;
+  if (pendingFileJobPollers.has(jobId)) return;
+
+  triggerFileJobProcessing(jobId)
+    .catch(error => console.error('[FileJob] Trigger error:', error.message));
+
+  scheduleFileJobPoll(jobId, messageId || job.message_id || null, 0);
+}
+
+async function resumePendingFileJobsForCurrentSession() {
+  if (!currentSessionId) return;
+
+  try {
+    const res = await fetch(`/api/file-jobs?session_id=${encodeURIComponent(currentSessionId)}&active_only=true`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+    for (const job of jobs) {
+      startFileJobLifecycle(job, job.message_id || null);
+    }
+  } catch (error) {
+    console.error('[FileJobResume] Error:', error.message);
+  }
 }
 
 function asArray(value) {
@@ -915,6 +1269,25 @@ async function processStream(response, streamId, onDone) {
   let buffer    = '';
   let previewData = null;
   let previewTicker = null;
+  let streamSessionId = null;
+  let streamUserMessageId = null;
+  let sessionSynced = false;
+  let hasFriendSuggestionEvent = false;
+
+  async function syncSessionFromStream(parsed) {
+    if (!parsed?.session_id) return;
+    streamSessionId = parsed.session_id;
+    if (currentSessionId || sessionSynced) return;
+
+    currentSessionId = parsed.session_id;
+    sessionSynced = true;
+    localStorage.setItem('aai_last_session', currentSessionId);
+    setTimeout(async () => {
+      await loadSessions();
+      const s = sessions.find(item => item.id === currentSessionId);
+      if (s) document.getElementById('topbarTitle').textContent = s.title;
+    }, 2500);
+  }
   let previewStepTimer = null;
   let streamError = null;
   let firstToken = true;
@@ -1042,7 +1415,45 @@ async function processStream(response, streamId, onDone) {
     try { parsed = JSON.parse(raw); }
     catch { return; }
 
-    if (parsed.error) throw new Error(parsed.error);
+    // Init event hanya untuk sinkronisasi session, skip processing
+    if (parsed.phase === 'init') {
+      if (parsed.session_id) syncSessionFromStream(parsed);
+      return;
+    }
+
+    if (parsed.session_id) {
+      syncSessionFromStream(parsed);
+    }
+
+    if (parsed.user_message_id) {
+      streamUserMessageId = parsed.user_message_id;
+      const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
+      if (userRows.length > 0 && !(userRows[userRows.length - 1].getAttribute('data-id') || '').trim()) {
+        userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id);
+      }
+    }
+
+    if (parsed.error) {
+      const err = new Error(parsed.error);
+      err.streamMeta = {
+        session_id: parsed.session_id || streamSessionId || currentSessionId || null,
+        user_message_id: parsed.user_message_id || streamUserMessageId || null
+      };
+      throw err;
+    }
+
+    // ── FRIEND SUGGESTION EVENT HANDLER ──
+    if (parsed.type === 'friend-suggestion') {
+      hasFriendSuggestionEvent = true;
+      const friendName = parsed.friend_name || 'Teman baru';
+      const introMsg = parsed.intro_message || '';
+      console.log('[Friend Suggestion] Detected:', { friendName, introMsg });
+      // Show the modal after a brief delay
+      setTimeout(() => {
+        showFriendSuggestionModal(friendName, introMsg);
+      }, 300);
+      return; // Don't process other events for this suggestion
+    }
 
     if (parsed.token) {
       if (firstToken) {
@@ -1065,6 +1476,22 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.done) {
+      if (parsed.final_text && (!fullText.trim() || parsed.replace_stream_text || parsed.file_job)) {
+        fullText = String(parsed.final_text || '').trim();
+        firstToken = false;
+      }
+
+      const friendTagResult = extractFriendSuggestionTags(fullText);
+      fullText = friendTagResult.cleanText;
+
+      // Fallback: kalau event SSE friend-suggestion tidak terkirim, tetap munculkan modal dari tag yang terdeteksi di teks.
+      if (!hasFriendSuggestionEvent && friendTagResult.suggestions.length > 0) {
+        const firstSuggestion = friendTagResult.suggestions[0];
+        setTimeout(() => {
+          showFriendSuggestionModal(firstSuggestion.name || 'Teman baru', firstSuggestion.intro || '');
+        }, 250);
+      }
+
       gotDone = true;
       flushStreamingRender(true);
       stopPreviewTicker('', true);
@@ -1081,6 +1508,9 @@ async function processStream(response, streamId, onDone) {
       }
       streamRow.setAttribute('data-preview', finalPreview ? encodeURIComponent(JSON.stringify(finalPreview)) : '');
       onDone(parsed, fullText, finalPreview);
+      if (parsed.file_job?.id) {
+        startFileJobLifecycle(parsed.file_job, parsed.message_id || null);
+      }
       scrollBottom();
     }
   }
@@ -1125,7 +1555,12 @@ async function processStream(response, streamId, onDone) {
     actionsEl.style.display = 'flex';
     streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
     streamRow.setAttribute('data-preview', previewData ? encodeURIComponent(JSON.stringify(previewData)) : '');
-    onDone({ done: true, session_id: null, message_id: null, user_message_id: null }, fullText, previewData);
+    onDone({
+      done: true,
+      session_id: streamSessionId || currentSessionId || null,
+      message_id: null,
+      user_message_id: streamUserMessageId || null
+    }, fullText, previewData);
     scrollBottom();
   }
 
@@ -1216,7 +1651,7 @@ async function sendMessage(text, files = []) {
     } catch (e) {
     console.error('❌ SendMessage Error:', e);
     clearTimeout(timeoutId);
-    renderStreamErrorUI(streamId, e.message);
+    renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
   } finally {
     setSendBtn('send');
   }
@@ -1276,6 +1711,8 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 
   setSendBtn('stop');
   abortController = new AbortController();
+  const pinnedSessionId = aiRow?.getAttribute('data-retry-session-id') || null;
+  const effectiveSessionId = pinnedSessionId || currentSessionId;
   const frozenPersona =
     aiRow?.getAttribute('data-persona') ||
     (assistantMessageId ? currentMessages.find(m => m.id === assistantMessageId)?.persona : null) ||
@@ -1288,7 +1725,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
       signal: abortController.signal,
       body: JSON.stringify({
         message: text,
-        session_id: currentSessionId,
+        session_id: effectiveSessionId,
         user_id: currentUser.id,
         persona_name: frozenPersona,
         memory_experiment_mode: currentMemoryExperimentMode,
@@ -1320,7 +1757,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 
     } catch (e) {
     console.error('❌ Regenerate Error:', e);
-    renderStreamErrorUI(streamId, e.message);
+    renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
   } finally {
     setSendBtn('send');
   }
@@ -1332,11 +1769,19 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 function retryLastMessage(btn) {
   const aiRow = btn.closest('.msg-row.assistant');
   const aiMsgId = aiRow.getAttribute('data-id') || null;
+  const forcedSessionId = aiRow.getAttribute('data-retry-session-id') || null;
+  const fallbackUserMsgId = aiRow.getAttribute('data-retry-user-message-id') || null;
+
+  if (forcedSessionId && !currentSessionId) {
+    currentSessionId = forcedSessionId;
+    localStorage.setItem('aai_last_session', currentSessionId);
+  }
+
   let el = aiRow.previousElementSibling;
   while (el) {
     if (el.classList.contains('user')) {
       const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
-      const userMsgId = el.getAttribute('data-id') || null;
+      const userMsgId = el.getAttribute('data-id') || fallbackUserMsgId || null;
       if (raw) {
         // PENTING: Jangan remove aiRow jika aiMsgId null, agar bisa tetap di sesi yang sama
         // Hanya perbarui eksisting bubble untuk retry
@@ -1539,6 +1984,7 @@ async function loadSession(id) {
     if (data.success && Array.isArray(data.messages)) {
       currentMessages = data.messages;
       renderMessageTree();
+      resumePendingFileJobsForCurrentSession();
     } else throw new Error("Format data tidak valid");
     if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
     renderSidebar();
@@ -1881,7 +2327,15 @@ function toggleCodeWindow(btn) {
 }
 function formatContent(text) {
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
-  let html = marked.parse(text);
+  let preppedText = String(text || '')
+    .replace(/\[SUGGEST-FRIEND:[\s\S]*?\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(90,180,212,.14);color:#1f5f85;font-weight:600;">Teman baru terdeteksi</span>')
+    .replace(/\[MEMORY:[\s\S]*?\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(42,122,158,.12);color:#1f5f85;font-weight:600;">Memori diperbarui</span>')
+    .replace(/\[MEMORY_FORGET:[\s\S]*?\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>');
+
+  let html = marked.parse(preppedText);
   html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi,
     `<div class="source-card">🌐 <a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2a7a9e">$1</a></div>`);
 
@@ -2188,14 +2642,104 @@ function initComposerUI() {
 
 
 // ══════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+// FRIEND SUGGESTION HANDLERS
+// ══════════════════════════════════════════════════════════════════════════════
+
+function showFriendSuggestionModal(friendName, introMessage) {
+  const modal = document.getElementById('friendSuggestionModal');
+  if (!modal) return;
+
+  pendingFriendSuggestion = { friendName, introMessage };
+
+  const titleEl = modal.querySelector('#friendSugTitle');
+  const descEl = modal.querySelector('#friendSugDesc');
+  const contextEl = modal.querySelector('#friendSugContext');
+
+  if (titleEl) titleEl.textContent = 'Kenali Teman Baru';
+  if (descEl) descEl.textContent = `${friendName} ingin diperkenalkan. Simpan ke memori aku supaya lebih mengenalnya ke depan? 😊`;
+  if (contextEl) contextEl.textContent = introMessage || '(Tidak ada konteks perkenalan)';
+
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function rejectFriendSuggestion() {
+  const modal = document.getElementById('friendSuggestionModal');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  pendingFriendSuggestion = null;
+}
+
+async function confirmFriendSuggestion() {
+  if (!pendingFriendSuggestion) {
+    rejectFriendSuggestion();
+    return;
+  }
+
+  const { friendName, introMessage } = pendingFriendSuggestion;
+  const modal = document.getElementById('friendSuggestionModal');
+
+  try {
+    // Call the confirm-and-save API
+    const res = await fetch('/api/friends/confirm-and-save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: currentUser.id,
+        friend_name: friendName,
+        relationship_type: 'teman',
+        intro_message: introMessage
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Gagal menyimpan teman');
+    }
+
+    const result = await res.json();
+
+    // Hide modal
+    if (modal) {
+      modal.classList.remove('active');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    // Show success message
+    await showAlertMessage(
+      `Baik, saya sudah ingat ${friendName} sebagai teman kamu. Senang berkenalan! 🤝`,
+      'Teman Tersimpan'
+    );
+
+    pendingFriendSuggestion = null;
+
+  } catch (err) {
+    console.error('Error confirming friend:', err);
+    await showAlertMessage(
+      `Gagal menyimpan teman: ${err.message}`,
+      'Kesalahan'
+    );
+  }
+}
+
 // INIT
 // ══════════════════════════════════════════
 async function initApp() {
   initComposerUI();
   await loadSessions();
   const last = localStorage.getItem('aai_last_session');
-  if (last && sessions.find(s => s.id === last)) loadSession(last);
-  else newChat();
+  if (last && sessions.find(s => s.id === last)) {
+    loadSession(last);
+  } else if (last && sessions.length > 0) {
+    // Session ID tersimpan tapi tidak ada di history — sesi baru yang SSE-nya tidak selesai
+    // Load sesi terbaru (sudah terurut updated_at DESC)
+    loadSession(sessions[0].id);
+  } else {
+    newChat();
+  }
 }
 document.addEventListener('DOMContentLoaded', initApp);
 document.addEventListener('DOMContentLoaded', initStickyCodeHeaders);

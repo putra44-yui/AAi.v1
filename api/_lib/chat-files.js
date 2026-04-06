@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx';
 
+const FILE_BLOCK_PATTERN = /\[FILE_START:(.+?)\]([\s\S]*?)\[FILE_END\]/g;
+
 export async function uploadFileToStorage({ supabase, base64String, fileName, mimeType }) {
   const base64 = base64String.split(',')[1];
   const buffer = Buffer.from(base64, 'base64');
@@ -201,9 +203,10 @@ export function applyWorksheetColumnWidths(ws, rows = []) {
   ws['!cols'] = widths;
 }
 
-export function buildWorkbookBufferFromSheetBlocks(sheetBlocks = []) {
+export function buildWorkbookBufferFromSheetBlocks(sheetBlocks = [], options = {}) {
   const sheetsToBuild = buildSandingWorkbookSheets(sheetBlocks);
   const wb = XLSX.utils.book_new();
+  const bookType = String(options?.bookType || 'xlsx').trim().toLowerCase() || 'xlsx';
 
   for (const sheet of sheetsToBuild) {
     const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
@@ -211,5 +214,199 @@ export function buildWorkbookBufferFromSheetBlocks(sheetBlocks = []) {
     XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
   }
 
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsb' });
+  return XLSX.write(wb, { type: 'buffer', bookType });
+}
+
+function resolveSpreadsheetFormat(ext = '') {
+  const normalized = String(ext || '').trim().toLowerCase();
+
+  if (normalized === 'xlsb') {
+    return {
+      bookType: 'xlsb',
+      contentType: 'application/vnd.ms-excel.sheet.binary.macroEnabled.12'
+    };
+  }
+
+  if (normalized === 'xls') {
+    return {
+      bookType: 'biff8',
+      contentType: 'application/vnd.ms-excel'
+    };
+  }
+
+  return {
+    bookType: 'xlsx',
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  };
+}
+
+function createFileBlockRegex() {
+  return new RegExp(FILE_BLOCK_PATTERN.source, FILE_BLOCK_PATTERN.flags);
+}
+
+function normalizeReplySpacing(text = '') {
+  return String(text || '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function extractGeneratedFileBlocks(sourceText = '') {
+  const text = String(sourceText || '');
+  const regex = createFileBlockRegex();
+  const blocks = [];
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    const filename = String(match[1] || '').trim();
+    const content = sanitizeGeneratedFileBlock(match[2]);
+    const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+
+    if (!filename) continue;
+
+    blocks.push({
+      rawBlock: match[0],
+      filename,
+      content,
+      ext
+    });
+  }
+
+  return blocks;
+}
+
+export function buildPendingFileReply(sourceText = '') {
+  const blocks = extractGeneratedFileBlocks(sourceText);
+  if (!blocks.length) {
+    return {
+      hasFiles: false,
+      pendingReply: normalizeReplySpacing(sourceText),
+      files: []
+    };
+  }
+
+  let pendingReply = String(sourceText || '');
+
+  for (const block of blocks) {
+    pendingReply = pendingReply.replace(
+      block.rawBlock,
+      `\n\n⏳ File **${block.filename}** sedang disiapkan. Link download akan muncul otomatis setelah proses selesai.\n\n`
+    );
+  }
+
+  pendingReply = normalizeReplySpacing(pendingReply);
+  if (!pendingReply) {
+    pendingReply = normalizeReplySpacing([
+      '⏳ Sedang menyiapkan file yang kamu minta:',
+      ...blocks.map((block, index) => `${index + 1}. ${block.filename}`)
+    ].join('\n'));
+  }
+
+  return {
+    hasFiles: true,
+    pendingReply,
+    files: blocks.map(block => ({ filename: block.filename, ext: block.ext }))
+  };
+}
+
+async function buildGeneratedFileBuffer({ filename, content, ext }) {
+  if (ext === 'txt') {
+    return {
+      buffer: Buffer.from(content, 'utf-8'),
+      contentType: 'text/plain'
+    };
+  }
+
+  if (ext === 'bas' || ext === 'vba') {
+    return {
+      buffer: Buffer.from(content.replace(/\n/g, '\r\n'), 'utf-8'),
+      contentType: 'text/plain'
+    };
+  }
+
+  if (ext === 'xlsb' || ext === 'xlsx' || ext === 'xls') {
+    const parsedSheets = parseSheetBlocks(content);
+    if (!parsedSheets.length) {
+      throw new Error('Konten tabel kosong. Gunakan format kolom dengan pemisah # di setiap baris.');
+    }
+
+    const spreadsheetFormat = resolveSpreadsheetFormat(ext);
+
+    return {
+      buffer: buildWorkbookBufferFromSheetBlocks(parsedSheets, { bookType: spreadsheetFormat.bookType }),
+      contentType: spreadsheetFormat.contentType
+    };
+  }
+
+  if (ext === 'docx') {
+    const docx = await import('docx');
+    const paragraphs = String(content || '')
+      .split('\n')
+      .map(line => new docx.Paragraph({
+        children: [new docx.TextRun({ text: line, font: 'Arial', size: 24 })]
+      }));
+
+    const doc = new docx.Document({ sections: [{ children: paragraphs }] });
+    return {
+      buffer: await docx.Packer.toBuffer(doc),
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    };
+  }
+
+  return {
+    buffer: Buffer.from(content, 'utf-8'),
+    contentType: 'text/plain'
+  };
+}
+
+export async function processGeneratedFiles({ supabase, sourceText = '' }) {
+  const blocks = extractGeneratedFileBlocks(sourceText);
+  if (!blocks.length) {
+    return {
+      hasFiles: false,
+      processedReply: normalizeReplySpacing(sourceText),
+      files: []
+    };
+  }
+
+  let processedReply = String(sourceText || '');
+  const files = [];
+
+  for (const block of blocks) {
+    try {
+      const built = await buildGeneratedFileBuffer(block);
+      const filePath = `generations/${Date.now()}-${block.filename}`;
+
+      const { error } = await supabase.storage.from('aai-files').upload(filePath, built.buffer, {
+        contentType: built.contentType,
+        upsert: false
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const { data: { publicUrl } } = supabase.storage.from('aai-files').getPublicUrl(filePath);
+      processedReply = processedReply.replace(block.rawBlock, `📥 **[Download ${block.filename}](${publicUrl})**`);
+      files.push({ filename: block.filename, status: 'ready', url: publicUrl });
+    } catch (error) {
+      processedReply = processedReply.replace(block.rawBlock, `⚠️ Error: ${error.message}`);
+      files.push({ filename: block.filename, status: 'failed', error: error.message });
+    }
+  }
+
+  return {
+    hasFiles: true,
+    processedReply: normalizeReplySpacing(processedReply),
+    files
+  };
+}
+
+export function buildFailedFileReply(pendingText = '', errorMessage = '') {
+  const trimmed = String(errorMessage || '').trim();
+  const detail = trimmed ? ` Detail: ${trimmed.slice(0, 180)}` : '';
+
+  return normalizeReplySpacing([
+    String(pendingText || '').trim(),
+    `⚠️ Ada kendala saat menyiapkan file. Coba ulangi permintaan file ini.${detail}`
+  ].filter(Boolean).join('\n\n'));
 }

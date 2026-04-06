@@ -135,6 +135,7 @@ alter table person_memory
   add column if not exists updated_at timestamptz default now(),
   add column if not exists source_message_id uuid references messages(id) on delete set null,
   add column if not exists priority_score float default 0.5,
+  add column if not exists memory_scope text default 'dynamic',
   add column if not exists memory_type text default 'fakta',
   add column if not exists category text default 'umum',
   add column if not exists status text default 'active',
@@ -145,7 +146,7 @@ alter table person_memory
 alter table person_memory
   drop constraint if exists chk_person_memory_status;
 alter table person_memory
-  add constraint chk_person_memory_status check (status in ('active', 'archived'));
+  add constraint chk_person_memory_status check (status in ('active', 'archived', 'dropped'));
 
 alter table person_memory
   drop constraint if exists chk_person_memory_type;
@@ -157,9 +158,17 @@ alter table person_memory
 alter table person_memory
   add constraint chk_person_memory_priority_score check (priority_score >= 0 and priority_score <= 1);
 
+alter table person_memory
+  drop constraint if exists chk_person_memory_scope;
+alter table person_memory
+  add constraint chk_person_memory_scope check (memory_scope in ('stable', 'dynamic'));
+
 create index if not exists idx_person_memory_updated on person_memory(person_id, updated_at desc);
 create index if not exists idx_person_memory_priority on person_memory(person_id, status, priority_score desc, updated_at desc);
 create index if not exists idx_person_memory_type_status on person_memory(person_id, memory_type, status, updated_at desc);
+create index if not exists idx_person_memory_scope_status on person_memory(person_id, memory_scope, status, updated_at desc);
+
+comment on column person_memory.memory_scope is 'stable untuk trait inti/identitas pokok, dynamic untuk emosi, kebiasaan, preferensi, dan konteks situasional';
 
 -- 9.1 PLANNING MEMORY (GLOBAL PER PERSON, USER-MANAGED)
 create table if not exists planning_memory (
@@ -203,17 +212,32 @@ update person_memory
 set priority_score = least(0.99, greatest(0.05, coalesce(confidence, 0.7) * greatest(0.3, least(1.0, coalesce(observation_count, 1) / 5.0))))
 where priority_score is null or priority_score = 0.5;
 
--- Trigger: auto-increment observation_count & updated_at saat memori diperbarui
+update person_memory
+set memory_scope = case
+  when memory_type = 'cara_berpikir' then 'stable'
+  when key in ('nama_panggilan', 'nama_lengkap', 'tanggal_lahir', 'tempat_lahir', 'domisili', 'profil_mbti', 'pola_pikir_inti', 'prinsip_keputusan', 'nilai_hidup') then 'stable'
+  when memory_type = 'pattern' and (
+    key like '%pola_pikir%'
+    or key like '%mindset%'
+    or key like '%prinsip%'
+    or key like '%nilai%'
+    or key like '%warisan%'
+  ) then 'stable'
+  else coalesce(memory_scope, 'dynamic')
+end
+where memory_scope is null or memory_scope not in ('stable', 'dynamic') or memory_scope = 'dynamic';
+
+-- Trigger: recompute priority from explicit values, do not auto-promote confidence/count.
 create or replace function update_person_memory_on_update()
 returns trigger as $$
 begin
   new.updated_at = now();
-  new.observation_count = coalesce(old.observation_count, 0) + 1;
-  -- Naikkan confidence semakin sering teramati (cap di 0.98)
-  new.confidence = least(0.98, coalesce(old.confidence, 0.7) + 0.05);
+  new.observation_count = greatest(1, coalesce(new.observation_count, old.observation_count, 1));
+  new.confidence = least(0.98, greatest(0.05, coalesce(new.confidence, old.confidence, 0.7)));
+  new.memory_scope = coalesce(nullif(new.memory_scope, ''), old.memory_scope, 'dynamic');
   new.priority_score = least(0.99, greatest(0.05, new.confidence * greatest(0.3, least(1.0, new.observation_count / 5.0))));
 
-  if new.status = 'archived' and old.status is distinct from 'archived' then
+  if new.status in ('archived', 'dropped') and old.status is distinct from new.status then
     new.deleted_at = now();
   end if;
 
@@ -232,6 +256,219 @@ create trigger trigger_update_person_memory
 before update on person_memory
 for each row
 execute function update_person_memory_on_update();
+
+-- 9.2 MEMORY EVIDENCE & LEGACY AUDIT
+create table if not exists person_memory_evidence (
+  id uuid primary key default uuid_generate_v4(),
+  person_id uuid not null references persons(id) on delete cascade,
+  memory_id uuid references person_memory(id) on delete set null,
+  memory_key text not null,
+  memory_type text not null default 'fakta',
+  memory_value text not null,
+  memory_scope text not null default 'dynamic',
+  category text default 'umum',
+  source_message_id uuid references messages(id) on delete set null,
+  source_session_id uuid references sessions(id) on delete set null,
+  unique_context_hash text not null,
+  normalized_claim_hash text not null,
+  evidence_status text not null default 'validated',
+  reliability_score float default 0.5,
+  emotional_state text default 'netral',
+  emotion_confidence float default 0,
+  style_signals text[] default '{}',
+  context_window text,
+  created_at timestamptz default now(),
+  constraint uq_person_memory_evidence_context unique (person_id, unique_context_hash)
+);
+
+alter table person_memory_evidence
+  drop constraint if exists chk_person_memory_evidence_type;
+alter table person_memory_evidence
+  add constraint chk_person_memory_evidence_type
+  check (memory_type in ('pattern', 'kebiasaan', 'cara_berpikir', 'preferensi', 'emosi', 'fakta'));
+
+alter table person_memory_evidence
+  drop constraint if exists chk_person_memory_evidence_scope;
+alter table person_memory_evidence
+  add constraint chk_person_memory_evidence_scope
+  check (memory_scope in ('stable', 'dynamic'));
+
+alter table person_memory_evidence
+  drop constraint if exists chk_person_memory_evidence_status;
+alter table person_memory_evidence
+  add constraint chk_person_memory_evidence_status
+  check (evidence_status in ('validated', 'provisional', 'conflict', 'suppressed'));
+
+alter table person_memory_evidence
+  drop constraint if exists chk_person_memory_evidence_reliability;
+alter table person_memory_evidence
+  add constraint chk_person_memory_evidence_reliability
+  check (reliability_score >= 0 and reliability_score <= 1);
+
+alter table person_memory_evidence
+  drop constraint if exists chk_person_memory_evidence_emotion_confidence;
+alter table person_memory_evidence
+  add constraint chk_person_memory_evidence_emotion_confidence
+  check (emotion_confidence >= 0 and emotion_confidence <= 1);
+
+create index if not exists idx_person_memory_evidence_person_created
+  on person_memory_evidence(person_id, created_at desc);
+
+create index if not exists idx_person_memory_evidence_memory_status
+  on person_memory_evidence(memory_id, evidence_status, created_at desc);
+
+create index if not exists idx_person_memory_evidence_key_status
+  on person_memory_evidence(person_id, memory_key, memory_type, evidence_status, created_at desc);
+
+create index if not exists idx_person_memory_evidence_claim_hash
+  on person_memory_evidence(person_id, normalized_claim_hash, created_at desc);
+
+comment on table person_memory_evidence is 'Append-only evidence rows untuk membedakan observasi independen dari pengulangan konteks yang sama';
+comment on column person_memory_evidence.unique_context_hash is 'Hash konservatif yang mencegah claim sama dalam sesi/konteks sama menaikkan observation_count';
+
+create table if not exists legacy_audit_log (
+  id uuid primary key default uuid_generate_v4(),
+  person_id uuid references persons(id) on delete cascade,
+  memory_id uuid references person_memory(id) on delete set null,
+  evidence_id uuid references person_memory_evidence(id) on delete set null,
+  session_id uuid references sessions(id) on delete set null,
+  source_message_id uuid references messages(id) on delete set null,
+  event_type text not null,
+  reason_code text,
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_legacy_audit_log_person_created
+  on legacy_audit_log(person_id, created_at desc);
+
+create index if not exists idx_legacy_audit_log_memory_created
+  on legacy_audit_log(memory_id, created_at desc);
+
+create index if not exists idx_legacy_audit_log_session_created
+  on legacy_audit_log(session_id, created_at desc);
+
+comment on table legacy_audit_log is 'Jejak keputusan memory governance: duplikasi konteks, provisional evidence, conflict, drift candidate, dan forget events';
+
+-- =========================================
+-- 10. FRIEND MEMORY SYSTEM SCHEMA (NEW)
+-- =========================================
+-- 10.1: Add friend_status field to relationships for metadata tracking
+alter table relationships
+  add column if not exists friend_status text default 'active',
+  add column if not exists introduced_at timestamptz default now(),
+  add column if not exists confidence float default 0.7,
+  add column if not exists introduction_context text;
+
+alter table relationships
+  drop constraint if exists chk_relationships_friend_status;
+alter table relationships
+  add constraint chk_relationships_friend_status 
+  check (friend_status in ('active', 'archived', 'pending_confirmation'));
+
+comment on column relationships.friend_status is 'Status hubungan teman: active, archived, pending_confirmation';
+comment on column relationships.introduced_at is 'Kapan teman dikenalkan/ditambahkan';
+comment on column relationships.confidence is 'Tingkat kepercayaan akan hubungan ini (0-1)';
+comment on column relationships.introduction_context is 'Context dari pengenalan awal (disimpan dari pesan intro)';
+
+-- 10.2: Add indexes for fast friend lookups
+create index if not exists idx_relationships_type_a 
+  on relationships(person_a, relation_type) 
+  where friend_status = 'active';
+
+create index if not exists idx_relationships_type_b 
+  on relationships(person_b, relation_type) 
+  where friend_status = 'active';
+
+create index if not exists idx_relationships_friend_type 
+  on relationships(person_a, relation_type, introduced_at desc) 
+  where relation_type IN ('teman', 'sahabat') AND friend_status = 'active';
+
+-- 10.3: Add source_person_id to person_memory (tracks who told us this memory)
+alter table person_memory
+  add column if not exists source_person_id uuid references persons(id) on delete set null;
+
+comment on column person_memory.source_person_id is 'Person ID yang memberitahu memory ini (jika dari teman, bukan self-memory)';
+
+create index if not exists idx_person_memory_source_person 
+  on person_memory(person_id, source_person_id, updated_at desc);
+
+-- 10.4: Auto-update relationships.introduced_at trigger
+create or replace function update_relationships_introduced_at()
+returns trigger as $$
+begin
+  if new.introduced_at is null then
+    new.introduced_at = now();
+  end if;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trigger_update_relationships_introduced_at on relationships;
+create trigger trigger_update_relationships_introduced_at
+before insert on relationships
+for each row
+execute function update_relationships_introduced_at();
+
+-- =========================================
+-- 11. FILE GENERATION JOBS (ASYNC FILE WORKER)
+-- =========================================
+create table if not exists file_generation_jobs (
+  id uuid primary key default uuid_generate_v4(),
+  message_id uuid not null references messages(id) on delete cascade,
+  session_id uuid not null references sessions(id) on delete cascade,
+  user_id uuid references users(id) on delete set null,
+  status text not null default 'pending',
+  source_text text not null,
+  pending_text text not null,
+  processed_text text,
+  error_text text,
+  file_count int not null default 0,
+  attempt_count int not null default 0,
+  started_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table file_generation_jobs
+  drop constraint if exists chk_file_generation_jobs_status;
+alter table file_generation_jobs
+  add constraint chk_file_generation_jobs_status
+  check (status in ('pending', 'processing', 'ready', 'failed'));
+
+alter table file_generation_jobs
+  drop constraint if exists chk_file_generation_jobs_file_count;
+alter table file_generation_jobs
+  add constraint chk_file_generation_jobs_file_count check (file_count >= 0);
+
+alter table file_generation_jobs
+  drop constraint if exists chk_file_generation_jobs_attempt_count;
+alter table file_generation_jobs
+  add constraint chk_file_generation_jobs_attempt_count check (attempt_count >= 0);
+
+create index if not exists idx_file_generation_jobs_status_created
+  on file_generation_jobs(status, created_at asc);
+
+create index if not exists idx_file_generation_jobs_message_id
+  on file_generation_jobs(message_id);
+
+create index if not exists idx_file_generation_jobs_session_id
+  on file_generation_jobs(session_id, created_at desc);
+
+create or replace function update_file_generation_jobs_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trigger_update_file_generation_jobs on file_generation_jobs;
+create trigger trigger_update_file_generation_jobs
+before update on file_generation_jobs
+for each row
+execute function update_file_generation_jobs_updated_at();
 
 COMMIT;
 
