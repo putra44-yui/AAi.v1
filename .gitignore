@@ -6,6 +6,7 @@ node_modules/
 
 # Web build output
 www/
+.next/
 
 # Local and temporary folders
 .tmp/
