@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -94,6 +94,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    image-rendering: auto;
     position: relative;
     z-index: 1;
   }
@@ -194,7 +195,7 @@
   <div class="card">
     <div class="logo">
       <div class="logo-icon">
-        <img src="/icons/icon-192.png" alt="Logo AAi" />
+        <img src="/icons/icon-512.png" srcset="/icons/icon-192.png 192w, /icons/icon-512.png 512w" sizes="52px" alt="Logo AAi" />
       </div>
       <div class="logo-text">
         <span class="logo-name">AAi</span>

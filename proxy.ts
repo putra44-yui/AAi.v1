@@ -2,12 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function proxy(request: NextRequest) {
-  const traceId = crypto.randomUUID();
+  const incomingTraceId = request.headers.get('x-trace-id');
+  const traceId = incomingTraceId && incomingTraceId.trim()
+    ? incomingTraceId.trim()
+    : crypto.randomUUID();
   const requestHeaders = new Headers(request.headers);
 
   requestHeaders.set('x-trace-id', traceId);
 
-  console.log(`[AAi-Audit] Trace ID dibuat: ${traceId} | Tujuan: ${request.nextUrl.pathname}`);
+  console.log(`[AAi-Audit] Trace ID ${incomingTraceId ? 'dipakai ulang' : 'dibuat'}: ${traceId} | Tujuan: ${request.nextUrl.pathname}`);
 
   return NextResponse.next({
     request: {

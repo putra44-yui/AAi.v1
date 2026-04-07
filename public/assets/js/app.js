@@ -1,10 +1,12 @@
 // ══════════════════════════════════════════
 // STATE GLOBAL
 // ══════════════════════════════════════════
+const LAST_SESSION_OWNER_KEY = 'aai_last_session_owner';
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
 if (!currentUser.id) window.location.href = '/login';
-if (currentUser.person_name || currentUser.username) {
-  document.getElementById('cardUsername').textContent = currentUser.person_name || currentUser.username;
+clearStoredSessionOnUserMismatch();
+if (currentUser.username || currentUser.person_name) {
+  document.getElementById('cardUsername').textContent = currentUser.username || currentUser.person_name;
 }
 if (currentUser.family_role) {
   document.getElementById('cardFamilyRole').textContent = currentUser.family_role;
@@ -25,6 +27,149 @@ let msgboxState = null;
 let pendingFriendSuggestion = null;
 const pendingFileJobPollers = new Map();
 const REASONING_PREVIEW_ENABLED = false;
+let scrollBottomFrame = null;
+let stickyCodeHeaderTimer = null;
+let suppressAutoScroll = false;
+let activeRenderJob = 0;
+
+function isMobileViewport() {
+  return window.innerWidth <= 768 || navigator.maxTouchPoints > 0;
+}
+
+function getPreferredDisplayName() {
+  return String(currentUser.username || currentUser.person_name || 'User').trim();
+}
+
+function getWelcomeIllustrationSrc() {
+  return isMobileViewport() ? '/ayaka.webp' : '/ayaka1.gif';
+}
+
+function clearStoredSessionOnUserMismatch() {
+  const storedOwner = localStorage.getItem(LAST_SESSION_OWNER_KEY);
+  if (!storedOwner || !currentUser?.id || String(storedOwner) === String(currentUser.id)) return;
+  localStorage.removeItem('aai_last_session');
+  localStorage.removeItem(LAST_SESSION_OWNER_KEY);
+}
+
+function clearStoredSessionState() {
+  localStorage.removeItem('aai_last_session');
+  localStorage.removeItem(LAST_SESSION_OWNER_KEY);
+}
+
+function buildSessionFallbackTitle(rawTitle = '') {
+  const normalized = String(rawTitle || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Obrolan baru';
+  return normalized.length > 42 ? `${normalized.slice(0, 39).trim()}...` : normalized;
+}
+
+function buildSessionTitleFromMessages(messages = []) {
+  const firstUserMessage = messages.find(message => message.role === 'user' && String(message.content || '').trim());
+  return buildSessionFallbackTitle(firstUserMessage?.content || '');
+}
+
+function upsertSessionSnapshot(nextSession, { makeFirst = false } = {}) {
+  const normalizedId = String(nextSession?.id || '').trim();
+  if (!normalizedId) return null;
+
+  const mergedSession = {
+    ...(nextSession || {}),
+    id: normalizedId,
+    title: buildSessionFallbackTitle(nextSession?.title),
+    updated_at: nextSession?.updated_at || new Date().toISOString()
+  };
+
+  const existingIndex = sessions.findIndex(session => session.id === normalizedId);
+  if (existingIndex >= 0) {
+    const current = { ...sessions[existingIndex], ...mergedSession };
+    if (makeFirst && existingIndex > 0) {
+      sessions = [current, ...sessions.filter((_, index) => index !== existingIndex)];
+    } else {
+      sessions[existingIndex] = current;
+    }
+    return current;
+  }
+
+  sessions = makeFirst ? [mergedSession, ...sessions] : [...sessions, mergedSession];
+  return mergedSession;
+}
+
+function persistCurrentSession(sessionId, {
+  force = false,
+  title = null,
+  makeFirst = false,
+  refreshSidebar = false
+} = {}) {
+  const normalizedId = String(sessionId || '').trim();
+  if (!normalizedId) return false;
+  if (!force && currentSessionId && currentSessionId !== normalizedId) return false;
+
+  currentSessionId = normalizedId;
+  localStorage.setItem('aai_last_session', normalizedId);
+  if (currentUser?.id) {
+    localStorage.setItem(LAST_SESSION_OWNER_KEY, String(currentUser.id));
+  }
+
+  const existing = sessions.find(session => session.id === normalizedId) || null;
+  if (title || !existing || makeFirst) {
+    const nextSession = upsertSessionSnapshot({
+      ...(existing || {}),
+      id: normalizedId,
+      title: title || existing?.title || 'Obrolan baru',
+      compact_checkpoint_at: existing?.compact_checkpoint_at || null,
+      updated_at: new Date().toISOString()
+    }, { makeFirst });
+    if (nextSession) currentSessionMeta = nextSession;
+  } else if (existing) {
+    currentSessionMeta = existing;
+  }
+
+  if (refreshSidebar) renderSidebar();
+  return true;
+}
+
+function getLastUserPromptText() {
+  const latestUserMessage = [...currentMessages].reverse()
+    .find(message => message.role === 'user' && String(message.content || '').trim());
+  if (latestUserMessage) return latestUserMessage.content;
+
+  const chatArea = document.getElementById('chatArea');
+  const userRows = chatArea ? Array.from(chatArea.querySelectorAll('.msg-row.user')) : [];
+  const lastRow = userRows[userRows.length - 1];
+  if (!lastRow) return '';
+
+  return safeDecodeURIComponent(lastRow.getAttribute('data-raw') || lastRow.textContent || '');
+}
+
+function scheduleStickyCodeHeadersUpdate() {
+  if (!document.querySelector('.code-window')) return;
+  if (stickyCodeHeaderTimer) return;
+  stickyCodeHeaderTimer = setTimeout(() => {
+    stickyCodeHeaderTimer = null;
+    requestAnimationFrame(() => {
+      updateStickyCodeHeaders();
+    });
+  }, 80);
+}
+
+async function clearRuntimeCaches() {
+  if ('caches' in window) {
+    try {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map(cacheKey => caches.delete(cacheKey)));
+    } catch (error) {
+      console.warn('Gagal membersihkan cache runtime:', error);
+    }
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(registration => registration.update()));
+    } catch (error) {
+      console.warn('Gagal refresh service worker:', error);
+    }
+  }
+}
 
 const PLANNING_COMMAND_PATTERNS = {
   list: /(apa\s+(rencana|perencanaan)\s*(kita)?|tampilkan\s+(rencana|perencanaan)|list\s+rencana)/i,
@@ -1035,10 +1180,11 @@ function renderStreamErrorUI(streamId, errorMessage, retryMeta = null) {
 
   if (sessionId) {
     aiRow.setAttribute('data-retry-session-id', sessionId);
-    if (!currentSessionId) {
-      currentSessionId = sessionId;
-      localStorage.setItem('aai_last_session', currentSessionId);
-    }
+    persistCurrentSession(sessionId, {
+      title: buildSessionFallbackTitle(getLastUserPromptText()),
+      makeFirst: true,
+      refreshSidebar: true
+    });
   }
 
   if (userMessageId) {
@@ -1269,20 +1415,36 @@ function buildHistoryPreviewTeaser(preview) {
   return buildPreviewTeaserQueue(preview)[0] || 'Ringkasan siap...';
 }
 
-async function ensureSessionVisibleInSidebar(sessionId, maxAttempts = 6, delayMs = 900) {
-  if (!sessionId) return false;
+async function ensureSessionVisibleInSidebar(sessionId) {
+  const normalizedId = String(sessionId || '').trim();
+  if (!normalizedId) return false;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    await loadSessions();
-    const found = sessions.find(item => item.id === sessionId);
-    if (found) {
-      document.getElementById('topbarTitle').textContent = found.title || 'AAi';
-      return true;
-    }
+  const updateTitle = session => {
+    document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
+    return true;
+  };
 
-    if (attempt < maxAttempts - 1) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+  const existing = sessions.find(item => item.id === normalizedId);
+  if (existing) return updateTitle(existing);
+
+  await loadSessions();
+
+  const refreshed = sessions.find(item => item.id === normalizedId);
+  if (refreshed) return updateTitle(refreshed);
+
+  const optimistic = upsertSessionSnapshot({
+    id: normalizedId,
+    title: buildSessionFallbackTitle(getLastUserPromptText()),
+    updated_at: new Date().toISOString()
+  }, { makeFirst: true });
+
+  if (optimistic) {
+    if (currentSessionId === normalizedId) {
+      currentSessionMeta = optimistic;
+      updateCompactStatus();
     }
+    renderSidebar();
+    return updateTitle(optimistic);
   }
 
   return false;
@@ -1312,12 +1474,20 @@ async function processStream(response, streamId, onDone) {
   async function syncSessionFromStream(parsed) {
     if (!parsed?.session_id) return;
     streamSessionId = parsed.session_id;
-    if (currentSessionId || sessionSynced) return;
+    const isKnownSession = sessions.some(item => item.id === parsed.session_id);
+    const synced = persistCurrentSession(parsed.session_id, {
+      title: isKnownSession ? null : buildSessionFallbackTitle(getLastUserPromptText()),
+      makeFirst: !isKnownSession,
+      refreshSidebar: !isKnownSession
+    });
 
-    currentSessionId = parsed.session_id;
-    sessionSynced = true;
-    localStorage.setItem('aai_last_session', currentSessionId);
-    void ensureSessionVisibleInSidebar(currentSessionId);
+    if (synced || currentSessionId === parsed.session_id) {
+      sessionSynced = true;
+    }
+
+    if (!isKnownSession) {
+      void ensureSessionVisibleInSidebar(parsed.session_id);
+    }
   }
   let previewStepTimer = null;
   let streamError = null;
@@ -1598,7 +1768,7 @@ async function processStream(response, streamId, onDone) {
     scrollBottom();
   }
 
-  setTimeout(initStickyCodeHeaders, 600);
+  setTimeout(scheduleStickyCodeHeadersUpdate, 180);
 }
 
 // ══════════════════════════════════════════
@@ -1650,9 +1820,13 @@ async function sendMessage(text, files = []) {
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
       if (resolvedSessionId) {
-        currentSessionId = resolvedSessionId;
-        localStorage.setItem('aai_last_session', currentSessionId);
-        void ensureSessionVisibleInSidebar(currentSessionId);
+        const isKnownSession = sessions.some(session => session.id === resolvedSessionId);
+        persistCurrentSession(resolvedSessionId, {
+          title: isKnownSession ? null : buildSessionFallbackTitle(text),
+          makeFirst: !isKnownSession,
+          refreshSidebar: !isKnownSession
+        });
+        void ensureSessionVisibleInSidebar(resolvedSessionId);
       }
       const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
       if (userRows.length > 0)
@@ -1732,11 +1906,29 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
     }
     if (!found) {
       const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+      if (userMessageId) {
+        const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
+        if (userRow) {
+          userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
+        } else {
+          area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+        }
+      } else {
+        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+      }
     }
   } else {
     const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+    if (userMessageId) {
+      const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
+      if (userRow) {
+        userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
+      } else {
+        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+      }
+    } else {
+      area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+    }
   }
   scrollBottom();
 
@@ -1774,6 +1966,17 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
+      const resolvedSessionId = parsed.session_id || effectiveSessionId || currentSessionId;
+      if (resolvedSessionId) {
+        const isKnownSession = sessions.some(session => session.id === resolvedSessionId);
+        persistCurrentSession(resolvedSessionId, {
+          title: isKnownSession ? null : buildSessionFallbackTitle(text),
+          makeFirst: !isKnownSession,
+          refreshSidebar: !isKnownSession
+        });
+        void ensureSessionVisibleInSidebar(resolvedSessionId);
+      }
+
       // Push as new sibling message (not update existing)
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
@@ -1803,9 +2006,13 @@ function retryLastMessage(btn) {
   const forcedSessionId = aiRow.getAttribute('data-retry-session-id') || null;
   const fallbackUserMsgId = aiRow.getAttribute('data-retry-user-message-id') || null;
 
-  if (forcedSessionId && !currentSessionId) {
-    currentSessionId = forcedSessionId;
-    localStorage.setItem('aai_last_session', currentSessionId);
+  if (forcedSessionId && currentSessionId !== forcedSessionId) {
+    persistCurrentSession(forcedSessionId, {
+      force: true,
+      title: buildSessionFallbackTitle(getLastUserPromptText()),
+      makeFirst: true,
+      refreshSidebar: true
+    });
   }
 
   let el = aiRow.previousElementSibling;
@@ -1838,6 +2045,8 @@ async function editUserMsg(btn) {
     return;
   }
 
+  row.classList.add('editing');
+  bubble.classList.add('is-editing');
   bubble.dataset.originalHtml = bubble.innerHTML;
   bubble.innerHTML = `
     <textarea class="edit-textarea" id="edt_${msgId}">${escHtml(raw)}</textarea>
@@ -1857,7 +2066,10 @@ async function editUserMsg(btn) {
 
 function cancelEdit(btn) {
   const bubble = btn.closest('.bubble');
+  const row = bubble?.closest('.msg-row.user');
   bubble.innerHTML = bubble.dataset.originalHtml;
+  bubble.classList.remove('is-editing');
+  row?.classList.remove('editing');
 }
 
 async function saveEdit(btn, msgId) {
@@ -1869,22 +2081,9 @@ async function saveEdit(btn, msgId) {
   if (!newText) return;
 
   bubble.innerHTML = formatContent(newText);
+  bubble.classList.remove('is-editing');
+  row.classList.remove('editing');
   row.setAttribute('data-raw', encodeURIComponent(newText));
-
-  let assistantMsgId = null;
-  let nextRow = row.nextElementSibling;
-  while (nextRow) {
-    if (nextRow.classList.contains('assistant')) {
-      assistantMsgId = nextRow.getAttribute('data-id') || null;
-      break;
-    }
-    nextRow = nextRow.nextElementSibling;
-  }
-  if (!assistantMsgId) {
-    assistantMsgId = activeVersionMap[msgId]
-      || [...currentMessages].reverse().find(m => m.parent_id === msgId && m.role === 'assistant')?.id
-      || null;
-  }
 
   try {
     const res = await fetch(`/api/chat`, {
@@ -1903,10 +2102,21 @@ async function saveEdit(btn, msgId) {
     if (!res.ok) throw new Error('Gagal update');
     const msg = currentMessages.find(m => m.id === msgId);
     if (msg) msg.content = newText;
-    renderMessageTree();
-    const refreshedAssistantRow = assistantMsgId
-      ? document.querySelector(`.msg-row.assistant[data-id="${assistantMsgId}"]`)
-      : null;
+    const refreshedUserRow = row;
+    let refreshedAssistantRow = null;
+    let assistantMsgId = null;
+    if (refreshedUserRow) {
+      let sibling = refreshedUserRow.nextElementSibling;
+      while (sibling) {
+        if (sibling.classList.contains('assistant')) {
+          refreshedAssistantRow = sibling;
+          assistantMsgId = sibling.getAttribute('data-id') || null;
+          break;
+        }
+        if (sibling.classList.contains('user')) break;
+        sibling = sibling.nextElementSibling;
+      }
+    }
     executeRegenerate(newText, msgId, assistantMsgId, refreshedAssistantRow);
   } catch (e) {
     await showAlertMessage(`Gagal menyimpan perubahan: ${e.message}`, 'Edit Gagal');
@@ -1988,16 +2198,32 @@ async function loadSessions() {
       updateCompactStatus();
     }
     renderSidebar();
+    return sessions;
   } catch (e) {
     logDebug(`Gagal load sessions: ${e.message}`, '#e74c3c');
-    sessions = []; renderSidebar();
+    if (!sessions.length) renderSidebar();
+    return sessions;
   }
 }
 
-async function loadSession(id) {
-  currentSessionId = id;
-  localStorage.setItem('aai_last_session', id);
-  const session = sessions.find(s => s.id === id);
+async function loadSession(id, options = {}) {
+  const {
+    allowMissingSidebar = false,
+    suppressErrorState = false,
+    titleHint = ''
+  } = options;
+  const normalizedId = String(id || '').trim();
+  if (!normalizedId) return false;
+
+  const existingSession = sessions.find(s => s.id === normalizedId) || null;
+  persistCurrentSession(normalizedId, {
+    force: true,
+    title: existingSession?.title || titleHint || (allowMissingSidebar ? 'Memuat sesi...' : null),
+    makeFirst: allowMissingSidebar && !existingSession,
+    refreshSidebar: allowMissingSidebar && !existingSession
+  });
+
+  const session = sessions.find(s => s.id === normalizedId) || existingSession || null;
   currentSessionMeta = session || null;
   updateCompactStatus();
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
@@ -2009,20 +2235,36 @@ async function loadSession(id) {
       <p style="margin-top:12px;">Memuat percakapan...</p>
     </div>`;
   try {
-    const res = await fetch(`/api/chat?session_id=${id}`);
+    const res = await fetch(`/api/chat?session_id=${normalizedId}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.success && Array.isArray(data.messages)) {
       currentMessages = data.messages;
+      const syncedSession = upsertSessionSnapshot({
+        ...(session || {}),
+        id: normalizedId,
+        title: session?.title || titleHint || buildSessionTitleFromMessages(data.messages),
+        compact_checkpoint_at: session?.compact_checkpoint_at || null,
+        updated_at: new Date().toISOString()
+      }, { makeFirst: allowMissingSidebar && !existingSession });
+      if (syncedSession) {
+        currentSessionMeta = syncedSession;
+        document.getElementById('topbarTitle').textContent = syncedSession.title || 'AAi';
+        updateCompactStatus();
+      }
       renderMessageTree();
       resumePendingFileJobsForCurrentSession();
     } else throw new Error("Format data tidak valid");
     if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
     renderSidebar();
+    return true;
   } catch (e) {
     logDebug(`Error load session: ${e.message}`, '#e74c3c');
-    document.getElementById('chatArea').innerHTML =
-      `<div style="padding:40px;text-align:center;color:#e74c3c;">⚠️ Gagal memuat: ${e.message}</div>`;
+    if (!suppressErrorState) {
+      document.getElementById('chatArea').innerHTML =
+        `<div style="padding:40px;text-align:center;color:#e74c3c;">⚠️ Gagal memuat: ${e.message}</div>`;
+    }
+    return false;
   }
 }
 
@@ -2085,18 +2327,20 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
   } catch (e) { console.error("Gagal hapus:", e); }
 });
 
-function newChat() {
+function newChat(options = {}) {
+  const { preserveStoredSession = false } = options;
   currentSessionId = null;
   currentSessionMeta = null;
-  localStorage.removeItem('aai_last_session');
+  activeRenderJob += 1;
+  if (!preserveStoredSession) clearStoredSessionState();
   currentMessages  = [];
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
     <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
       <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite;background:transparent;">
-        <img src="/ayaka1.gif" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
+        <img src="${getWelcomeIllustrationSrc()}" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
       </div>
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${currentUser.username}! 👋</h2>
+      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${getPreferredDisplayName()}! 👋</h2>
       <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
     </div>`;
   document.getElementById('topbarTitle').textContent = 'AAi';
@@ -2159,19 +2403,40 @@ function renderMessageTree() {
   const area   = document.getElementById('chatArea');
   const branch = buildActiveBranch();
   if (!branch.length) { logDebug('Branch kosong, skip render', '#e67e22'); return; }
+  const renderJob = ++activeRenderJob;
   area.innerHTML = '';
-  branch.forEach(m => {
-    const siblings = currentMessages.filter(s => s.parent_id === m.parent_id && s.role === m.role);
-    const idx      = siblings.findIndex(s => s.id === m.id);
-    const extra = m.role === 'assistant'
-      ? { preview: m.preview || null, persona: m.persona || '' }
-      : null;
-    appendMessage(m.role, m.content, m.created_at, null, m.id, {
-      total: siblings.length, current: idx + 1, siblings: siblings.map(s => s.id)
-    }, extra);
-  });
-  scrollBottom();
-  setTimeout(initStickyCodeHeaders, 400);
+  suppressAutoScroll = true;
+  const renderChunkSize = isMobileViewport() ? 8 : 18;
+  const renderChunk = (startIndex = 0) => {
+    if (renderJob !== activeRenderJob) return;
+
+    const endIndex = Math.min(startIndex + renderChunkSize, branch.length);
+    for (let index = startIndex; index < endIndex; index += 1) {
+      const message = branch[index];
+      const siblings = currentMessages.filter(s => s.parent_id === message.parent_id && s.role === message.role);
+      const currentIndex = siblings.findIndex(s => s.id === message.id);
+      const extra = message.role === 'assistant'
+        ? { preview: message.preview || null, persona: message.persona || '' }
+        : null;
+      appendMessage(message.role, message.content, message.created_at, null, message.id, {
+        total: siblings.length,
+        current: currentIndex + 1,
+        siblings: siblings.map(s => s.id)
+      }, extra);
+    }
+
+    if (endIndex < branch.length) {
+      requestAnimationFrame(() => renderChunk(endIndex));
+      return;
+    }
+
+    if (renderJob !== activeRenderJob) return;
+    suppressAutoScroll = false;
+    scrollBottom();
+    scheduleStickyCodeHeadersUpdate();
+  };
+
+  requestAnimationFrame(() => renderChunk(0));
 }
 
 // ══════════════════════════════════════════
@@ -2270,7 +2535,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
   }
 
   area.insertAdjacentHTML('beforeend', html);
-  scrollBottom();
+  if (!suppressAutoScroll) {
+    scrollBottom();
+  }
 }
 
 // ══════════════════════════════════════════
@@ -2377,7 +2644,7 @@ function toggleCodeWindow(btn) {
     span.textContent = 'Minimize';
   }
 
-  requestAnimationFrame(initStickyCodeHeaders);
+  requestAnimationFrame(scheduleStickyCodeHeadersUpdate);
 }
 function formatContent(text) {
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
@@ -2410,8 +2677,23 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-function scrollBottom() {
-  const a = document.getElementById('chatArea'); a.scrollTop = a.scrollHeight;
+function scrollBottom(force = false) {
+  const chatArea = document.getElementById('chatArea');
+  if (!chatArea) return;
+
+  const applyScroll = () => {
+    scrollBottomFrame = null;
+    chatArea.scrollTop = chatArea.scrollHeight;
+  };
+
+  if (force) {
+    if (scrollBottomFrame) cancelAnimationFrame(scrollBottomFrame);
+    applyScroll();
+    return;
+  }
+
+  if (scrollBottomFrame) return;
+  scrollBottomFrame = requestAnimationFrame(applyScroll);
 }
 
 // ══════════════════════════════════════════
@@ -2630,7 +2912,9 @@ window.addEventListener('resize', () => {
 async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
   if (!shouldLogout) return;
+  clearStoredSessionState();
   localStorage.removeItem('aai_user');
+  await clearRuntimeCaches();
   window.location.href = '/login';
 }
 
@@ -2661,11 +2945,11 @@ function initStickyCodeHeaders() {
   if (!chatArea) return;
 
   if (!chatArea.dataset.codeStickyBound) {
-    chatArea.addEventListener('scroll', updateStickyCodeHeaders, { passive: true });
+    chatArea.addEventListener('scroll', scheduleStickyCodeHeadersUpdate, { passive: true });
     chatArea.dataset.codeStickyBound = 'true';
   }
 
-  updateStickyCodeHeaders();
+  scheduleStickyCodeHeadersUpdate();
 }
 
 // ══════════════════════════════════════════
@@ -2781,27 +3065,76 @@ async function confirmFriendSuggestion() {
 
 // INIT
 // ══════════════════════════════════════════
-async function initApp() {
-  initComposerUI();
-  await loadSessions();
-  const last = localStorage.getItem('aai_last_session');
-  if (last && sessions.find(s => s.id === last)) {
-    loadSession(last);
-  } else if (last && sessions.length > 0) {
-    // Session ID tersimpan tapi tidak ada di history — sesi baru yang SSE-nya tidak selesai
-    // Load sesi terbaru (sudah terurut updated_at DESC)
-    loadSession(sessions[0].id);
-  } else {
-    newChat();
+async function restoreLastSession(lastSessionId) {
+  const normalizedId = String(lastSessionId || '').trim();
+  if (!normalizedId) return false;
+
+  const restored = await loadSession(normalizedId, {
+    allowMissingSidebar: true,
+    suppressErrorState: true,
+    titleHint: 'Memuat sesi...'
+  });
+
+  if (!restored) {
+    currentSessionId = null;
+    currentSessionMeta = null;
+    clearStoredSessionState();
+    return false;
   }
+
+  await ensureSessionVisibleInSidebar(normalizedId);
+  return true;
+}
+
+async function bootstrapSessionState() {
+  const last = String(localStorage.getItem('aai_last_session') || '').trim();
+  const restorePromise = last ? restoreLastSession(last) : Promise.resolve(false);
+  const sessionsPromise = loadSessions();
+
+  const restored = await restorePromise;
+  await sessionsPromise;
+
+  if (restored) {
+    await ensureSessionVisibleInSidebar(last);
+    return;
+  }
+
+  if (last) {
+    const fallbackSession = sessions.find(session => session.id !== last) || sessions[0] || null;
+    if (fallbackSession) {
+      await loadSession(fallbackSession.id, {
+        suppressErrorState: true,
+        titleHint: fallbackSession.title || ''
+      });
+      return;
+    }
+
+    newChat();
+    return;
+  }
+
+  renderSidebar();
+}
+
+function initApp() {
+  initComposerUI();
+  newChat({ preserveStoredSession: true });
+  requestAnimationFrame(() => {
+    void bootstrapSessionState();
+  });
 }
 document.addEventListener('DOMContentLoaded', initApp);
 document.addEventListener('DOMContentLoaded', initStickyCodeHeaders);
+window.addEventListener('storage', event => {
+  if (event.key === 'aai_user' && !event.newValue) {
+    window.location.href = '/login';
+  }
+});
 window.addEventListener('resize', () => {
-  initStickyCodeHeaders();
+  scheduleStickyCodeHeadersUpdate();
   updateMobileSendVisibility();
 });
-setTimeout(initStickyCodeHeaders, 600);
+setTimeout(scheduleStickyCodeHeadersUpdate, 600);
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

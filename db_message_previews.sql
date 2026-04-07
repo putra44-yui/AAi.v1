@@ -482,9 +482,19 @@ create table if not exists memories (
   created_at timestamptz default now()
 );
 
+alter table memories
+  add column if not exists key text;
+
+update memories
+set key = lower(trim(split_part(content, ':', 1)))
+where (key is null or btrim(key) = '')
+  and content is not null
+  and position(':' in content) > 0;
+
 create index if not exists idx_memories_user_created on memories(user_id, created_at desc);
 create index if not exists idx_memories_user_locked on memories(user_id, is_locked, created_at desc);
 create index if not exists idx_memories_evidence_chain_gin on memories using gin(evidence_chain);
+create index if not exists idx_memories_user_key on memories(user_id, key);
 
 create table if not exists draft_memories (
   id uuid primary key default uuid_generate_v4(),

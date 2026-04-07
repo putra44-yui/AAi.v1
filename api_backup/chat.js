@@ -15,8 +15,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const MAIN_MODEL = "qwen/qwen3.6-plus:free";
-const DEFAULT_FALLBACK_MODEL = 'qwen/qwen2.5-coder:free';
+const MAIN_MODEL = 'qwen/qwen3-coder:free';
+const DEFAULT_FALLBACK_MODEL = 'qwen/qwen3-coder:free';
 const MEMORY_TAG_PREFIX = '[MEMORY:';
 const MEMORY_FORGET_TAG_PREFIX = '[MEMORY_FORGET:';
 const CLARIFY_BLOCK_START = '[AAI_CLARIFY]';
@@ -49,6 +49,118 @@ function parseFloatEnv(name, fallbackValue, min = 0, max = 1) {
   const raw = Number.parseFloat(process.env[name] || '');
   if (Number.isNaN(raw)) return fallbackValue;
   return Math.max(min, Math.min(max, raw));
+}
+
+function limitList(items = [], maxItems = 4) {
+  return (Array.isArray(items) ? items : []).filter(Boolean).slice(0, Math.max(0, maxItems));
+}
+
+function compactText(value = '', maxChars = 160) {
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function estimatePromptChars(messages = []) {
+  return (Array.isArray(messages) ? messages : []).reduce((total, message) => {
+    return total + String(message?.content || '').length;
+  }, 0);
+}
+
+function buildPromptRelevantSelection(selection = {}, options = {}) {
+  const items = Array.isArray(selection.items) ? selection.items : [];
+  const promptLimit = Math.max(4, Number(options.maxItems || 12));
+  const preferredTypes = limitList(selection.preferredTypes, 4);
+  const preferredTypeSet = new Set(preferredTypes);
+  const selected = [];
+  const seenKeys = new Set();
+
+  const pushItem = (item) => {
+    if (!item) return;
+    const dedupeKey = String(item.id || `${item.key || ''}:${item.value || ''}`);
+    if (seenKeys.has(dedupeKey)) return;
+    seenKeys.add(dedupeKey);
+    selected.push({
+      ...item,
+      key: compactText(item?.key || '', 80),
+      value: compactText(item?.value || '', 140)
+    });
+  };
+
+  for (const item of items) {
+    if (selected.length >= promptLimit) break;
+    const type = chatMemory.normalizeMemoryType(item?.memory_type || 'fakta');
+    if (preferredTypeSet.has(type)) pushItem(item);
+  }
+
+  for (const item of items) {
+    if (selected.length >= promptLimit) break;
+    pushItem(item);
+  }
+
+  return {
+    ...selection,
+    items: selected.slice(0, promptLimit),
+    preferredTypes,
+    intents: limitList(selection.intents, 4),
+    reasoning: limitList((selection.reasoning || []).map(reason => compactText(reason, 90)), 3),
+    relationSignals: {
+      ...(selection.relationSignals || {}),
+      mentionedNames: limitList(selection.relationSignals?.mentionedNames, 3),
+      signals: limitList(selection.relationSignals?.signals, 3)
+    }
+  };
+}
+
+function buildCompactSpeechStylePrompt(profile = {}, personName = 'user') {
+  if (!profile || profile.sampleCount === 0) return '';
+
+  const styleShift = limitList(profile.styleShift, 2)
+    .map(item => String(item || '').replace(/_/g, ' '));
+  const recurrentTopics = limitList(profile.recurrentTopics, 4);
+
+  return [
+    `[POLA KOMUNIKASI ${String(personName).toUpperCase()}]`,
+    `Nada dasar: ${profile.formality || '-'}, ${profile.messageLength || '-'}, ${profile.reflectiveStyle || '-'}`,
+    `Gaya tanya/urgensi: ${profile.questioningStyle || '-'}, ${profile.urgencyTendency || '-'}`,
+    `Slot waktu: dominan ${profile.dominantTimeSlot || '-'}, sekarang ${profile.currentTimeSlot || '-'}`,
+    recurrentTopics.length > 0 ? `Topik berulang: ${recurrentTopics.join(', ')}` : '',
+    styleShift.length > 0 ? `Perubahan gaya: ${styleShift.join(', ')}` : '',
+    profile.timeAnomaly ? 'Perhatian: user muncul di waktu yang tidak biasa.' : '',
+    'Gunakan hanya untuk menyesuaikan nada respons.'
+  ].filter(Boolean).join('\n');
+}
+
+function createRequestPerfTrace(traceId = '') {
+  const startedAt = Date.now();
+  let lastMarkAt = startedAt;
+  const marks = [];
+
+  return {
+    mark(label, extra = {}) {
+      const now = Date.now();
+      marks.push({
+        label,
+        delta_ms: now - lastMarkAt,
+        elapsed_ms: now - startedAt,
+        ...extra
+      });
+      lastMarkAt = now;
+    },
+    log(status, extra = {}) {
+      console.log('[AAI-Perf]', JSON.stringify({
+        trace_id: traceId,
+        status,
+        total_ms: Date.now() - startedAt,
+        marks,
+        ...extra
+      }));
+    }
+  };
 }
 
 function sleep(ms) {
@@ -1591,8 +1703,17 @@ export default async function handler(req, res) {
   }
 
   // ── POST: Kirim pesan + streaming ──
+  let perf = null;
+  let currentSessionIdForPerf = null;
+  let finalUserMessageIdForPerf = null;
+  let modelUsedForPerf = null;
+  let retryCountForPerf = 0;
+  let fallbackUsedForPerf = false;
+  let promptCharsForPerf = 0;
+  let promptMemoryCountForPerf = 0;
+
   try {
-        const {
+    const {
       message, session_id, user_id, username,
       persona_name = 'Auto', parent_id = null, user_message_id = null,
       assistant_message_id = null,
@@ -1603,6 +1724,13 @@ export default async function handler(req, res) {
       files = [] // ← Terima array file dari frontend
     } = req.body;
     let lockStatus = 'saved';
+    perf = createRequestPerfTrace(traceId);
+    perf.mark('request_received', {
+      has_session: Boolean(session_id),
+      has_files: Array.isArray(files) && files.length > 0,
+      edit_mode: Boolean(edit_message_id),
+      consistency_mode: Boolean(consistency_mode)
+    });
 
     const userMessage = String(message || '').trim();
     if (!userMessage) throw new Error("Pesan tidak boleh kosong");
@@ -1620,6 +1748,16 @@ export default async function handler(req, res) {
       console.log(`✅ Pesan ${edit_message_id} berhasil di-update`);
 
       if (update_only) {
+        traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'POST', 200, {
+          user_id: user_id || 'unknown',
+          edit_message_id,
+          updated_only: true
+        });
+        perf?.log('update_only_success', {
+          user_id: user_id || 'unknown',
+          edit_message_id,
+          updated_only: true
+        });
         return res.status(200).json({
           success: true,
           message_id: edit_message_id,
@@ -1708,6 +1846,10 @@ export default async function handler(req, res) {
         fileContext += `\n\n📝 KONTEN FILE (WAJIB DIBACA & DIJAWAB):\n${textContents.join('\n\n---\n\n')}`;
       }
     }
+    perf.mark('file_context_ready', {
+      file_count: Array.isArray(files) ? files.length : 0,
+      file_context_chars: fileContext.length
+    });
 
     
     // 1. User & Person
@@ -1718,10 +1860,65 @@ export default async function handler(req, res) {
 
     const { data: user, error: userErr } = await userQuery.single();
     if (userErr || !user?.person_id) throw new Error("User atau person belum terhubung!");
+    perf.mark('user_lookup_done', {
+      user_id: user?.id || null,
+      person_id: user?.person_id || null
+    });
 
-    const { data: person } = await supabase
-      .from('persons').select('name, date_of_birth, role')
-      .eq('id', user.person_id).single();
+    const shouldLookupAssistantFromEdit = Boolean(!assistant_message_id && edit_message_id && session_id);
+    const [
+      personResult,
+      allPersonsResult,
+      relationsResult,
+      existingAssistantResult,
+      sessionStateResult,
+      chatHistoryResult
+    ] = await Promise.all([
+      supabase
+        .from('persons')
+        .select('id, name, date_of_birth, role')
+        .eq('id', user.person_id)
+        .single(),
+      supabase
+        .from('persons')
+        .select('id, name, date_of_birth, role'),
+      supabase
+        .from('relationships')
+        .select('person_a(name,role), person_b(name,role), relation_type'),
+      shouldLookupAssistantFromEdit
+        ? supabase
+            .from('messages')
+            .select('id')
+            .eq('session_id', session_id)
+            .eq('parent_id', edit_message_id)
+            .eq('role', 'assistant')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      session_id
+        ? supabase
+            .from('sessions')
+            .select('*')
+            .eq('id', session_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      session_id
+        ? supabase
+            .from('messages')
+            .select('id, role, content')
+            .eq('session_id', session_id)
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [] })
+    ]);
+
+    const person = personResult?.data || null;
+    perf.mark('base_context_queries_done', {
+      has_person: Boolean(person?.id),
+      family_count: Array.isArray(allPersonsResult?.data) ? allPersonsResult.data.length : 0,
+      relation_count: Array.isArray(relationsResult?.data) ? relationsResult.data.length : 0,
+      history_rows: Array.isArray(chatHistoryResult?.data) ? chatHistoryResult.data.length : 0
+    });
 
     const currentAge = calculateAge(person?.date_of_birth);
     const injectedMemoryLimit = parsePositiveIntEnv('AAI_MAX_INJECTED_MEMORIES', DEFAULT_MAX_INJECTED_MEMORIES);
@@ -1737,16 +1934,14 @@ export default async function handler(req, res) {
     });
 
     // 2. Family context
-    const { data: allPersons } = await supabase.from('persons').select('id, name, date_of_birth, role');
+    const allPersons = allPersonsResult?.data || [];
     const familyContext = (allPersons || []).map(p => {
       const age = calculateAge(p.date_of_birth);
       const dob = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : 'tidak diketahui';
       return `- ${p.name} (${p.role}, ${age} tahun, lahir ${dob})`;
     }).join('\n');
 
-    const { data: relations } = await supabase
-      .from('relationships')
-      .select('person_a(name,role), person_b(name,role), relation_type');
+    const relations = relationsResult?.data || [];
     const relationContext = (relations || [])
       .map(r => {
         const personA = r.person_a;
@@ -1796,20 +1991,13 @@ export default async function handler(req, res) {
       const childPerson = (allPersons || []).find(p => p.id === childId);
       return { name: childPerson?.name || 'Anak', memories: childMemoryResults[idx]?.data || [] };
     }).filter(c => c.memories.length > 0);
+    perf.mark('memory_queries_done', {
+      active_memory_count: Array.isArray(memories) ? memories.length : 0,
+      dropped_memory_count: droppedMemories.length,
+      child_memory_groups: childMemoriesData.length
+    });
 
-    let targetAssistantMessageId = assistant_message_id || null;
-    if (!targetAssistantMessageId && edit_message_id) {
-      const { data: existingAssistant } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('session_id', session_id)
-        .eq('parent_id', edit_message_id)
-        .eq('role', 'assistant')
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      targetAssistantMessageId = existingAssistant?.id || null;
-    }
+    let targetAssistantMessageId = assistant_message_id || existingAssistantResult?.data?.id || null;
 
     // 3. Chat history
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -1817,21 +2005,12 @@ export default async function handler(req, res) {
     const forgetIntentRequested = /\blupakan\b|\bforget\b|\bhapus memori\b|\bjangan ingat\b/.test(msgLower);
     const isCompactCheckpointRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(userMessage);
 
-    const sessionState = session_id
-      ? ((await supabase
-          .from('sessions')
-          .select('*')
-          .eq('id', session_id)
-          .maybeSingle()).data || null)
-      : null;
+    const sessionState = sessionStateResult?.data || null;
 
     const persistedCheckpointSummary = String(sessionState?.compact_checkpoint_summary || '').trim();
     const checkpointMessageId = sessionState?.compact_checkpoint_message_id || null;
 
-    const chatHistoryRows = session_id
-      ? ((await supabase.from('messages').select('id, role, content')
-          .eq('session_id', session_id).order('created_at', { ascending: true })).data || [])
-      : [];
+    const chatHistoryRows = chatHistoryResult?.data || [];
 
     let historyCutoffIndex = chatHistoryRows.length;
     if (edit_message_id) {
@@ -1878,7 +2057,6 @@ export default async function handler(req, res) {
     // Dihitung dari histori sesi terbaru + pesan saat ini.
     // Tidak butuh DB extra — cukup dari recentHistory yang sudah di-load.
     const speechProfile = speechStyle.buildSpeechProfile(recentHistory, userMessage);
-    const speechStyleBlock = speechStyle.buildSpeechStyleBlock(speechProfile, person?.name || 'User');
     const emotionGuidance = chatPreview.buildRuntimeEmotionGuidance(userMessage, recentHistory);
     const relevantSelection = chatMemory.selectRelevantMemories(memories || [], userMessage, {
       limit: experimentProfile.relevantMemoryLimit,
@@ -1889,6 +2067,19 @@ export default async function handler(req, res) {
       emotionHints: emotionGuidance,
       recurrentTopics: speechProfile?.recurrentTopics || [],
       familyNames: (allPersons || []).map(p => p.name).filter(Boolean)
+    });
+    const promptRelevantSelection = buildPromptRelevantSelection(relevantSelection, {
+      maxItems: isCompactCheckpointRequest ? 8 : 12
+    });
+    const speechStyleBlock = buildCompactSpeechStylePrompt(speechProfile, person?.name || 'User');
+    promptMemoryCountForPerf = Array.isArray(promptRelevantSelection.items)
+      ? promptRelevantSelection.items.length
+      : 0;
+    perf.mark('prompt_signals_ready', {
+      selected_memories: Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0,
+      prompt_memories: promptMemoryCountForPerf,
+      recent_history_messages: recentHistory.length,
+      checkpoint_history: Boolean(persistedCheckpointSummary)
     });
 
     const cognitiveProfile = (memories || []).reduce((acc, memory) => {
@@ -1940,25 +2131,38 @@ export default async function handler(req, res) {
 
     const systemConsistencyPrompt = {
       role: 'system',
-      content: chatContext.buildConsistencyLock(person, relevantSelection)
+      content: chatContext.buildConsistencyLock(person, promptRelevantSelection)
     };
 
-    const memoryContextText = chatMemory.buildMemoryContext(relevantSelection.items || []);
+    const emotionEvidence = limitList(emotionGuidance.evidence, 4);
+    const mentionedRelations = limitList(
+      (promptRelevantSelection.relationSignals?.mentionedNames || [])
+        .concat(promptRelevantSelection.relationSignals?.signals || []),
+      4
+    );
+    const routineHints = [];
+    if (speechProfile?.timeAnomaly) routineHints.push('waktu_tidak_biasa');
+    routineHints.push(...limitList(speechProfile?.styleShift, 2));
+    if ((speechProfile?.recurrentTopics || []).length > 0) {
+      routineHints.push(`topik:${limitList(speechProfile.recurrentTopics, 4).join(',')}`);
+    }
+
+    const memoryContextText = chatMemory.buildMemoryContext(promptRelevantSelection.items || []);
     const systemMemoryContextPrompt = {
       role: 'system',
       content: [
         '[RELEVANT MEMORY]',
-        `Intent terdeteksi: ${relevantSelection.intent || 'general'}`,
-        `Lapisan intent: ${(relevantSelection.intents || []).join(', ') || '-'}`,
-        `Emotional intent: ${relevantSelection.emotionalIntent || 'netral'}`,
-        `Timing intent: ${relevantSelection.timingIntent || 'rutin'}`,
-        `Tipe prioritas: ${(relevantSelection.preferredTypes || []).join(', ') || '-'}`,
-        `Jumlah memori terpilih: ${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
+        `Intent terdeteksi: ${promptRelevantSelection.intent || 'general'}`,
+        `Lapisan intent: ${(promptRelevantSelection.intents || []).join(', ') || '-'}`,
+        `Emotional intent: ${promptRelevantSelection.emotionalIntent || 'netral'}`,
+        `Timing intent: ${promptRelevantSelection.timingIntent || 'rutin'}`,
+        `Tipe prioritas: ${(promptRelevantSelection.preferredTypes || []).join(', ') || '-'}`,
+        `Jumlah memori terpilih: ${Array.isArray(promptRelevantSelection.items) ? promptRelevantSelection.items.length : 0}/${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
         `Experiment mode: ${experimentProfile.mode || 'balanced'}`,
         memoryContextText,
         '',
         '[LAST CHAT]',
-        chatContext.buildLastChatContext(recentHistory)
+        chatContext.buildLastChatContext(recentHistory, isCompactCheckpointRequest ? 6 : 5)
       ].join('\n')
     };
 
@@ -1966,38 +2170,26 @@ export default async function handler(req, res) {
       role: 'system',
       content: [
         '[EMOTION GUIDE]',
-        `Primary emotion: ${emotionGuidance.primary_emotion || 'netral'}`,
-        `Secondary emotions: ${(emotionGuidance.secondary_emotions || []).join(', ') || '-'}`,
-        `Confidence: ${Number(emotionGuidance.confidence || 0).toFixed(2)}`,
-        `Mixed signal: ${emotionGuidance.mixed ? 'yes' : 'no'}`,
-        `Contradictory signal: ${emotionGuidance.contradiction ? 'yes' : 'no'}`,
-        `Needs caution: ${emotionGuidance.needs_caution ? 'yes' : 'no'}`,
-        `Evidence: ${(emotionGuidance.evidence || []).join(', ') || '-'}`,
-        emotionGuidance.summary,
-        'Gunakan panduan ini hanya untuk mengatur nada dan cara validasi. Jangan mengklaim emosi user sebagai fakta bila sinyalnya lemah, campuran, atau kontradiktif.'
-      ].join('\n')
+        `Primary/secondary: ${emotionGuidance.primary_emotion || 'netral'} | ${(emotionGuidance.secondary_emotions || []).join(', ') || '-'}`,
+        `Confidence: ${Number(emotionGuidance.confidence || 0).toFixed(2)} | mixed=${emotionGuidance.mixed ? 'yes' : 'no'} | caution=${emotionGuidance.needs_caution ? 'yes' : 'no'}`,
+        emotionEvidence.length > 0 ? `Evidence: ${emotionEvidence.join(', ')}` : '',
+        compactText(emotionGuidance.summary, 180),
+        'Gunakan hanya untuk mengatur nada dan validasi, bukan menyatakan emosi user sebagai fakta.'
+      ].filter(Boolean).join('\n')
     };
 
     const systemIntentSignalsPrompt = {
       role: 'system',
       content: [
         '[INTENT LAYERS]',
-        `Primary intent: ${relevantSelection.intent || 'general'}`,
-        `Intent layers: ${(relevantSelection.intents || []).join(', ') || '-'}`,
-        `Emotional intent: ${relevantSelection.emotionalIntent || 'netral'}`,
-        `Timing intent: ${relevantSelection.timingIntent || 'rutin'}`,
-        `Relation focus: ${relevantSelection.relationSignals?.hasRelationFocus ? 'yes' : 'no'}`,
-        `Mentioned relations: ${((relevantSelection.relationSignals?.mentionedNames || []).concat(relevantSelection.relationSignals?.signals || [])).join(', ') || '-'}`,
-        `Reasoning hints: ${(relevantSelection.reasoning || []).join(' | ') || '-'}`,
-        '',
-        '[ROUTINE SIGNALS]',
-        `Dominant time slot: ${speechProfile?.dominantTimeSlot || 'tidak_diketahui'}`,
-        `Current time slot: ${speechProfile?.currentTimeSlot || 'tidak_diketahui'}`,
-        `Time anomaly: ${speechProfile?.timeAnomaly ? 'yes' : 'no'}`,
-        `Style shift: ${(speechProfile?.styleShift || []).join(', ') || '-'}`,
-        `Recurrent topics: ${(speechProfile?.recurrentTopics || []).join(', ') || '-'}`,
-        'Gunakan blok ini untuk memilih fokus respons dan memori: jika ada anomali waktu, perubahan gaya, atau fokus relasi, prioritaskan memori pola, emosi, dan relasi yang paling relevan.'
-      ].join('\n')
+        `Primary/layers: ${promptRelevantSelection.intent || 'general'} | ${(promptRelevantSelection.intents || []).join(', ') || '-'}`,
+        `Emotion/time intent: ${promptRelevantSelection.emotionalIntent || 'netral'} | ${promptRelevantSelection.timingIntent || 'rutin'}`,
+        `Relation focus: ${promptRelevantSelection.relationSignals?.hasRelationFocus ? 'yes' : 'no'} | ${mentionedRelations.join(', ') || '-'}`,
+        promptRelevantSelection.reasoning?.length > 0 ? `Reasoning hints: ${promptRelevantSelection.reasoning.join(' | ')}` : '',
+        `Routine signals: dominan=${speechProfile?.dominantTimeSlot || 'tidak_diketahui'}, sekarang=${speechProfile?.currentTimeSlot || 'tidak_diketahui'}`,
+        routineHints.length > 0 ? `Style/topic signals: ${routineHints.join(' | ')}` : '',
+        'Prioritaskan memori pola, emosi, dan relasi hanya jika sinyal di atas memang mendukung.'
+      ].filter(Boolean).join('\n')
     };
 
     const cognitiveStyleContent = [
@@ -2151,7 +2343,9 @@ MENGHAPUS MEMORI:
       const { data: newSession } = await supabase
         .from('sessions').insert({ user_id: user.id, title: quickTitle }).select().single();
       currentSessionId = newSession.id;
-      generateTitle(apiKey, userMessage, currentSessionId);
+      if (chatProvider.AUTO_TITLE_ENABLED) {
+        generateTitle(apiKey, userMessage, currentSessionId);
+      }
     }
 
     // Simpan pesan user (kecuali kalau edit)
@@ -2229,6 +2423,14 @@ MENGHAPUS MEMORI:
         console.error('[Preview] Gagal simpan preview audit:', previewInsertErr.message);
       }
     }
+    currentSessionIdForPerf = currentSessionId;
+    finalUserMessageIdForPerf = finalUserMessageId;
+    perf.mark('session_bootstrap_done', {
+      session_id: currentSessionId,
+      user_message_id: finalUserMessageId,
+      new_session: !session_id,
+      preview_enabled: Boolean(previewPayload)
+    });
 
     // ── STREAMING ──
     res.setHeader('Content-Type', 'text/event-stream');
@@ -2304,8 +2506,18 @@ MENGHAPUS MEMORI:
     // ── FRIEND MEMORY INJECTION ──
     let systemFriendContextPrompt = null;
     let knownFriendsData = []; // hoisted so post-processing guard can access it
+    const promptFriendLimit = isCompactCheckpointRequest ? 2 : 3;
+    const promptFriendCount = isCompactCheckpointRequest ? 3 : 4;
     try {
-      knownFriendsData = await chatContext.fetchFriendsWithMemories(supabase, person.id, 5) || [];
+      knownFriendsData = ((await chatContext.fetchFriendsWithMemories(supabase, person.id, promptFriendLimit)) || [])
+        .slice(0, promptFriendCount)
+        .map(friend => ({
+          ...friend,
+          memories: limitList(friend.memories, promptFriendLimit).map(memory => ({
+            ...memory,
+            value: compactText(memory?.value || memory?.key || '', 90)
+          }))
+        }));
       // ALWAYS build friend context block (even if empty) so LLM knows what to reference
       const friendContextText = chatContext.buildFriendContextBlock(knownFriendsData);
       systemFriendContextPrompt = {
@@ -2326,8 +2538,8 @@ MENGHAPUS MEMORI:
     let systemDroppedMemoryPrompt = null;
     if (droppedMemories.length > 0) {
       const droppedLines = droppedMemories
-        .map(m => `- ${m.key}: ${m.value}`)
-        .slice(0, 8);
+        .slice(0, isCompactCheckpointRequest ? 4 : 5)
+        .map(m => `- ${compactText(m.key, 40)}: ${compactText(m.value, 90)}`);
       systemDroppedMemoryPrompt = {
         role: 'system',
         content: `[JEJAK MEMORI YANG PERNAH DILEPAS]\nMemori berikut pernah diminta dilupakan user. Jejak datanya masih tersimpan ringan.\nGunakan HANYA jika user tanya soal hal yang sudah dilupakan dengan sebutan seperti 'masih ingat soal X?', 'apa kau masih ingat', atau mempertanyakan hal lupa.\nSaat itu, sebutkan: "Aku masih ingat sedikit jejaknya — [data]." Jangan bawa sewaktu tidak ditanya.\n${droppedLines.join('\\n')}`
@@ -2344,11 +2556,11 @@ MENGHAPUS MEMORI:
         .flatMap(child => {
           const headerLine = `${child.name}:`;
           const memLines = (child.memories || [])
-            .slice(0, 5)
-            .map(m => `  - ${m.value || m.key}`);
+            .slice(0, isCompactCheckpointRequest ? 2 : 3)
+            .map(m => `  - ${compactText(m.value || m.key, 90)}`);
           return [headerLine, ...memLines];
         })
-        .slice(0, 25);
+        .slice(0, isCompactCheckpointRequest ? 12 : 16);
       systemChildMemoryPrompt = {
         role: 'system',
         content: `[DATA BERSAMA — CATATAN ANAK]\nData berikut dicatat salah satu orang tua dan berlaku untuk kedua orang tua. Jika ada info baru tentang anak, simpan dengan key baku.\n${childLines.join('\\n')}`
@@ -2382,9 +2594,27 @@ MENGHAPUS MEMORI:
       max_tokens: effectiveModelConfig.max_tokens,
       top_p: effectiveModelConfig.top_p
     };
+    promptCharsForPerf = estimatePromptChars(openRouterPayload.messages);
+    perf.mark('prompt_payload_ready', {
+      prompt_chars: promptCharsForPerf,
+      prompt_messages: openRouterPayload.messages.length,
+      prompt_memories: promptMemoryCountForPerf,
+      known_friend_count: knownFriendsData.length,
+      dropped_memory_count: droppedMemories.length,
+      child_memory_groups: childMemoriesData.length
+    });
 
     const providerResult = await chatProvider.callOpenRouterWithRetry({ apiKey, payload: openRouterPayload });
+    modelUsedForPerf = providerResult.modelUsed || null;
+    retryCountForPerf = providerResult.retryCount || 0;
+    fallbackUsedForPerf = Boolean(providerResult.fallbackUsed);
     if (!providerResult.ok) {
+      perf.mark('provider_error', {
+        status: providerResult.status || 0,
+        model: modelUsedForPerf || '-',
+        retry_count: retryCountForPerf,
+        fallback_used: fallbackUsedForPerf
+      });
       const errorDetail = providerResult.errorBody || 'Unknown error';
       console.error('[OpenRouter] ERROR DETAIL:', {
         status: providerResult.status,
@@ -2403,6 +2633,16 @@ MENGHAPUS MEMORI:
         lock_status: lockStatus
       })}\n\n`);
       traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'POST', 500, { error: 'provider_error', model: providerResult.modelUsed });
+      perf.log('provider_error', {
+        session_id: currentSessionId,
+        user_message_id: finalUserMessageId,
+        model: modelUsedForPerf,
+        retry_count: retryCountForPerf,
+        fallback_used: fallbackUsedForPerf,
+        prompt_chars: promptCharsForPerf,
+        prompt_memory_count: promptMemoryCountForPerf,
+        lock_status: lockStatus
+      });
       res.end();
       return;
     }
@@ -2411,12 +2651,19 @@ MENGHAPUS MEMORI:
     const modelUsed = providerResult.modelUsed;
     const retryCount = providerResult.retryCount;
     const fallbackUsed = providerResult.fallbackUsed;
+    perf.mark('provider_response_ready', {
+      status: aiResponse.status,
+      model: modelUsed,
+      retry_count: retryCount,
+      fallback_used: fallbackUsed
+    });
     console.log(`[OpenRouter] Status response: ${aiResponse.status} ${aiResponse.statusText} | model=${modelUsed} | retries=${retryCount} | fallback=${fallbackUsed}`);
 
     const reader = aiResponse.body.getReader();
     const decoder = new TextDecoder();
     let fullReply = '';
     let buffer = '';
+    let streamErrorMessage = '';
     const filterVisibleToken = createMemoryTagStreamFilter();
     const heartbeat = setInterval(() => {
       try {
@@ -2463,10 +2710,15 @@ MENGHAPUS MEMORI:
         res.flush?.();
       }
     } catch (streamErr) {
+      streamErrorMessage = streamErr.message;
       console.error("Stream error:", streamErr.message);
     } finally {
       clearInterval(heartbeat);
     }
+    perf.mark('provider_stream_done', {
+      reply_chars: fullReply.length,
+      stream_error: streamErrorMessage || undefined
+    });
 
     // Simpan AI response ke DB — LANGSUNG setelah stream selesai, SEBELUM file processing
     if (true) {
@@ -2613,6 +2865,11 @@ MENGHAPUS MEMORI:
           console.error('[Checkpoint] Gagal simpan checkpoint sesi:', checkpointErr.message);
         }
       }
+      perf.mark('assistant_persisted', {
+        assistant_message_id: aiMsgData?.id || null,
+        reply_chars: cleanReply.length,
+        checkpoint_saved: Boolean(checkpointSummaryToPersist)
+      });
 
       const pendingFileState = chatFiles.buildPendingFileReply(sourceReplyForFiles);
       let finalReplyForClient = cleanReply;
@@ -2662,6 +2919,11 @@ MENGHAPUS MEMORI:
           }
         }
       }
+      perf.mark('client_payload_ready', {
+        final_reply_chars: finalReplyForClient.length,
+        file_job_queued: Boolean(fileJobMeta),
+        inline_file_processing: shouldUseInlineFileProcessing
+      });
 
       // 2. Kirim event `done` ke client SEGERA
       res.write(`data: ${JSON.stringify({
@@ -2683,6 +2945,10 @@ MENGHAPUS MEMORI:
         lock_status: lockStatus
       })}\n\n`);
       res.flush?.();
+      perf.mark('done_event_sent', {
+        assistant_message_id: aiMsgData?.id || null,
+        preview_id: previewRecordId || null
+      });
 
       if (previewRecordId && aiMsgData?.id) {
         try {
@@ -3141,6 +3407,27 @@ MENGHAPUS MEMORI:
           }
         }
       }
+
+      perf.mark('post_stream_side_effects_done', {
+        memory_upserts: detectedMemories.length,
+        memory_forgets: detectedForgetKeys.length,
+        inline_file_processing: shouldUseInlineFileProcessing,
+        lock_status: lockStatus
+      });
+      perf.log('success', {
+        session_id: currentSessionId,
+        user_message_id: finalUserMessageId,
+        assistant_message_id: aiMsgData?.id || null,
+        model: modelUsed,
+        retry_count: retryCount,
+        fallback_used: fallbackUsed,
+        prompt_chars: promptCharsForPerf,
+        prompt_memory_count: promptMemoryCountForPerf,
+        reply_chars: finalReplyForClient.length,
+        file_job_queued: Boolean(fileJobMeta),
+        inline_file_processing: shouldUseInlineFileProcessing,
+        lock_status: lockStatus
+      });
     }
 
     traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'POST', 200, { user_id: user_id || 'unknown', session_id: currentSessionId, lock_status: lockStatus });
@@ -3148,6 +3435,16 @@ MENGHAPUS MEMORI:
 
   } catch (error) {
     console.error("=== ERROR ===", error.message);
+    perf?.log('exception', {
+      error: error.message,
+      session_id: currentSessionIdForPerf,
+      user_message_id: finalUserMessageIdForPerf,
+      model: modelUsedForPerf,
+      retry_count: retryCountForPerf,
+      fallback_used: fallbackUsedForPerf,
+      prompt_chars: promptCharsForPerf,
+      prompt_memory_count: promptMemoryCountForPerf
+    });
     if (!res.headersSent) {
       traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'POST', 500, { error: error.message, lock_status: 'locked' });
       return res.status(500).json({ error: error.message, trace_id: traceId, lock_status: 'locked' });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'aai-shell-v5';
+const CACHE_NAME = 'aai-shell-v7';
 const PRECACHE_URLS = [
   '/assets/js/app.js',
   '/manifest.webmanifest',
@@ -38,16 +38,15 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      )
-    )
-  );
-  self.clients.claim();
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter(key => key !== CACHE_NAME)
+        .map(key => caches.delete(key))
+    );
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', event => {
@@ -66,10 +65,11 @@ self.addEventListener('fetch', event => {
   if (isDocumentRequest(req, url)) {
     event.respondWith(
       fetch(req)
-        .then(response => {
+        .then(async response => {
           if (shouldCache(response)) {
             const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(req, copy);
           }
           return response;
         })
