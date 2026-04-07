@@ -2114,12 +2114,35 @@ function buildActiveBranch() {
   let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
   if (!current) current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
   if (!current) return [];
+
+  // Pre-compute descendant counts so we can prefer the deepest live branch
+  // at any fork (handles orphaned checkpoint AI responses from race conditions)
+  const childrenMap = {};
+  currentMessages.forEach(m => { if (m.parent_id) { (childrenMap[m.parent_id] = childrenMap[m.parent_id] || []).push(m); } });
+  const descCount = {};
+  function countDesc(id) {
+    if (descCount.hasOwnProperty(id)) return descCount[id];
+    const kids = childrenMap[id] || [];
+    descCount[id] = kids.reduce((s, c) => s + 1 + countDesc(c.id), 0);
+    return descCount[id];
+  }
+  currentMessages.forEach(m => countDesc(m.id));
+
   const branch = [current];
   while (true) {
     const children = currentMessages.filter(m => m.parent_id === current.id);
     if (!children.length) break;
     const selectedId = activeVersionMap[current.id];
-    current = (selectedId && children.find(c => c.id === selectedId)) || children[children.length - 1];
+    if (selectedId && children.find(c => c.id === selectedId)) {
+      current = children.find(c => c.id === selectedId);
+    } else {
+      // Prefer the child leading to the deepest chain; tiebreak: most recently created
+      current = children.reduce((best, c) => {
+        const cD = descCount[c.id] || 0, bD = descCount[best.id] || 0;
+        if (cD !== bD) return cD > bD ? c : best;
+        return new Date(c.created_at) >= new Date(best.created_at) ? c : best;
+      });
+    }
     branch.push(current);
   }
   return branch;

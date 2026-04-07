@@ -722,6 +722,7 @@ function createMemoryTagStreamFilter() {
   let buffer = '';
   let suppressingMemoryTag = false;
   let suppressingClarifyBlock = false;
+  let suppressingCheckpointBlock = false;
 
   return function filterChunk(chunk = '', flush = false) {
     if (chunk) buffer += chunk;
@@ -729,6 +730,18 @@ function createMemoryTagStreamFilter() {
     let visible = '';
 
     while (buffer.length > 0) {
+      // Handle [SESSION_CHECKPOINT]...[/SESSION_CHECKPOINT] blocks
+      if (suppressingCheckpointBlock) {
+        const endIdx = buffer.indexOf(CHECKPOINT_SUMMARY_END);
+        if (endIdx === -1) {
+          if (flush) buffer = '';
+          break;
+        }
+        buffer = buffer.slice(endIdx + CHECKPOINT_SUMMARY_END.length);
+        suppressingCheckpointBlock = false;
+        continue;
+      }
+
       // Handle [AAI_CLARIFY]...[/AAI_CLARIFY] blocks
       if (suppressingClarifyBlock) {
         const endIdx = buffer.indexOf(CLARIFY_BLOCK_END);
@@ -755,6 +768,7 @@ function createMemoryTagStreamFilter() {
 
       // Check for all block/tag starts
       const blockCandidates = [
+        { marker: CHECKPOINT_SUMMARY_START, type: 'checkpoint' },
         { marker: CLARIFY_BLOCK_START, type: 'clarify' },
         { marker: MEMORY_TAG_PREFIX, type: 'memory' },
         { marker: MEMORY_FORGET_TAG_PREFIX, type: 'forget' }
@@ -767,7 +781,9 @@ function createMemoryTagStreamFilter() {
         const selected = blockCandidates[0];
         visible += buffer.slice(0, selected.index);
         buffer = buffer.slice(selected.index + selected.marker.length);
-        if (selected.type === 'clarify') {
+        if (selected.type === 'checkpoint') {
+          suppressingCheckpointBlock = true;
+        } else if (selected.type === 'clarify') {
           suppressingClarifyBlock = true;
         } else {
           suppressingMemoryTag = true;
@@ -782,6 +798,7 @@ function createMemoryTagStreamFilter() {
       }
 
       const maxMarkerLength = Math.max(
+        CHECKPOINT_SUMMARY_START.length,
         CLARIFY_BLOCK_START.length,
         MEMORY_TAG_PREFIX.length,
         MEMORY_FORGET_TAG_PREFIX.length
@@ -2653,7 +2670,7 @@ MENGHAPUS MEMORI:
         message_id: aiMsgData?.id,
         user_message_id: finalUserMessageId,
         final_text: finalReplyForClient,
-        replace_stream_text: finalReplyForClient !== cleanReply,
+        replace_stream_text: isCompactCheckpointRequest || finalReplyForClient !== cleanReply,
         file_job: fileJobMeta,
         preview_id: previewRecordId,
         preview: clientPreviewPayload,
