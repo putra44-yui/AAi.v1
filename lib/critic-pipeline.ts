@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,23 +145,23 @@ export async function runCriticPipeline(
   input: string
 ): Promise<CriticOutput | CriticError> {
   try {
-    const pipelineTraceId = crypto.randomUUID();
+    const pipelineTraceId = randomUUID();
 
     // Stage 1: Deconstruct
-    const deconstructTrace: StageTrace = { stage: 'deconstruct', trace_id: crypto.randomUUID() };
+    const deconstructTrace: StageTrace = { stage: 'deconstruct', trace_id: randomUUID() };
     const deconstructed = stageDeconstruct(input, deconstructTrace);
 
     // Stage 2: Extract
-    const extractTrace: StageTrace = { stage: 'extract', trace_id: crypto.randomUUID() };
+    const extractTrace: StageTrace = { stage: 'extract', trace_id: randomUUID() };
     const extracted = stageExtract(deconstructed, input, extractTrace);
     extracted['pipeline_trace_id'] = pipelineTraceId;
 
     // Stage 3: Project
-    const projectTrace: StageTrace = { stage: 'project', trace_id: crypto.randomUUID() };
+    const projectTrace: StageTrace = { stage: 'project', trace_id: randomUUID() };
     const projected = stageProject(deconstructed, extracted, projectTrace);
 
     // Stage 4: Synthesize
-    const synthesizeTrace: StageTrace = { stage: 'synthesize', trace_id: crypto.randomUUID() };
+    const synthesizeTrace: StageTrace = { stage: 'synthesize', trace_id: randomUUID() };
     const synthesized = stageSynthesize(
       deconstructed,
       extracted,

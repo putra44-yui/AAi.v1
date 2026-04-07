@@ -10,7 +10,6 @@ export type LockStatus = 'locked' | 'saved' | 'draft';
 
 type MemoryRow = {
   id: string;
-  content: string;
   is_locked: boolean;
 };
 
@@ -36,16 +35,6 @@ function normalizeMemoryKey(memoryKey: string): string {
   return String(memoryKey || '').trim().toLowerCase();
 }
 
-function extractContentKey(content: string): string {
-  const raw = String(content || '').trim();
-  const separatorIndex = raw.indexOf(':');
-  if (separatorIndex === -1) {
-    return normalizeMemoryKey(raw);
-  }
-
-  return normalizeMemoryKey(raw.slice(0, separatorIndex));
-}
-
 export function formatMemoryContent(memoryKey: string, content: string): string {
   return `${normalizeMemoryKey(memoryKey)}: ${String(content || '').trim()}`;
 }
@@ -60,19 +49,17 @@ export async function saveMemoryWithLockGuard({
   const normalizedKey = normalizeMemoryKey(memoryKey);
   const normalizedContent = String(content || '').trim();
 
-  const { data: memoryRows, error: fetchError } = await supabase
+  const { data: existingMemory, error: fetchError } = await supabase
     .from('memories')
-    .select('id, content, is_locked')
+    .select('id, is_locked')
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(100);
+    .eq('key', normalizedKey)
+    .limit(1)
+    .maybeSingle();
 
   if (fetchError) {
     throw new Error(fetchError.message);
   }
-
-  const existingMemory = ((memoryRows || []) as MemoryRow[])
-    .find((row) => extractContentKey(row.content) === normalizedKey) || null;
 
   if (existingMemory?.is_locked) {
     const { data: draftRow, error: draftError } = await supabase
@@ -105,6 +92,7 @@ export async function saveMemoryWithLockGuard({
     const { data: updatedMemory, error: updateError } = await supabase
       .from('memories')
       .update({
+        key: normalizedKey,
         content: normalizedContent,
         evidence_chain: evidenceChain
       })
@@ -127,6 +115,7 @@ export async function saveMemoryWithLockGuard({
     .from('memories')
     .insert({
       user_id: userId,
+      key: normalizedKey,
       content: normalizedContent,
       evidence_chain: evidenceChain,
       is_locked: false

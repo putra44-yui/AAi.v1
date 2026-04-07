@@ -9,7 +9,9 @@ const handlers = createLegacyRouteHandlers(legacyHandler);
 
 export const GET = handlers.GET;
 export const POST = handlers.POST;
-export const PUT = handlers.PUT;
+export async function PUT(...args: Parameters<typeof handlers.PUT>): Promise<Response> {
+	return handlers.PUT(...args);
+}
 export const PATCH = handlers.PATCH;
 export const DELETE = handlers.DELETE;
 export const OPTIONS = handlers.OPTIONS;

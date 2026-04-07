@@ -29,6 +29,11 @@ function withTraceHeader(response: Response, traceId: string): Response {
 
 async function withTraceJsonBody(response: Response, traceId: string): Promise<Response> {
 	const contentType = response.headers.get('content-type') || '';
+	const isSse = contentType.includes('text/event-stream');
+	if (isSse) {
+		return withTraceHeader(response, traceId);
+	}
+
 	if (!contentType.includes('application/json')) {
 		return withTraceHeader(response, traceId);
 	}
