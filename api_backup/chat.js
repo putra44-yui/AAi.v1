@@ -15,8 +15,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const MAIN_MODEL = 'qwen/qwen3-coder:free';
-const DEFAULT_FALLBACK_MODEL = 'qwen/qwen3-coder:free';
 const MEMORY_TAG_PREFIX = '[MEMORY:';
 const MEMORY_FORGET_TAG_PREFIX = '[MEMORY_FORGET:';
 const CLARIFY_BLOCK_START = '[AAI_CLARIFY]';
@@ -26,7 +24,6 @@ const MAX_HISTORY_MESSAGES_COMPACT = 60;
 const HISTORY_SUMMARY_MAX_MESSAGES = 6;
 const HISTORY_SUMMARY_MAX_CHARS = 260;
 const DEFAULT_MAX_INJECTED_MEMORIES = 120;
-const RETRYABLE_OPENROUTER_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const CHECKPOINT_SUMMARY_START = '[SESSION_CHECKPOINT]';
 const CHECKPOINT_SUMMARY_END = '[/SESSION_CHECKPOINT]';
 const REASONING_PREVIEW_ENABLED = String(process.env.AAI_REASONING_PREVIEW_ENABLED || '').toLowerCase() === 'true';
@@ -1547,98 +1544,21 @@ function getModelConfig(personaList) {
   return configs[persona] || configs['Auto'];
 }
 
-function buildModelCandidates() {
-  const fallbackFromEnv = String(process.env.OPENROUTER_FALLBACK_MODEL || '').trim();
-  const fallbacks = uniqueList([
-    fallbackFromEnv || DEFAULT_FALLBACK_MODEL
-  ]).filter(model => model && model !== MAIN_MODEL);
-  return [MAIN_MODEL, ...fallbacks];
+function buildModelResponseMeta(modelName = '', fallbackUsed = false, retryCount = 0) {
+  const normalizedModel = String(modelName || '').trim();
+  return {
+    model_used: normalizedModel,
+    model_label: chatProvider.formatModelLabel(normalizedModel),
+    fallback_used: Boolean(fallbackUsed),
+    retry_count: Math.max(0, Number(retryCount || 0))
+  };
 }
 
-async function callOpenRouterWithRetry({ apiKey, payload }) {
-  const maxRetries = Math.max(0, parsePositiveIntEnv('OPENROUTER_MAX_RETRIES', 2));
-  const attemptTimeoutMs = parsePositiveIntEnv('OPENROUTER_ATTEMPT_TIMEOUT_MS', 45000);
-  const backoffBaseMs = parsePositiveIntEnv('OPENROUTER_BACKOFF_BASE_MS', 800);
-  const models = buildModelCandidates();
-  let totalRetryCount = 0;
-
-  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-    const modelName = models[modelIndex];
-    const fallbackUsed = modelIndex > 0;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
-
-      try {
-        const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://aai.family',
-            'X-Title': 'AAi Keluarga'
-          },
-          body: JSON.stringify({ ...payload, model: modelName }),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (aiResponse.ok) {
-          return {
-            ok: true,
-            response: aiResponse,
-            modelUsed: modelName,
-            retryCount: totalRetryCount,
-            fallbackUsed
-          };
-        }
-
-        const errorBody = await aiResponse.text();
-        const isRetryable = RETRYABLE_OPENROUTER_STATUS.has(aiResponse.status);
-        if (!isRetryable) {
-          return {
-            ok: false,
-            status: aiResponse.status,
-            statusText: aiResponse.statusText,
-            errorBody,
-            modelUsed: modelName,
-            retryCount: totalRetryCount,
-            fallbackUsed
-          };
-        }
-
-        if (attempt >= maxRetries) {
-          break;
-        }
-
-        totalRetryCount += 1;
-        const jitter = Math.floor(Math.random() * 450);
-        const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
-        await sleep(waitMs);
-      } catch (err) {
-        clearTimeout(timeoutId);
-        if (attempt >= maxRetries) {
-          break;
-        }
-
-        totalRetryCount += 1;
-        const jitter = Math.floor(Math.random() * 450);
-        const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
-        await sleep(waitMs);
-      }
-    }
-  }
-
+function mergePreviewAuditPayload(previewPayload = null, modelMeta = {}) {
+  const base = previewPayload && typeof previewPayload === 'object' ? previewPayload : {};
   return {
-    ok: false,
-    status: 503,
-    statusText: 'Service Unavailable',
-    errorBody: 'Gagal terhubung ke provider setelah retry dan fallback.',
-    modelUsed: MAIN_MODEL,
-    retryCount: totalRetryCount,
-    fallbackUsed: true
+    ...base,
+    ...modelMeta
   };
 }
 
@@ -1662,32 +1582,45 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: true });
       if (error) throw error;
 
-      let enriched = messages || [];
-      if (REASONING_PREVIEW_ENABLED) {
-        const { data: previews } = await supabase
-          .from('message_previews')
-          .select('id, user_message_id, assistant_message_id, preview_json, is_ambiguous, confidence, reason_codes, created_at')
-          .eq('session_id', session_id)
-          .order('created_at', { ascending: true });
+      const { data: previews, error: previewsError } = await supabase
+        .from('message_previews')
+        .select('id, user_message_id, assistant_message_id, preview_json, is_ambiguous, confidence, reason_codes, created_at')
+        .eq('session_id', session_id)
+        .order('created_at', { ascending: true });
+      if (previewsError) throw previewsError;
 
-        const previewByAssistant = new Map((previews || [])
-          .filter(p => p.assistant_message_id)
-          .map(p => [p.assistant_message_id, p]));
-        const previewByUser = new Map((previews || [])
-          .filter(p => p.user_message_id)
-          .map(p => [p.user_message_id, p]));
+      const previewByAssistant = new Map((previews || [])
+        .filter(p => p.assistant_message_id)
+        .map(p => [p.assistant_message_id, p]));
+      const previewByUser = new Map((previews || [])
+        .filter(p => p.user_message_id)
+        .map(p => [p.user_message_id, p]));
 
-        enriched = (messages || []).map(msg => {
-          if (msg.role !== 'assistant') return msg;
-          const linked = previewByAssistant.get(msg.id) || previewByUser.get(msg.parent_id);
-          if (!linked) return msg;
-          return {
-            ...msg,
-            preview: chatPreview.buildClientPreviewPayload(linked.preview_json),
-            preview_id: linked.id
-          };
-        });
-      }
+      const enriched = (messages || []).map(msg => {
+        if (msg.role !== 'assistant') return msg;
+        const linked = previewByAssistant.get(msg.id) || previewByUser.get(msg.parent_id);
+        if (!linked) return msg;
+
+        const previewJson = linked.preview_json && typeof linked.preview_json === 'object'
+          ? linked.preview_json
+          : {};
+        const modelMeta = buildModelResponseMeta(
+          previewJson.model_used,
+          previewJson.fallback_used,
+          previewJson.retry_count
+        );
+
+        return {
+          ...msg,
+          ...(REASONING_PREVIEW_ENABLED
+            ? { preview: chatPreview.buildClientPreviewPayload(previewJson) }
+            : {}),
+          preview_id: linked.id,
+          model_used: modelMeta.model_used,
+          model_label: String(previewJson.model_label || modelMeta.model_label || '').trim(),
+          fallback_used: modelMeta.fallback_used
+        };
+      });
 
       traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'GET', 200, { session_id, message_count: enriched.length });
       return res.status(200).json({ success: true, messages: enriched });
@@ -2403,7 +2336,7 @@ MENGHAPUS MEMORI:
     const isAmbiguousPreview = REASONING_PREVIEW_ENABLED && !!ambiguityPayload?.show_preview;
     let previewRecordId = null;
 
-    if (REASONING_PREVIEW_ENABLED && previewPayload) {
+    if (finalUserMessageId) {
       try {
         const { data: previewInsert } = await supabase
           .from('message_previews')
@@ -2414,7 +2347,7 @@ MENGHAPUS MEMORI:
             is_ambiguous: isAmbiguousPreview,
             confidence: ambiguityPayload?.confidence,
             reason_codes: ambiguityPayload?.reason_codes || [],
-            preview_json: previewPayload
+            preview_json: previewPayload && typeof previewPayload === 'object' ? previewPayload : {}
           })
           .select('id')
           .single();
@@ -2651,6 +2584,7 @@ MENGHAPUS MEMORI:
     const modelUsed = providerResult.modelUsed;
     const retryCount = providerResult.retryCount;
     const fallbackUsed = providerResult.fallbackUsed;
+    const modelResponseMeta = buildModelResponseMeta(modelUsed, fallbackUsed, retryCount);
     perf.mark('provider_response_ready', {
       status: aiResponse.status,
       model: modelUsed,
@@ -2815,6 +2749,7 @@ MENGHAPUS MEMORI:
 
       cleanReply = ensureVisibleAssistantReply(cleanReply, fullReply.trim() ? 'sanitized_empty' : 'provider_empty');
       const sourceReplyForFiles = cleanReply;
+      const persistedPreviewPayload = mergePreviewAuditPayload(previewPayload, modelResponseMeta);
 
       // 1. Simpan dulu ke DB (clean reply tanpa memory tags)
       let aiMsgData;
@@ -2938,6 +2873,7 @@ MENGHAPUS MEMORI:
         preview: clientPreviewPayload,
         persona_used: targetPersona,
         model_used: modelUsed,
+        model_label: modelResponseMeta.model_label,
         retry_count: retryCount,
         fallback_used: fallbackUsed,
         consistency_mode: !!consistency_mode,
@@ -2954,7 +2890,10 @@ MENGHAPUS MEMORI:
         try {
           await supabase
             .from('message_previews')
-            .update({ assistant_message_id: aiMsgData.id })
+            .update({
+              assistant_message_id: aiMsgData.id,
+              preview_json: persistedPreviewPayload
+            })
             .eq('id', previewRecordId);
         } catch (previewLinkErr) {
           console.error('[Preview] Gagal link preview -> assistant:', previewLinkErr.message);
@@ -3457,20 +3396,20 @@ MENGHAPUS MEMORI:
 
 async function generateTitle(apiKey, userMessage, sessionId) {
   try {
-    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({
-        model: chatProvider.MAIN_MODEL,
+    const providerResult = await chatProvider.callOpenRouterWithRetry({
+      apiKey,
+      payload: {
+        stream: false,
         messages: [{ role: "user", content: `Buatkan judul obrolan yang sangat singkat (1-3 kata saja) untuk pesan ini: "${userMessage}". Balas HANYA dengan judul, tanpa tanda kutip, tanpa titik, tanpa basa-basi.` }],
         temperature: 0.3, max_tokens: 20
-      })
+      }
     });
-    if (!r.ok) {
-      throw new Error(`Title API ${r.status} ${r.statusText}`);
+
+    if (!providerResult.ok) {
+      throw new Error(`Title API ${providerResult.status} ${providerResult.statusText}`);
     }
-    const d = await r.json();
+
+    const d = await providerResult.response.json();
     const title = d.choices?.[0]?.message?.content?.replace(/["'.]/g, '').trim();
     if (title) {
       await supabase.from('sessions').update({ title }).eq('id', sessionId);

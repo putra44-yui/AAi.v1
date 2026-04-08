@@ -118,6 +118,60 @@ Rollback cepat:
 1. Set `AAI_REASONING_PREVIEW_ENABLED=true` di Vercel/Supabase env.
 2. Redeploy.
 
+## OpenRouter Model Routing
+
+Model chat sekarang bisa diatur lewat environment variable tanpa perlu ubah kode backend setiap kali mau ganti model atau menukar urutannya.
+
+Precedence final:
+- `OPENROUTER_MODEL_ORDER`
+- `OPENROUTER_MAIN_MODEL` + `OPENROUTER_FALLBACK_MODEL`
+- default kode: `arcee-ai/trinity-large-preview:free` lalu `openai/gpt-oss-20b:free`
+
+Catatan:
+- `.env.local` tetap menjadi tempat nilai runtime lokal.
+- Contoh konfigurasi disimpan di dokumen ini agar tidak mencampur contoh dengan secret.
+- `OPENROUTER_MODEL_ORDER` menang penuh. Jika variabel ini diisi, pasangan main dan fallback diabaikan.
+
+Contoh 1: ganti primary saja
+
+```env
+OPENROUTER_MAIN_MODEL=google/gemma-3-27b-it:free
+```
+
+Hasil:
+- primary memakai `google/gemma-3-27b-it:free`
+- fallback tetap default `openai/gpt-oss-20b:free`
+
+Contoh 2: ganti fallback saja
+
+```env
+OPENROUTER_FALLBACK_MODEL=qwen/qwen3-coder:free
+```
+
+Hasil:
+- primary tetap default `arcee-ai/trinity-large-preview:free`
+- fallback memakai `qwen/qwen3-coder:free`
+
+Contoh 3: atur seluruh urutan model
+
+```env
+OPENROUTER_MODEL_ORDER=google/gemma-3-27b-it:free,openai/gpt-oss-20b:free,qwen/qwen3-coder:free
+```
+
+Hasil:
+- sistem mencoba model sesuai urutan persis dari kiri ke kanan
+- `OPENROUTER_MAIN_MODEL` dan `OPENROUTER_FALLBACK_MODEL` tidak dipakai selama `OPENROUTER_MODEL_ORDER` terisi valid
+
+Env lain yang tetap relevan:
+- `OPENROUTER_MAX_RETRIES`
+- `OPENROUTER_ATTEMPT_TIMEOUT_MS`
+- `OPENROUTER_BACKOFF_BASE_MS`
+
+Checklist deploy setelah mengganti model:
+1. Simpan perubahan env di environment deployment yang dipakai.
+2. Redeploy aplikasi.
+3. Uji satu chat normal dan satu kondisi fallback untuk memastikan model aktif dan metadata label sesuai harapan.
+
 ## Performance Considerations
 
 - Friend context fetch: ~50-100ms (new database query)

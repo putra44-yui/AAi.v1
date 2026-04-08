@@ -1,12 +1,43 @@
-const MAIN_MODEL = 'qwen/qwen3-coder:free';
+const DEFAULT_MAIN_MODEL = 'arcee-ai/trinity-large-preview:free';
+const DEFAULT_FALLBACK_MODEL = 'openai/gpt-oss-20b:free';
 const RETRYABLE_OPENROUTER_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const DEFAULT_MAX_RETRIES = 0;
-const DEFAULT_ATTEMPT_TIMEOUT_MS = 45000;
-const DEFAULT_BACKOFF_BASE_MS = 300;
+const DEFAULT_ATTEMPT_TIMEOUT_MS = 90000;
+const DEFAULT_BACKOFF_BASE_MS = 500;
 const DEFAULT_AUTO_TITLE_ENABLED = false;
+
+const MODEL_LABEL_OVERRIDES = {
+  'arcee-ai/trinity-large-preview:free': 'Trinity Large Preview',
+  'openai/gpt-oss-20b:free': 'GPT OSS 20B'
+};
 
 function uniqueList(items = []) {
   return [...new Set(items.filter(Boolean))];
+}
+
+function readModelEnv(name) {
+  return String(process.env[name] || '').trim();
+}
+
+function parseModelOrderEnv(name) {
+  const raw = readModelEnv(name);
+  if (!raw) return [];
+
+  return uniqueList(
+    raw
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+  );
+}
+
+function resolveConfiguredMainModel() {
+  const orderedModels = parseModelOrderEnv('OPENROUTER_MODEL_ORDER');
+  if (orderedModels.length > 0) {
+    return orderedModels[0];
+  }
+
+  return readModelEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MAIN_MODEL;
 }
 
 export function parsePositiveIntEnv(name, fallbackValue) {
@@ -56,6 +87,29 @@ function normalizeRateLimitErrorBody(errorBody = '', retryAfterHeader = '') {
   return body ? `${body} (${retryInfo})` : `Rate limit OpenRouter tercapai (${retryInfo}).`;
 }
 
+function titleCaseToken(token = '') {
+  if (!token) return '';
+  if (/^[a-z]{2,4}$/i.test(token)) return token.toUpperCase();
+  if (/^[0-9]+[a-z]+$/i.test(token)) return token.toUpperCase();
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+export function formatModelLabel(modelName = '') {
+  const normalized = String(modelName || '').trim();
+  if (!normalized) return '';
+
+  if (MODEL_LABEL_OVERRIDES[normalized]) {
+    return MODEL_LABEL_OVERRIDES[normalized];
+  }
+
+  const shortName = normalized.split('/').pop()?.replace(/:.*$/, '') || normalized;
+  return shortName
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map(titleCaseToken)
+    .join(' ');
+}
+
 export function getModelConfig(personaList) {
   const persona = personaList[0];
   const configs = {
@@ -69,7 +123,80 @@ export function getModelConfig(personaList) {
 }
 
 export function buildModelCandidates() {
-  return [MAIN_MODEL];
+  const orderedModels = parseModelOrderEnv('OPENROUTER_MODEL_ORDER');
+  if (orderedModels.length > 0) {
+    return orderedModels;
+  }
+
+  const mainFromEnv = readModelEnv('OPENROUTER_MAIN_MODEL');
+  const fallbackFromEnv = readModelEnv('OPENROUTER_FALLBACK_MODEL');
+
+  return uniqueList([
+    mainFromEnv || DEFAULT_MAIN_MODEL,
+    fallbackFromEnv || DEFAULT_FALLBACK_MODEL
+  ]).filter(Boolean);
+}
+
+async function attemptOpenRouterRequest({ apiKey, payload, modelName, attemptTimeoutMs, fallbackUsed }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+
+  try {
+    const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://aai.family',
+        'X-Title': 'AAi Keluarga'
+      },
+      body: JSON.stringify({ ...payload, model: modelName }),
+      signal: controller.signal
+    });
+
+    if (aiResponse.ok) {
+      return {
+        ok: true,
+        response: aiResponse,
+        modelUsed: modelName,
+        fallbackUsed,
+        retryable: false,
+        hardRateLimited: false
+      };
+    }
+
+    const errorBody = await aiResponse.text();
+    const retryAfterHeader = aiResponse.headers.get('retry-after');
+    const normalizedErrorBody = normalizeRateLimitErrorBody(errorBody, retryAfterHeader);
+    const hardRateLimited = isHardRateLimit(aiResponse.status, normalizedErrorBody);
+
+    return {
+      ok: false,
+      status: aiResponse.status,
+      statusText: aiResponse.statusText,
+      errorBody: normalizedErrorBody,
+      modelUsed: modelName,
+      fallbackUsed,
+      retryable: RETRYABLE_OPENROUTER_STATUS.has(aiResponse.status),
+      hardRateLimited
+    };
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === 'AbortError';
+    return {
+      ok: false,
+      status: isAbort ? 504 : 503,
+      statusText: isAbort ? 'Gateway Timeout' : 'Service Unavailable',
+      errorBody: isAbort
+        ? `Provider timeout setelah ${attemptTimeoutMs}ms.`
+        : (error instanceof Error ? error.message : 'Gagal menghubungi provider.'),
+      modelUsed: modelName,
+      fallbackUsed,
+      retryable: true,
+      hardRateLimited: false
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function callOpenRouterWithRetry({ apiKey, payload }) {
@@ -80,88 +207,49 @@ export async function callOpenRouterWithRetry({ apiKey, payload }) {
   let totalRetryCount = 0;
   let lastFailure = null;
 
-  for (let pass = 0; pass <= maxRetries; pass++) {
-    for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-      const modelName = models[modelIndex];
-      const fallbackUsed = modelIndex > 0;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), attemptTimeoutMs);
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+    const modelName = models[modelIndex];
+    const fallbackUsed = modelIndex > 0;
 
-      try {
-        const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://aai.family',
-            'X-Title': 'AAi Keluarga'
-          },
-          body: JSON.stringify({ ...payload, model: modelName }),
-          signal: controller.signal
-        });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const result = await attemptOpenRouterRequest({
+        apiKey,
+        payload,
+        modelName,
+        attemptTimeoutMs,
+        fallbackUsed
+      });
 
-        if (aiResponse.ok) {
-          return {
-            ok: true,
-            response: aiResponse,
-            modelUsed: modelName,
-            retryCount: totalRetryCount,
-            fallbackUsed
-          };
-        }
-
-        const errorBody = await aiResponse.text();
-        const retryAfterHeader = aiResponse.headers.get('retry-after');
-        const isRetryable = RETRYABLE_OPENROUTER_STATUS.has(aiResponse.status);
-        const normalizedErrorBody = normalizeRateLimitErrorBody(errorBody, retryAfterHeader);
-        const hardRateLimited = isHardRateLimit(aiResponse.status, normalizedErrorBody);
-        lastFailure = {
-          status: aiResponse.status,
-          statusText: aiResponse.statusText,
-          errorBody: normalizedErrorBody,
+      if (result.ok) {
+        return {
+          ok: true,
+          response: result.response,
           modelUsed: modelName,
           retryCount: totalRetryCount,
           fallbackUsed
         };
-
-        if (!isRetryable || hardRateLimited) {
-          return {
-            ok: false,
-            ...lastFailure
-          };
-        }
-
-        if (modelIndex < models.length - 1) {
-          totalRetryCount += 1;
-          continue;
-        }
-      } catch (error) {
-        const isAbort = error instanceof Error && error.name === 'AbortError';
-        lastFailure = {
-          status: isAbort ? 504 : 503,
-          statusText: isAbort ? 'Gateway Timeout' : 'Service Unavailable',
-          errorBody: isAbort
-            ? `Provider timeout setelah ${attemptTimeoutMs}ms.`
-            : (error instanceof Error ? error.message : 'Gagal menghubungi provider.'),
-          modelUsed: modelName,
-          retryCount: totalRetryCount,
-          fallbackUsed
-        };
-
-        if (modelIndex < models.length - 1) {
-          totalRetryCount += 1;
-          continue;
-        }
-      } finally {
-        clearTimeout(timeoutId);
       }
 
-      if (pass < maxRetries && modelIndex === models.length - 1) {
-        totalRetryCount += 1;
-        const jitter = Math.floor(Math.random() * 180);
-        const waitMs = backoffBaseMs * (2 ** pass) + jitter;
-        await sleep(waitMs);
-      }
+      lastFailure = {
+        status: result.status,
+        statusText: result.statusText,
+        errorBody: result.errorBody,
+        modelUsed: modelName,
+        retryCount: totalRetryCount,
+        fallbackUsed
+      };
+
+      const shouldRetryCurrentModel = attempt < maxRetries && result.retryable && !result.hardRateLimited;
+      if (!shouldRetryCurrentModel) break;
+
+      totalRetryCount += 1;
+      const jitter = Math.floor(Math.random() * 180);
+      const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
+      await sleep(waitMs);
+    }
+
+    if (modelIndex < models.length - 1) {
+      totalRetryCount += 1;
     }
   }
 
@@ -170,11 +258,14 @@ export async function callOpenRouterWithRetry({ apiKey, payload }) {
     status: lastFailure?.status || 503,
     statusText: lastFailure?.statusText || 'Service Unavailable',
     errorBody: lastFailure?.errorBody || 'Gagal terhubung ke provider setelah retry.',
-    modelUsed: lastFailure?.modelUsed || MAIN_MODEL,
+    modelUsed: lastFailure?.modelUsed || resolveConfiguredMainModel(),
     retryCount: totalRetryCount,
     fallbackUsed: Boolean(lastFailure?.fallbackUsed)
   };
 }
 
+const MAIN_MODEL = resolveConfiguredMainModel();
+
 export { MAIN_MODEL };
+export { DEFAULT_MAIN_MODEL, DEFAULT_FALLBACK_MODEL };
 export const AUTO_TITLE_ENABLED = parseBooleanEnv('AAI_ENABLE_AUTO_TITLE', DEFAULT_AUTO_TITLE_ENABLED);

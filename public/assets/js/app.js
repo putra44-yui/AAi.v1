@@ -938,6 +938,61 @@ function applyHighlight(code, lang) {
 // ══════════════════════════════════════════
 // HELPER: buat HTML bubble AI saat streaming
 // ══════════════════════════════════════════
+function titleCaseModelToken(token = '') {
+  if (!token) return '';
+  if (/^[a-z]{2,4}$/i.test(token)) return token.toUpperCase();
+  if (/^[0-9]+[a-z]+$/i.test(token)) return token.toUpperCase();
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+function normalizeAssistantModelLabel(modelName = '', explicitLabel = '') {
+  const preferredLabel = String(explicitLabel || '').trim();
+  if (preferredLabel) return preferredLabel;
+
+  const normalized = String(modelName || '').trim();
+  if (!normalized) return '';
+
+  const shortName = normalized.split('/').pop()?.replace(/:.*$/, '') || normalized;
+  return shortName
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map(titleCaseModelToken)
+    .join(' ');
+}
+
+function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') {
+  const displayLabel = normalizeAssistantModelLabel(modelName, modelLabel);
+  return `
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
+        <img src="/ayaka.gif" alt="Ayaka">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
+          AAi ${versionHtml}
+        </div>
+        <div class="assistant-model-label" style="font-size:11px;line-height:1.1;color:var(--text-muted);opacity:${displayLabel ? '0.78' : '0'};min-height:12px;">
+          ${escHtml(displayLabel)}
+        </div>
+      </div>
+    </div>`;
+}
+
+function applyAssistantModelMeta(row, modelName = '', modelLabel = '') {
+  if (!row) return;
+
+  const normalizedModel = String(modelName || '').trim();
+  const displayLabel = normalizeAssistantModelLabel(normalizedModel, modelLabel);
+  row.setAttribute('data-model', normalizedModel);
+  row.setAttribute('data-model-label', displayLabel);
+
+  const labelEl = row.querySelector('.assistant-model-label');
+  if (!labelEl) return;
+
+  labelEl.textContent = displayLabel;
+  labelEl.style.opacity = displayLabel ? '0.78' : '0';
+}
+
 function buildStreamBubbleHTML(streamId, timeStr) {
   const previewPanelHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-preview" id="preview_${streamId}" style="display:none;">
@@ -953,15 +1008,8 @@ function buildStreamBubbleHTML(streamId, timeStr) {
     : '';
 
   return `
-    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-          <img src="/ayaka.gif" alt="Ayaka">
-        </div>
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
-          AAi <span class="version-tag">V.1</span>
-        </div>
-      </div>
+    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
+      ${buildAssistantHeaderHTML('<span class="version-tag">V.1</span>')}
       ${previewPanelHtml}
       ${teaserHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
@@ -1084,17 +1132,18 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
   return { bubbleEl, actionsEl };
 }
 
-function renderStreamingContent(text) {
-  const safeText = escHtml(String(text || ''))
-    .replace(/\[SUGGEST-FRIEND:[^\]]+\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(90,180,212,.14);color:#1f5f85;font-weight:600;">Teman baru terdeteksi</span>')
-    .replace(/\[MEMORY:[^\]]+\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(42,122,158,.12);color:#1f5f85;font-weight:600;">Memori diperbarui</span>')
-    .replace(/\[MEMORY_FORGET:[^\]]+\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>')
-    .replace(/\r\n?|\n/g, '<br>');
+function ensureStreamingPlainNode(bubbleEl) {
+  if (!bubbleEl) return null;
 
-  return `<div class="streaming-plain">${safeText}</div>`;
+  let streamingNode = bubbleEl.querySelector('.streaming-plain[data-stream-live="true"]');
+  if (streamingNode) return streamingNode;
+
+  bubbleEl.textContent = '';
+  streamingNode = document.createElement('div');
+  streamingNode.className = 'streaming-plain';
+  streamingNode.setAttribute('data-stream-live', 'true');
+  bubbleEl.appendChild(streamingNode);
+  return streamingNode;
 }
 
 function safeDecodeURIComponent(input = '') {
@@ -1494,6 +1543,8 @@ async function processStream(response, streamId, onDone) {
   let firstToken = true;
   let gotDone   = false;
   let renderScheduled = false;
+  let streamingNode = null;
+  let renderedTextLength = 0;
 
   function clearPreviewAnimation() {
     if (previewTicker) {
@@ -1593,9 +1644,27 @@ async function processStream(response, streamId, onDone) {
 
   function flushStreamingRender(finalRender = false) {
     if (!bubbleEl) return;
-    bubbleEl.innerHTML = finalRender ? formatContent(fullText) : renderStreamingContent(fullText);
-    if (finalRender) bubbleEl.classList.remove('stream-cursor');
-    else bubbleEl.classList.add('stream-cursor');
+
+    if (finalRender) {
+      bubbleEl.innerHTML = formatContent(fullText);
+      bubbleEl.classList.remove('stream-cursor');
+      streamingNode = null;
+      renderedTextLength = 0;
+    } else {
+      streamingNode = streamingNode || ensureStreamingPlainNode(bubbleEl);
+      if (streamingNode) {
+        const nextChunk = fullText.slice(renderedTextLength);
+        if (nextChunk) {
+          streamingNode.textContent += nextChunk;
+          renderedTextLength = fullText.length;
+        } else if (renderedTextLength !== fullText.length) {
+          streamingNode.textContent = fullText;
+          renderedTextLength = fullText.length;
+        }
+      }
+      bubbleEl.classList.add('stream-cursor');
+    }
+
     scrollBottom();
   }
 
@@ -1659,7 +1728,8 @@ async function processStream(response, streamId, onDone) {
 
     if (parsed.token) {
       if (firstToken) {
-        bubbleEl.innerHTML = '';
+        streamingNode = null;
+        renderedTextLength = 0;
         firstToken = false;
         stopPreviewTicker('', true);
       }
@@ -1701,6 +1771,7 @@ async function processStream(response, streamId, onDone) {
       streamRow.setAttribute('data-id', parsed.message_id || '');
       streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
       streamRow.setAttribute('data-persona', parsed.persona_used || '');
+      applyAssistantModelMeta(streamRow, parsed.model_used || '', parsed.model_label || '');
       const finalPreview = REASONING_PREVIEW_ENABLED
         ? (previewData || normalizePreview(parsed.preview))
         : null;
@@ -1790,8 +1861,8 @@ async function sendMessage(text, files = []) {
   setSendBtn('stop');
   abortController = new AbortController();
 
-  // Timeout 2 menit untuk respons panjang
-  const timeoutId = setTimeout(() => abortController.abort(), 120000);
+  // Beri ruang lebih panjang agar primary model dan fallback sempat selesai.
+  const timeoutId = setTimeout(() => abortController.abort(), 240000);
 
   try {
     const res = await fetch('/api/chat', {
@@ -1840,7 +1911,10 @@ async function sendMessage(text, files = []) {
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
         preview: preview || null,
-        persona: parsed.persona_used || currentPersona
+        persona: parsed.persona_used || currentPersona,
+        model_used: parsed.model_used || '',
+        model_label: parsed.model_label || '',
+        fallback_used: !!parsed.fallback_used
       });
 
       if (isCompactRequest) {
@@ -1982,7 +2056,10 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: userMessageId, created_at: new Date().toISOString(),
         preview: preview || null,
-        persona: parsed.persona_used || frozenPersona
+        persona: parsed.persona_used || frozenPersona,
+        model_used: parsed.model_used || '',
+        model_label: parsed.model_label || '',
+        fallback_used: !!parsed.fallback_used
       });
       // Select the new version
       if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
@@ -2171,7 +2248,10 @@ async function sendMessageBranched(text, parentId = null) {
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: parsed.user_message_id, created_at: new Date().toISOString(),
         preview: preview || null,
-        persona: parsed.persona_used || currentPersona
+        persona: parsed.persona_used || currentPersona,
+        model_used: parsed.model_used || '',
+        model_label: parsed.model_label || '',
+        fallback_used: !!parsed.fallback_used
       });
       if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
     });
@@ -2416,7 +2496,12 @@ function renderMessageTree() {
       const siblings = currentMessages.filter(s => s.parent_id === message.parent_id && s.role === message.role);
       const currentIndex = siblings.findIndex(s => s.id === message.id);
       const extra = message.role === 'assistant'
-        ? { preview: message.preview || null, persona: message.persona || '' }
+        ? {
+            preview: message.preview || null,
+            persona: message.persona || '',
+            model: message.model_used || '',
+            modelLabel: message.model_label || ''
+          }
         : null;
       appendMessage(message.role, message.content, message.created_at, null, message.id, {
         total: siblings.length,
@@ -2452,6 +2537,8 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
 
   if (role === 'assistant') {
     const previewBlock = extra?.preview ? buildPreviewPanelHTML(extra.preview) : '';
+    const modelName = String(extra?.model || '').trim();
+    const modelLabel = normalizeAssistantModelLabel(modelName, extra?.modelLabel || '');
 
     let sourcesHtml = '';
     if (metadata?.sources?.length) {
@@ -2478,13 +2565,8 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
     html = `
-    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}">
-      <div style="display:flex;align-items:center;gap:10px;">
-        <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-          <img src="/ayaka.gif" alt="Ayaka">
-        </div>
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;"> ${versionHtml}</div>
-      </div>
+    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
+      ${buildAssistantHeaderHTML(versionHtml, modelName, modelLabel)}
       ${previewBlock}
       <div class="bubble">${formatContent(content)}</div>
       ${sourcesHtml}
