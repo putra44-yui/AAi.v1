@@ -1,4 +1,4 @@
-const DEFAULT_MAIN_MODEL = 'arcee-ai/trinity-large-preview:free';
+const DEFAULT_MAIN_MODEL = 'qwen/qwen3.6-plus';
 const DEFAULT_FALLBACK_MODEL = 'openai/gpt-oss-20b:free';
 const RETRYABLE_OPENROUTER_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const DEFAULT_MAX_RETRIES = 0;
@@ -7,7 +7,7 @@ const DEFAULT_BACKOFF_BASE_MS = 500;
 const DEFAULT_AUTO_TITLE_ENABLED = false;
 
 const MODEL_LABEL_OVERRIDES = {
-  'arcee-ai/trinity-large-preview:free': 'Trinity Large Preview',
+  'qwen/qwen3.6-plus': 'qwen3.6 Plus',
   'openai/gpt-oss-20b:free': 'GPT OSS 20B'
 };
 
@@ -111,7 +111,7 @@ export function getModelConfig(personaList) {
     Coding: { temperature: 0.0, max_tokens: 52000, top_p: 0.85 },
     'Kritikus Brutal': { temperature: 0.3, max_tokens: 3000, top_p: 0.85 },
     Santai: { temperature: 0.8, max_tokens: 1500, top_p: 0.95 },
-    Rosalia: { temperature: 0.95, max_tokens: 1000, top_p: 0.95 },
+    Rosalia: { temperature: 0.95, max_tokens: 1500, top_p: 0.95 },
     Auto: { temperature: 0.7, max_tokens: 3000, top_p: 0.9 }
   };
   return configs[persona] || configs.Auto;
