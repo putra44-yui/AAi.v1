@@ -1545,9 +1545,25 @@ async function processStream(response, streamId, onDone) {
   let renderScheduled = false;
   let streamingNode = null;
   let renderedTextLength = 0;
+  let renderTimer = null;
+  let renderFrame = null;
+  let lastRenderAt = 0;
+  const STREAM_RENDER_INTERVAL_MS = 34;
   let streamScrollFrame = null;
   let lastStreamScrollAt = 0;
   const STREAM_SCROLL_INTERVAL_MS = 90;
+
+  function clearStreamingRenderSchedule() {
+    if (renderTimer) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    if (renderFrame) {
+      cancelAnimationFrame(renderFrame);
+      renderFrame = null;
+    }
+    renderScheduled = false;
+  }
 
   function scheduleStreamScroll(force = false) {
     if (force) {
@@ -1671,6 +1687,7 @@ async function processStream(response, streamId, onDone) {
     if (!bubbleEl) return;
 
     if (finalRender) {
+      clearStreamingRenderSchedule();
       bubbleEl.innerHTML = formatContent(fullText);
       bubbleEl.classList.remove('stream-cursor');
       streamingNode = null;
@@ -1695,11 +1712,32 @@ async function processStream(response, streamId, onDone) {
 
   function scheduleStreamingRender() {
     if (renderScheduled) return;
-    renderScheduled = true;
-    requestAnimationFrame(() => {
+
+    const runRender = () => {
       renderScheduled = false;
+      lastRenderAt = Date.now();
       if (!gotDone) flushStreamingRender(false);
-    });
+    };
+
+    renderScheduled = true;
+    const elapsed = Date.now() - lastRenderAt;
+    const waitMs = Math.max(0, STREAM_RENDER_INTERVAL_MS - elapsed);
+
+    if (waitMs === 0) {
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = null;
+        runRender();
+      });
+      return;
+    }
+
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = null;
+        runRender();
+      });
+    }, waitMs);
   }
 
   function processLine(line) {

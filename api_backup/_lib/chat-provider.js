@@ -32,11 +32,6 @@ function parseModelOrderEnv(name) {
 }
 
 function resolveConfiguredMainModel() {
-  const orderedModels = parseModelOrderEnv('OPENROUTER_MODEL_ORDER');
-  if (orderedModels.length > 0) {
-    return orderedModels[0];
-  }
-
   return readModelEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MAIN_MODEL;
 }
 
@@ -123,18 +118,7 @@ export function getModelConfig(personaList) {
 }
 
 export function buildModelCandidates() {
-  const orderedModels = parseModelOrderEnv('OPENROUTER_MODEL_ORDER');
-  if (orderedModels.length > 0) {
-    return orderedModels;
-  }
-
-  const mainFromEnv = readModelEnv('OPENROUTER_MAIN_MODEL');
-  const fallbackFromEnv = readModelEnv('OPENROUTER_FALLBACK_MODEL');
-
-  return uniqueList([
-    mainFromEnv || DEFAULT_MAIN_MODEL,
-    fallbackFromEnv || DEFAULT_FALLBACK_MODEL
-  ]).filter(Boolean);
+  return [resolveConfiguredMainModel()].filter(Boolean);
 }
 
 async function attemptOpenRouterRequest({ apiKey, payload, modelName, attemptTimeoutMs, fallbackUsed }) {
@@ -203,54 +187,45 @@ export async function callOpenRouterWithRetry({ apiKey, payload }) {
   const maxRetries = Math.max(0, parsePositiveIntEnv('OPENROUTER_MAX_RETRIES', DEFAULT_MAX_RETRIES));
   const attemptTimeoutMs = parsePositiveIntEnv('OPENROUTER_ATTEMPT_TIMEOUT_MS', DEFAULT_ATTEMPT_TIMEOUT_MS);
   const backoffBaseMs = parsePositiveIntEnv('OPENROUTER_BACKOFF_BASE_MS', DEFAULT_BACKOFF_BASE_MS);
-  const models = buildModelCandidates();
+  const modelName = resolveConfiguredMainModel();
   let totalRetryCount = 0;
   let lastFailure = null;
 
-  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-    const modelName = models[modelIndex];
-    const fallbackUsed = modelIndex > 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const result = await attemptOpenRouterRequest({
+      apiKey,
+      payload,
+      modelName,
+      attemptTimeoutMs,
+      fallbackUsed: false
+    });
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const result = await attemptOpenRouterRequest({
-        apiKey,
-        payload,
-        modelName,
-        attemptTimeoutMs,
-        fallbackUsed
-      });
-
-      if (result.ok) {
-        return {
-          ok: true,
-          response: result.response,
-          modelUsed: modelName,
-          retryCount: totalRetryCount,
-          fallbackUsed
-        };
-      }
-
-      lastFailure = {
-        status: result.status,
-        statusText: result.statusText,
-        errorBody: result.errorBody,
+    if (result.ok) {
+      return {
+        ok: true,
+        response: result.response,
         modelUsed: modelName,
         retryCount: totalRetryCount,
-        fallbackUsed
+        fallbackUsed: false
       };
-
-      const shouldRetryCurrentModel = attempt < maxRetries && result.retryable && !result.hardRateLimited;
-      if (!shouldRetryCurrentModel) break;
-
-      totalRetryCount += 1;
-      const jitter = Math.floor(Math.random() * 180);
-      const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
-      await sleep(waitMs);
     }
 
-    if (modelIndex < models.length - 1) {
-      totalRetryCount += 1;
-    }
+    lastFailure = {
+      status: result.status,
+      statusText: result.statusText,
+      errorBody: result.errorBody,
+      modelUsed: modelName,
+      retryCount: totalRetryCount,
+      fallbackUsed: false
+    };
+
+    const shouldRetryCurrentModel = attempt < maxRetries && result.retryable && !result.hardRateLimited;
+    if (!shouldRetryCurrentModel) break;
+
+    totalRetryCount += 1;
+    const jitter = Math.floor(Math.random() * 180);
+    const waitMs = backoffBaseMs * (2 ** attempt) + jitter;
+    await sleep(waitMs);
   }
 
   return {
@@ -260,7 +235,7 @@ export async function callOpenRouterWithRetry({ apiKey, payload }) {
     errorBody: lastFailure?.errorBody || 'Gagal terhubung ke provider setelah retry.',
     modelUsed: lastFailure?.modelUsed || resolveConfiguredMainModel(),
     retryCount: totalRetryCount,
-    fallbackUsed: Boolean(lastFailure?.fallbackUsed)
+    fallbackUsed: false
   };
 }
 
