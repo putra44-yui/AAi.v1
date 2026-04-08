@@ -1937,6 +1937,10 @@ export default async function handler(req, res) {
     const msgLower = userMessage.toLowerCase();
     const forgetIntentRequested = /\blupakan\b|\bforget\b|\bhapus memori\b|\bjangan ingat\b/.test(msgLower);
     const isCompactCheckpointRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(userMessage);
+    const isDirectShortQuestion = userMessage.length <= 90
+      && /\?$/.test(userMessage)
+      && !/\n/.test(userMessage)
+      && !(Array.isArray(files) && files.length > 0);
 
     const sessionState = sessionStateResult?.data || null;
 
@@ -2002,7 +2006,7 @@ export default async function handler(req, res) {
       familyNames: (allPersons || []).map(p => p.name).filter(Boolean)
     });
     const promptRelevantSelection = buildPromptRelevantSelection(relevantSelection, {
-      maxItems: isCompactCheckpointRequest ? 8 : 12
+      maxItems: isCompactCheckpointRequest ? 8 : (isDirectShortQuestion ? 6 : 12)
     });
     const speechStyleBlock = buildCompactSpeechStylePrompt(speechProfile, person?.name || 'User');
     promptMemoryCountForPerf = Array.isArray(promptRelevantSelection.items)
@@ -2092,6 +2096,7 @@ export default async function handler(req, res) {
         `Tipe prioritas: ${(promptRelevantSelection.preferredTypes || []).join(', ') || '-'}`,
         `Jumlah memori terpilih: ${Array.isArray(promptRelevantSelection.items) ? promptRelevantSelection.items.length : 0}/${Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0}`,
         `Experiment mode: ${experimentProfile.mode || 'balanced'}`,
+        'Gunakan memori hanya jika relevan langsung dengan pertanyaan user. Jika tidak relevan, abaikan blok ini.',
         memoryContextText,
         '',
         '[LAST CHAT]',
@@ -2150,6 +2155,10 @@ export default async function handler(req, res) {
       role: 'system',
       content: [
         'Konteks runtime (WAJIB jadi rujukan awal):',
+        `Pertanyaan singkat langsung: ${isDirectShortQuestion ? 'ya' : 'tidak'}`,
+        isDirectShortQuestion
+          ? 'Jika ya, berikan jawaban inti langsung tanpa pembuka memori, lalu tambahan konteks jika memang diperlukan.'
+          : 'Jika tidak, tetap prioritaskan menjawab inti pertanyaan sebelum konteks tambahan.',
         '[USER MESSAGE]',
         userMessage || '-',
         ...(fileContext ? ['', '[LAMPIRAN FILE]', fileContext] : [])
@@ -2173,6 +2182,8 @@ ${combinedSystem}
 ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji.
 - Default jawaban: ringkas, langsung ke inti, dan mudah dibaca.
+- WAJIB jawab inti pertanyaan user pada kalimat pertama.
+- Untuk pertanyaan faktual/langsung, JANGAN mulai jawaban dengan "aku ingat..." atau ringkasan memori kecuali user memang menanyakannya.
 - Hindari format list bernomor (1, 2, 3) kecuali user memang meminta format langkah/urutan.
 - Untuk jawaban umum, utamakan paragraf pendek atau bullet sederhana tanpa nomor.
 - Kamu adalah AAi, namamu AAi, panggil dirimu AAi, kamu di rancang oleh teguh dengan berbagai hal, terutama yang berhubungan dengan teknologi, pemrograman, dan kehidupan sehari-hari.
@@ -2506,7 +2517,7 @@ MENGHAPUS MEMORI:
         systemPrompt,
         systemIdentityPrompt,
         systemConsistencyPrompt,
-        systemMemoryContextPrompt,
+        ...(isDirectShortQuestion ? [] : [systemMemoryContextPrompt]),
         ...(systemFriendContextPrompt ? [systemFriendContextPrompt] : []),
         systemEmotionGuidancePrompt,
         systemIntentSignalsPrompt,

@@ -1545,6 +1545,31 @@ async function processStream(response, streamId, onDone) {
   let renderScheduled = false;
   let streamingNode = null;
   let renderedTextLength = 0;
+  let streamScrollFrame = null;
+  let lastStreamScrollAt = 0;
+  const STREAM_SCROLL_INTERVAL_MS = 90;
+
+  function scheduleStreamScroll(force = false) {
+    if (force) {
+      if (streamScrollFrame) {
+        cancelAnimationFrame(streamScrollFrame);
+        streamScrollFrame = null;
+      }
+      lastStreamScrollAt = 0;
+      scrollBottom(true);
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastStreamScrollAt < STREAM_SCROLL_INTERVAL_MS) return;
+    if (streamScrollFrame) return;
+
+    streamScrollFrame = requestAnimationFrame(() => {
+      streamScrollFrame = null;
+      lastStreamScrollAt = Date.now();
+      scrollBottom();
+    });
+  }
 
   function clearPreviewAnimation() {
     if (previewTicker) {
@@ -1665,7 +1690,7 @@ async function processStream(response, streamId, onDone) {
       bubbleEl.classList.add('stream-cursor');
     }
 
-    scrollBottom();
+    scheduleStreamScroll(finalRender);
   }
 
   function scheduleStreamingRender() {
