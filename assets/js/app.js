@@ -2796,17 +2796,23 @@ function formatContent(text) {
   let preppedText = String(text || '')
     .replace(/\[SUGGEST-FRIEND:[\s\S]*?\]/gi,
       '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(90,180,212,.14);color:#1f5f85;font-weight:600;">Teman baru terdeteksi</span>')
-    .replace(/\[MEMORY:[\s\S]*?\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(42,122,158,.12);color:#1f5f85;font-weight:600;">Memori diperbarui</span>')
-    .replace(/\[MEMORY_FORGET:[\s\S]*?\]/gi,
-      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(231,76,60,.10);color:#b23b2f;font-weight:600;">Memori dilupakan</span>');
+    .replace(/\[MEMORY(?::[\s\S]*?)?\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(46,125,50,.14);color:#2e7d32;font-weight:700;">&lt;memory&gt;</span>')
+    .replace(/\[MEMORY_FORGET(?::[\s\S]*?)?\]/gi,
+      '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(46,125,50,.14);color:#2e7d32;font-weight:700;">&lt;memory&gt;</span>')
+    .replace(/\[type=pattern;category=[^\]]*;key=[^\]]*;value=[^\]]*\]/gi, '');
 
   let html = marked.parse(preppedText);
   html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi,
     `<div class="source-card">🌐 <a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2a7a9e">$1</a></div>`);
 
   if (typeof DOMPurify === 'undefined') {
-    return `<div class="streaming-plain">${escHtml(text).replace(/\n/g, '<br>')}</div>`;
+    const fallbackText = String(text || '')
+      .replace(/\[SUGGEST-FRIEND:[\s\S]*?\]/gi, 'Teman baru terdeteksi')
+      .replace(/\[MEMORY(?::[\s\S]*?)?\]/gi, '<memory>')
+      .replace(/\[MEMORY_FORGET(?::[\s\S]*?)?\]/gi, '<memory>')
+      .replace(/\[type=pattern;category=[^\]]*;key=[^\]]*;value=[^\]]*\]/gi, '');
+    return `<div class="streaming-plain">${escHtml(fallbackText).replace(/\n/g, '<br>')}</div>`;
   }
 
   return DOMPurify.sanitize(html, {
