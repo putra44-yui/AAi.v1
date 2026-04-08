@@ -12,10 +12,22 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { session_id } = req.query;
+  const { session_id, user_id } = req.query;
   if (!session_id) return res.status(400).json({ error: 'session_id wajib' });
+  if (!user_id) return res.status(400).json({ error: 'user_id wajib' });
 
   try {
+    // Verifikasi kepemilikan: pastikan session ini milik user yang meminta
+    const { data: sessionRow, error: sessionError } = await supabase
+      .from('sessions')
+      .select('id')
+      .eq('id', session_id)
+      .eq('user_id', user_id)
+      .maybeSingle();
+
+    if (sessionError) throw sessionError;
+    if (!sessionRow) return res.status(403).json({ error: 'Akses ditolak' });
+
     const { data: messages, error } = await supabase
       .from('messages')
       .select('id, role, content, parent_id, created_at')

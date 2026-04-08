@@ -2378,7 +2378,7 @@ async function loadSession(id, options = {}) {
       <p style="margin-top:12px;">Memuat percakapan...</p>
     </div>`;
   try {
-    const res = await fetch(`/api/chat?session_id=${normalizedId}`);
+    const res = await fetch(`/api/chat?session_id=${normalizedId}&user_id=${encodeURIComponent(currentUser.id)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.success && Array.isArray(data.messages)) {

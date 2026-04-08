@@ -1569,12 +1569,29 @@ export default async function handler(req, res) {
 
   // ── GET: Load riwayat sesi ──
   if (req.method === 'GET') {
-    const { session_id } = req.query;
+    const { session_id, user_id } = req.query;
     if (!session_id) {
       traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'GET', 400, { reason: 'missing_session_id' });
       return res.status(400).json({ error: 'session_id wajib' });
     }
+    if (!user_id) {
+      traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'GET', 400, { reason: 'missing_user_id' });
+      return res.status(400).json({ error: 'user_id wajib' });
+    }
     try {
+      // Verifikasi kepemilikan: session harus milik user yang meminta
+      const { data: sessionRow, error: sessionError } = await supabase
+        .from('sessions')
+        .select('id')
+        .eq('id', session_id)
+        .eq('user_id', user_id)
+        .maybeSingle();
+      if (sessionError) throw sessionError;
+      if (!sessionRow) {
+        traceGuard.logAuditTrail(supabase, traceId, '/api/chat', 'GET', 403, { reason: 'session_not_owned', session_id, user_id });
+        return res.status(403).json({ error: 'Akses ditolak' });
+      }
+
       const { data: messages, error } = await supabase
         .from('messages')
         .select('id, role, content, parent_id, created_at')
