@@ -3,10 +3,10 @@
   "appName": "AAi",
   "webDir": "www",
   "server": {
-    "url": "https://a-ai-rust.vercel.app",
+    "url": "https://a-ai-putrat545-6887s-projects.vercel.app",
     "cleartext": false,
     "allowNavigation": [
-      "a-ai-rust.vercel.app"
+      "a-ai-putrat545-6887s-projects.vercel.app"
     ]
   }
 }
