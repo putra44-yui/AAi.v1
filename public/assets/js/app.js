@@ -62,6 +62,11 @@ function buildSessionFallbackTitle(rawTitle = '') {
   return normalized.length > 42 ? `${normalized.slice(0, 39).trim()}...` : normalized;
 }
 
+function isProvisionalSessionTitle(rawTitle = '') {
+  const normalized = String(rawTitle || '').replace(/\s+/g, ' ').trim();
+  return !normalized || normalized === 'Memuat sesi...' || normalized === 'Obrolan baru';
+}
+
 function buildSessionTitleFromMessages(messages = []) {
   const firstUserMessage = messages.find(message => message.role === 'user' && String(message.content || '').trim());
   return buildSessionFallbackTitle(firstUserMessage?.content || '');
@@ -122,6 +127,8 @@ function persistCurrentSession(sessionId, {
   } else if (existing) {
     currentSessionMeta = existing;
   }
+
+  document.getElementById('topbarTitle').textContent = currentSessionMeta?.title || 'AAi';
 
   if (refreshSidebar) renderSidebar();
   return true;
@@ -1523,18 +1530,19 @@ async function processStream(response, streamId, onDone) {
   async function syncSessionFromStream(parsed) {
     if (!parsed?.session_id) return;
     streamSessionId = parsed.session_id;
-    const isKnownSession = sessions.some(item => item.id === parsed.session_id);
+    const knownSession = sessions.find(item => item.id === parsed.session_id) || null;
+    const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
     const synced = persistCurrentSession(parsed.session_id, {
-      title: isKnownSession ? null : buildSessionFallbackTitle(getLastUserPromptText()),
-      makeFirst: !isKnownSession,
-      refreshSidebar: !isKnownSession
+      title: shouldRefreshTitle ? buildSessionFallbackTitle(getLastUserPromptText()) : null,
+      makeFirst: !knownSession,
+      refreshSidebar: shouldRefreshTitle || !knownSession
     });
 
     if (synced || currentSessionId === parsed.session_id) {
       sessionSynced = true;
     }
 
-    if (!isKnownSession) {
+    if (!knownSession) {
       void ensureSessionVisibleInSidebar(parsed.session_id);
     }
   }
@@ -1954,11 +1962,12 @@ async function sendMessage(text, files = []) {
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
       if (resolvedSessionId) {
-        const isKnownSession = sessions.some(session => session.id === resolvedSessionId);
+        const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
+        const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
         persistCurrentSession(resolvedSessionId, {
-          title: isKnownSession ? null : buildSessionFallbackTitle(text),
-          makeFirst: !isKnownSession,
-          refreshSidebar: !isKnownSession
+          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
+          makeFirst: !knownSession,
+          refreshSidebar: shouldRefreshTitle || !knownSession
         });
         void ensureSessionVisibleInSidebar(resolvedSessionId);
       }
@@ -2105,11 +2114,12 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || effectiveSessionId || currentSessionId;
       if (resolvedSessionId) {
-        const isKnownSession = sessions.some(session => session.id === resolvedSessionId);
+        const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
+        const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
         persistCurrentSession(resolvedSessionId, {
-          title: isKnownSession ? null : buildSessionFallbackTitle(text),
-          makeFirst: !isKnownSession,
-          refreshSidebar: !isKnownSession
+          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
+          makeFirst: !knownSession,
+          refreshSidebar: shouldRefreshTitle || !knownSession
         });
         void ensureSessionVisibleInSidebar(resolvedSessionId);
       }
@@ -2378,10 +2388,18 @@ async function loadSession(id, options = {}) {
       <p style="margin-top:12px;">Memuat percakapan...</p>
     </div>`;
   try {
-    const res = await fetch(`/api/chat?session_id=${normalizedId}&user_id=${encodeURIComponent(currentUser.id)}`);
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: normalizedId,
+        user_id: currentUser.id,
+        action: 'load_session'
+      })
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (data.success && Array.isArray(data.messages)) {
+    if (Array.isArray(data.messages) && (!data.status || data.status === 'active')) {
       currentMessages = data.messages;
       const syncedSession = upsertSessionSnapshot({
         ...(session || {}),
@@ -2542,11 +2560,27 @@ function switchVersion(id) {
   renderMessageTree(); scrollBottom();
 }
 
+function renderEmptySessionState() {
+  const area = document.getElementById('chatArea');
+  area.innerHTML = `
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:40px;color:var(--text-muted);">
+      <div style="font-size:40px;line-height:1;">💬</div>
+      <h3 style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--text);">Sesi ini masih kosong</h3>
+      <p style="max-width:320px;font-size:15px;line-height:1.6;">Kirim pesan pertama untuk mulai percakapan di sesi ini.</p>
+    </div>`;
+}
+
 function renderMessageTree() {
   const area   = document.getElementById('chatArea');
   const branch = buildActiveBranch();
-  if (!branch.length) { logDebug('Branch kosong, skip render', '#e67e22'); return; }
   const renderJob = ++activeRenderJob;
+  if (!branch.length) {
+    suppressAutoScroll = false;
+    renderEmptySessionState();
+    scheduleStickyCodeHeadersUpdate();
+    logDebug('Branch kosong, render state sesi kosong', '#e67e22');
+    return;
+  }
   area.innerHTML = '';
   suppressAutoScroll = true;
   const renderChunkSize = isMobileViewport() ? 8 : 18;
