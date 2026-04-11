@@ -36,6 +36,8 @@ const CONTEXT_FALLBACK_HISTORY_COUNT = 4;
 const CONTEXT_FALLBACK_MEMORY_LIMIT = 6;
 const DEFAULT_ACCOUNT_OWNER_NAME = 'Teguh Putra';
 const DEFAULT_ACCOUNT_OWNER_USERNAME = 'teguh';
+const TECHNICAL_CONTEXT_REGEX = /\b(kode|coding|bug|function|html|css|javascript|js|python|sql|error|fix|api|backend|frontend|react|next|node|database|query|deploy|git|loop|array|object|fetch|async|await|import|export|class|component|hook|state|props|syntax|compile|excel|rumus|build|install|npm|yarn|vercel|server|endpoint|route|request|response|json)\b/i;
+const FAMILY_TOPIC_ALIAS_REGEX = /\b(istri(?:ku|\s+saya)?|suami(?:ku|\s+saya)?|ayah(?:ku|\s+saya)?|ibu(?:ku|\s+saya)?|mama(?:ku|\s+saya)?|papa(?:ku|\s+saya)?|abi(?:ku)?|ummi(?:ku)?|bunda(?:ku|\s+saya)?|anak(?:ku|\s+saya)?|kakak(?:ku|\s+saya)?|adik(?:ku|\s+saya)?)\b/i;
 
 const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
 const REASONING_STREAMING_TITLE = 'AAI sedang berpikir';
@@ -80,6 +82,41 @@ function estimatePromptChars(messages = []) {
   return (Array.isArray(messages) ? messages : []).reduce((total, message) => {
     return total + String(message?.content || '').length;
   }, 0);
+}
+
+function looksTechnicalMessage(input = '') {
+  return TECHNICAL_CONTEXT_REGEX.test(String(input || ''));
+}
+
+function shouldTrimTechnicalHistoryForFamilyQuery({
+  userMessage = '',
+  recentHistory = [],
+  familyMemoryTarget = null,
+  familyQueryContext = {}
+} = {}) {
+  if (!familyMemoryTarget?.id) return false;
+  if (looksTechnicalMessage(userMessage)) return false;
+
+  const normalizedUserMessage = chatMemory.normalizeMemoryText(userMessage || '');
+  if (!normalizedUserMessage) return false;
+
+  const familyHints = uniqueList([
+    familyMemoryTarget?.name,
+    familyQueryContext?.subjectInfo?.subject,
+    familyQueryContext?.subjectInfo?.relation,
+    ...(familyQueryContext?.ownerFocusContext?.matchedAliases || [])
+  ].map(part => chatMemory.normalizeMemoryText(part)).filter(Boolean));
+  const strongFamilyFocus = FAMILY_TOPIC_ALIAS_REGEX.test(userMessage)
+    || familyHints.some(hint => hint && normalizedUserMessage.includes(hint));
+  if (!strongFamilyFocus) return false;
+
+  const filteredHistory = (Array.isArray(recentHistory) ? recentHistory : [])
+    .filter(row => String(row?.content || '').trim());
+  if (filteredHistory.length < 2) return false;
+
+  const technicalHits = filteredHistory.filter(row => looksTechnicalMessage(row?.content || '')).length;
+  const technicalRatio = technicalHits / filteredHistory.length;
+  return String(userMessage || '').trim().length <= 120 && technicalHits >= 2 && technicalRatio >= 0.5;
 }
 
 /**
@@ -219,23 +256,23 @@ function buildFamilyResolverEntries({ allPersons = [], currentPerson = null, own
       const aliases = [];
 
       if (role === 'ayah') {
-        aliases.push('ayah', 'ayahku', 'abi', 'abiku', 'bapak', 'bapakku', 'papa', 'papaku');
+        aliases.push('ayah', 'ayahku', 'ayah saya', 'abi', 'abiku', 'bapak', 'bapakku', 'bapak saya', 'papa', 'papaku', 'papa saya');
       }
 
       if (role === 'ibu') {
-        aliases.push('ibu', 'ibuku', 'ummi', 'ummiku', 'mama', 'mamaku', 'bunda', 'bundaku');
+        aliases.push('ibu', 'ibuku', 'ibu saya', 'ummi', 'ummiku', 'mama', 'mamaku', 'mama saya', 'bunda', 'bundaku', 'bunda saya');
       }
 
       if (role === 'anak' && childCount === 1) {
-        aliases.push('anak', 'anakku', 'anaknya');
+        aliases.push('anak', 'anakku', 'anaknya', 'anak saya');
       }
 
       if (currentRole === 'ayah' && role === 'ibu') {
-        aliases.push('istri', 'istriku');
+        aliases.push('istri', 'istriku', 'istri saya');
       }
 
       if (currentRole === 'ibu' && role === 'ayah') {
-        aliases.push('suami', 'suamiku');
+        aliases.push('suami', 'suamiku', 'suami saya');
       }
 
       if (ownerPerson?.id && personRow.id === ownerPerson.id) {
@@ -2480,6 +2517,21 @@ export default async function handler(req, res) {
     let promptRecentHistory = recentHistory;
     let promptRelevantMaxItems = isCompactCheckpointRequest ? 8 : (isDirectShortQuestion ? 6 : 12);
     let familyPromptMaxItems = shouldUseFamilyMemoryPool ? 6 : 0;
+
+    if (shouldTrimTechnicalHistoryForFamilyQuery({
+      userMessage,
+      recentHistory,
+      familyMemoryTarget,
+      familyQueryContext
+    })) {
+      promptHistorySummary = '';
+      promptRecentHistory = [];
+      perf.mark('family_topic_history_trimmed', {
+        trimmed_recent_history_count: recentHistory.length,
+        target_person_id: familyMemoryTarget?.id || null,
+        target_name: familyMemoryTarget?.name || null
+      });
+    }
 
     const estimateSelectionTokens = (memoryItems = []) => estimateTokens((memoryItems || []).map(memory => {
       const metadata = chatMemory.extractStructuredMemoryMetadata(memory || {});

@@ -752,6 +752,13 @@ async function verifyFamilyAliasSubjectResolution() {
   });
   assert.equal(spouseAliasSubject?.subject, 'Rosalia', 'Alias istri harus dipetakan ke pasangan canonical');
 
+  const spouseSayaAliasSubject = chatMemory.resolveSubject('Bagaimana istri saya sekarang?', [], {
+    currentPersonName: 'Teguh Putra',
+    familyMembers,
+    familyNames: familyMembers.map(member => member.name)
+  });
+  assert.equal(spouseSayaAliasSubject?.subject, 'Rosalia', 'Frasa seperti "istri saya" harus tetap dipetakan ke pasangan canonical, bukan ke diri sendiri');
+
   const compositeNestedSubject = chatMemory.resolveSubject('Istri Budi sedang sakit', knownFriends, {
     currentPersonName: 'Teguh Putra',
     familyMembers,
@@ -833,6 +840,7 @@ async function verifyFamilyAliasSubjectResolution() {
     owner_alias_subject: ownerAliasSubject?.subject || null,
     canonical_nested_subject: canonicalNestedSubject?.subject || null,
     spouse_alias_subject: spouseAliasSubject?.subject || null,
+    spouse_saya_alias_subject: spouseSayaAliasSubject?.subject || null,
     composite_nested_subject: compositeNestedSubject?.subject || null,
     composite_parent_subject: compositeParentSubject?.subject || null,
     nested_relation_subject: nestedRelationSubject?.subject || null,

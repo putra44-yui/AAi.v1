@@ -92,15 +92,15 @@ const RELATION_PATTERN_DEFINITIONS = [
 ];
 const RELATION_ALIAS_MAP = Object.freeze({
   diri: ['aku', 'saya', 'gue', 'gw', 'gua', 'diriku'],
-  teman: ['teman', 'temanku'],
-  sahabat: ['sahabat', 'sahabatku'],
-  istri: ['istri', 'istriku'],
-  suami: ['suami', 'suamiku'],
-  anak: ['anak', 'anakku', 'anaknya'],
-  ayah: ['ayah', 'ayahku', 'abi', 'abiku', 'bapak', 'bapakku', 'papa', 'papaku'],
-  ibu: ['ibu', 'ibuku', 'ummi', 'ummiku', 'mama', 'mamaku', 'bunda', 'bundaku'],
-  kakak: ['kakak', 'kakakku'],
-  adik: ['adik', 'adikku'],
+  teman: ['teman', 'temanku', 'teman saya'],
+  sahabat: ['sahabat', 'sahabatku', 'sahabat saya'],
+  istri: ['istri', 'istriku', 'istri saya'],
+  suami: ['suami', 'suamiku', 'suami saya'],
+  anak: ['anak', 'anakku', 'anaknya', 'anak saya'],
+  ayah: ['ayah', 'ayahku', 'ayah saya', 'abi', 'abiku', 'bapak', 'bapakku', 'bapak saya', 'papa', 'papaku', 'papa saya'],
+  ibu: ['ibu', 'ibuku', 'ibu saya', 'ummi', 'ummiku', 'mama', 'mamaku', 'mama saya', 'bunda', 'bundaku', 'bunda saya'],
+  kakak: ['kakak', 'kakakku', 'kakak saya'],
+  adik: ['adik', 'adikku', 'adik saya'],
   keluarga: ['keluarga']
 });
 const GENERIC_RELATION_ALIAS_SET = new Set(Object.values(RELATION_ALIAS_MAP)
@@ -1612,7 +1612,9 @@ export function resolveSubject(text = '', knownFriends = [], options = {}) {
     });
   }
 
-  if (currentPersonName && FIRST_PERSON_REGEX.test(raw)) {
+  const hasExplicitNonCurrentCandidate = candidates.some(candidate => candidate.explicit && !candidate.isCurrentUser);
+
+  if (currentPersonName && FIRST_PERSON_REGEX.test(raw) && !hasExplicitNonCurrentCandidate) {
     const normalized = normalizeMemoryText(currentPersonName);
     candidates.push({
       subject: currentPersonName,
