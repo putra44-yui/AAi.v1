@@ -179,7 +179,7 @@ async function clearRuntimeCaches() {
 }
 
 const PLANNING_COMMAND_PATTERNS = {
-  list: /(apa\s+(rencana|perencanaan)\s*(kita)?|tampilkan\s+(rencana|perencanaan)|list\s+rencana)/i,
+  list: /(apa\s+(isi\s+)?(rencana|perencanaan)\s*(kita)?|tampilkan\s+(isi\s+)?(rencana|perencanaan)|lihat\s+(isi\s+)?rencana|list\s+rencana)/i,
   save: /^(ingat\s+ini|catat\s+(rencana|ini)|simpan\s+rencana|ingat\s+rencana)\b/i,
   saveFromContext: /^(catat|ingat|simpan)\s+(ya|itu|deh|aja|dong)\s*[.!?]*$/i,
   saveFromContextAlt: /^(ok|oke)\s+(catat|ingat|simpan)\s*[.!?]*$/i,
@@ -339,6 +339,11 @@ function splitTitleAndContent(raw = '') {
   return { title: normalizePlanningText(text), content: '' };
 }
 
+function extractPlanningListQuery(raw = '') {
+  const text = normalizePlanningText(String(raw || '').replace(PLANNING_COMMAND_PATTERNS.list, ''));
+  return normalizePlanningText(text.replace(/^(tentang|soal|untuk)\s+/i, ''));
+}
+
 function stripPlanningMarkdown(raw = '') {
   return String(raw || '')
     .replace(/```[\s\S]*?```/g, ' ')
@@ -465,7 +470,7 @@ function parsePlanningCommand(rawText = '') {
   if (!text) return null;
 
   if (PLANNING_COMMAND_PATTERNS.list.test(text)) {
-    return { type: 'list', query: text };
+    return { type: 'list', query: extractPlanningListQuery(text) };
   }
 
   if (PLANNING_COMMAND_PATTERNS.save.test(text)) {
@@ -516,6 +521,24 @@ function buildPlanningRecapMarkdown(items = [], query = '') {
 
   if (!list.length) {
     return `${title}\n\nBelum ada rencana yang tersimpan.`;
+  }
+
+  if (query && list.length === 1) {
+    const item = list[0] || {};
+    const detailTitle = normalizePlanningText(item.title || 'Rencana tanpa judul');
+    const detailContent = String(item.content || '').trim() || 'Tanpa catatan tambahan.';
+    const metaLines = [
+      item.category ? `Kategori: ${normalizePlanningText(item.category)}` : '',
+      Array.isArray(item.tags) && item.tags.length ? `Tag: ${item.tags.map(tag => normalizePlanningText(tag)).filter(Boolean).join(', ')}` : ''
+    ].filter(Boolean);
+
+    return [
+      title,
+      '',
+      `**${detailTitle}**`,
+      ...(metaLines.length ? [...metaLines, ''] : []),
+      detailContent
+    ].join('\n');
   }
 
   const isShortSummary = list.length <= 3;
@@ -586,7 +609,10 @@ async function handlePlanningCommand(rawText) {
 
   try {
     if (command.type === 'list') {
-      const data = await planningApi(`/api/planning-memory?user_id=${encodeURIComponent(currentUser.id)}`);
+      const querySuffix = command.query
+        ? `&q=${encodeURIComponent(command.query)}&limit=10`
+        : '';
+      const data = await planningApi(`/api/planning-memory?user_id=${encodeURIComponent(currentUser.id)}${querySuffix}`);
       appendMessage('assistant', buildPlanningRecapMarkdown(data.items || [], command.query));
       return true;
     }

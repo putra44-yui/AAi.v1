@@ -38,6 +38,7 @@ const DEFAULT_ACCOUNT_OWNER_NAME = 'Teguh Putra';
 const DEFAULT_ACCOUNT_OWNER_USERNAME = 'teguh';
 const TECHNICAL_CONTEXT_REGEX = /\b(kode|coding|bug|function|html|css|javascript|js|python|sql|error|fix|api|backend|frontend|react|next|node|database|query|deploy|git|loop|array|object|fetch|async|await|import|export|class|component|hook|state|props|syntax|compile|excel|rumus|build|install|npm|yarn|vercel|server|endpoint|route|request|response|json)\b/i;
 const FAMILY_TOPIC_ALIAS_REGEX = /\b(istri(?:ku|\s+saya)?|suami(?:ku|\s+saya)?|ayah(?:ku|\s+saya)?|ibu(?:ku|\s+saya)?|mama(?:ku|\s+saya)?|papa(?:ku|\s+saya)?|abi(?:ku)?|ummi(?:ku)?|bunda(?:ku|\s+saya)?|anak(?:ku|\s+saya)?|kakak(?:ku|\s+saya)?|adik(?:ku|\s+saya)?)\b/i;
+const PLANNING_TOPIC_REGEX = /\b(rencana|perencanaan|plan(?:ning)?|roadmap|target|prioritas|deadline|jadwal|timeline|milestone|checklist|todo|to do|aksi|langkah|progress|progres)\b/i;
 
 const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
 const REASONING_STREAMING_TITLE = 'AAI sedang berpikir';
@@ -117,6 +118,121 @@ function shouldTrimTechnicalHistoryForFamilyQuery({
   const technicalHits = filteredHistory.filter(row => looksTechnicalMessage(row?.content || '')).length;
   const technicalRatio = technicalHits / filteredHistory.length;
   return String(userMessage || '').trim().length <= 120 && technicalHits >= 2 && technicalRatio >= 0.5;
+}
+
+function isPlanningTopicQuery(input = '') {
+  return PLANNING_TOPIC_REGEX.test(String(input || ''));
+}
+
+function normalizePlanningQueryText(input = '') {
+  return chatMemory.normalizeMemoryText(String(input || '')
+    .replace(/\b(apa|bagaimana|gimana|tolong|coba|bisa|dong|ya|kah|nih|ini|itu|sih|aku|saya|kita|kami|mohon|tentang|soal|untuk)\b/gi, ' '));
+}
+
+function buildPlanningSearchText(item = {}) {
+  return [
+    item?.title,
+    item?.content,
+    item?.category,
+    ...(Array.isArray(item?.tags) ? item.tags : [])
+  ]
+    .map(part => chatMemory.normalizeMemoryText(part || ''))
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function buildPlanningMemoryContext(items = [], options = {}) {
+  const targetName = String(options.targetName || 'subjek ini').trim() || 'subjek ini';
+  const rows = Array.isArray(items) ? items.filter(Boolean) : [];
+
+  if (rows.length === 0) {
+    return `Belum ada planning memory yang relevan untuk ${targetName}.`;
+  }
+
+  return rows.map(item => {
+    const title = compactText(item?.title || 'Tanpa judul', 80);
+    const content = compactText(item?.content || 'Tanpa catatan tambahan', 220);
+    const category = String(item?.category || '').trim().toLowerCase();
+    const priority = Number(item?.priority || 0);
+    const tags = (Array.isArray(item?.tags) ? item.tags : [])
+      .map(tag => String(tag || '').trim())
+      .filter(Boolean)
+      .slice(0, 4);
+
+    return [
+      `- ${title}${category ? ` {${category}}` : ''}${priority ? ` (priority ${priority})` : ''}: ${content}`,
+      tags.length > 0 ? `  tags: ${tags.join(', ')}` : ''
+    ].filter(Boolean).join('\n');
+  }).join('\n');
+}
+
+async function selectRelevantPlanningMemories({
+  supabase,
+  personId,
+  userMessage = '',
+  limit = 6
+} = {}) {
+  const queryDetected = isPlanningTopicQuery(userMessage);
+  if (!supabase || !personId || !queryDetected) {
+    return { items: [], queryDetected, genericQuery: false, totalAvailable: 0 };
+  }
+
+  const { data, error } = await supabase
+    .from('planning_memory')
+    .select('id, title, content, category, tags, priority, created_at, updated_at')
+    .eq('person_id', personId)
+    .order('priority', { ascending: false })
+    .order('updated_at', { ascending: false })
+    .limit(25);
+
+  if (error) throw error;
+
+  const rows = Array.isArray(data) ? data.filter(Boolean) : [];
+  const normalizedQuery = normalizePlanningQueryText(userMessage);
+  const genericQuery = normalizedQuery.split(' ').filter(Boolean).length <= 1;
+
+  const scoredRows = rows.map(row => {
+    const searchText = buildPlanningSearchText(row);
+    const lexical = genericQuery || !normalizedQuery
+      ? 0
+      : chatMemory.jaccardSimilarity(normalizedQuery, searchText);
+    const normalizedTitle = chatMemory.normalizeMemoryText(row?.title || '');
+    const titleMatch = Boolean(
+      normalizedQuery
+      && normalizedTitle
+      && (normalizedTitle.includes(normalizedQuery) || normalizedQuery.includes(normalizedTitle))
+    );
+    const tagMatch = (Array.isArray(row?.tags) ? row.tags : []).some(tag => {
+      const normalizedTag = chatMemory.normalizeMemoryText(tag || '');
+      return normalizedTag && normalizedQuery.includes(normalizedTag);
+    });
+    const priorityBoost = Math.min(0.2, Math.max(0, Number(row?.priority || 0)) / 10);
+    const freshness = chatMemory.computeFreshnessScore(row?.updated_at);
+
+    return {
+      ...row,
+      _planning_score: Number((lexical + (titleMatch ? 0.25 : 0) + (tagMatch ? 0.1 : 0) + priorityBoost + freshness * 0.12).toFixed(4))
+    };
+  });
+
+  scoredRows.sort((left, right) => {
+    if (right._planning_score !== left._planning_score) return right._planning_score - left._planning_score;
+    if (Number(right?.priority || 0) !== Number(left?.priority || 0)) return Number(right?.priority || 0) - Number(left?.priority || 0);
+    return new Date(right?.updated_at || 0).getTime() - new Date(left?.updated_at || 0).getTime();
+  });
+
+  const filteredRows = genericQuery
+    ? scoredRows
+    : scoredRows.filter(row => row._planning_score >= 0.16 || Number(row?.priority || 0) >= 1);
+  const fallbackRows = filteredRows.length > 0 ? filteredRows : scoredRows.slice(0, Math.max(1, Math.min(3, Number(limit || 6))));
+
+  return {
+    items: fallbackRows.slice(0, Math.max(1, Number(limit || 6))).map(({ _planning_score, ...row }) => row),
+    queryDetected: true,
+    genericQuery,
+    totalAvailable: rows.length
+  };
 }
 
 /**
@@ -2502,6 +2618,25 @@ export default async function handler(req, res) {
         })
       : { items: [], legacyItems: [], dynamicItems: [], allMemories: [] };
 
+    const planningMemoryTarget = shouldUseFamilyMemoryPool && familyMemoryTarget?.id
+      ? familyMemoryTarget
+      : (person || { id: user.person_id, name: currentSubject, role: relationToOwner });
+    let relevantPlanningSelection = { items: [], queryDetected: false, genericQuery: false, totalAvailable: 0 };
+    try {
+      relevantPlanningSelection = await selectRelevantPlanningMemories({
+        supabase,
+        personId: planningMemoryTarget?.id || user.person_id,
+        userMessage,
+        limit: shouldUseFamilyMemoryPool ? 5 : 6
+      });
+    } catch (planningErr) {
+      console.error('[Planning] Gagal load planning memory:', planningErr.message);
+      registerPipelineWarning('planning_memory_load_failed', {
+        person_id: planningMemoryTarget?.id || user.person_id,
+        error: planningErr.message
+      });
+    }
+
     const allActiveMemories = Array.isArray(relevantSelection.allMemories) ? relevantSelection.allMemories : [];
     perf.mark('memory_selection_done', {
       active_memory_count: allActiveMemories.length,
@@ -2509,7 +2644,10 @@ export default async function handler(req, res) {
       checkpoint_history: Boolean(relevantSelection.checkpointSummary || persistedCheckpointSummary),
       family_memory_pool_enabled: shouldUseFamilyMemoryPool,
       family_target_person_id: familyMemoryTarget?.id || null,
-      family_selected_memory_count: Array.isArray(familyRelevantSelection.items) ? familyRelevantSelection.items.length : 0
+      family_selected_memory_count: Array.isArray(familyRelevantSelection.items) ? familyRelevantSelection.items.length : 0,
+      planning_query_detected: Boolean(relevantPlanningSelection.queryDetected),
+      planning_target_person_id: planningMemoryTarget?.id || null,
+      planning_selected_count: Array.isArray(relevantPlanningSelection.items) ? relevantPlanningSelection.items.length : 0
     });
 
     let effectiveCheckpointSummary = String(relevantSelection.checkpointSummary || persistedCheckpointSummary || '').trim();
@@ -2801,6 +2939,30 @@ export default async function handler(req, res) {
       };
     }
 
+    let systemPlanningMemoryPrompt = null;
+    if (relevantPlanningSelection.queryDetected) {
+      const planningTargetName = String(planningMemoryTarget?.name || currentSubject || accountOwner).trim() || accountOwner;
+      const planningMemoryContextText = buildPlanningMemoryContext(relevantPlanningSelection.items || [], {
+        targetName: planningTargetName
+      });
+
+      systemPlanningMemoryPrompt = {
+        role: 'system',
+        content: [
+          `[PLANNING MEMORY: ${planningTargetName.toUpperCase()}]`,
+          `Gunakan blok ini saat user menanyakan rencana, target, prioritas, jadwal, timeline, langkah, atau progres untuk ${planningTargetName}.`,
+          shouldUseFamilyMemoryPool && planningMemoryTarget?.id
+            ? `Subjek planning yang diprioritaskan: ${planningTargetName}${planningMemoryTarget?.role ? ` (${planningMemoryTarget.role})` : ''}.`
+            : `Blok ini milik ${planningTargetName}.`,
+          `Jumlah plan terpilih: ${Array.isArray(relevantPlanningSelection.items) ? relevantPlanningSelection.items.length : 0}/${relevantPlanningSelection.totalAvailable || 0}.`,
+          Array.isArray(relevantPlanningSelection.items) && relevantPlanningSelection.items.length > 0
+            ? 'Jika ada beberapa plan, utamakan item yang paling mirip dengan pertanyaan user.'
+            : 'Belum ada planning memory relevan tersimpan. Jika user menanyakan plan, jawab jujur bahwa belum ada data rencana tersimpan.',
+          planningMemoryContextText
+        ].join('\n')
+      };
+    }
+
     const systemEmotionGuidancePrompt = {
       role: 'system',
       content: [
@@ -2882,6 +3044,7 @@ ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji.
 - WAJIB jawab inti pertanyaan user pada kalimat pertama.
 - Untuk pertanyaan faktual/langsung, JANGAN mulai jawaban dengan "aku ingat..." atau ringkasan memori kecuali user memang menanyakannya.
+- Jika ada blok [PLANNING MEMORY], gunakan blok itu hanya untuk pertanyaan tentang rencana, target, jadwal, prioritas, langkah, atau progres. Jika bloknya kosong, jawab jujur bahwa belum ada rencana tersimpan yang relevan.
 - Hindari format list bernomor (1, 2, 3) kecuali user memang meminta format langkah/urutan.
 - Untuk jawaban umum, utamakan paragraf pendek atau bullet sederhana tanpa nomor.
 - Kamu adalah AAi, namamu AAi, panggil dirimu AAi, kamu di rancang oleh teguh dengan berbagai hal, terutama yang berhubungan dengan teknologi, pemrograman, dan kehidupan sehari-hari.
@@ -3254,6 +3417,7 @@ MENGHAPUS MEMORI:
         systemPrompt,
         systemIdentityPrompt,
         systemConsistencyPrompt,
+        ...(systemPlanningMemoryPrompt ? [systemPlanningMemoryPrompt] : []),
         ...(isDirectShortQuestion ? [] : [systemMemoryContextPrompt]),
         ...(systemFamilyMemoryPrompt ? [systemFamilyMemoryPrompt] : []),
         ...(systemRuntimeWarningPrompt ? [systemRuntimeWarningPrompt] : []),
@@ -3283,6 +3447,7 @@ MENGHAPUS MEMORI:
       prompt_messages: openRouterPayload.messages.length,
       prompt_memories: promptMemoryCountForPerf,
       family_prompt_memories: Array.isArray(familyPromptSelection.items) ? familyPromptSelection.items.length : 0,
+      planning_prompt_items: Array.isArray(relevantPlanningSelection.items) ? relevantPlanningSelection.items.length : 0,
       known_friend_count: knownFriendsData.length,
       dropped_memory_count: droppedMemories.length,
       child_memory_groups: childMemoriesData.length

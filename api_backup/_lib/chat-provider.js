@@ -108,11 +108,11 @@ export function formatModelLabel(modelName = '') {
 export function getModelConfig(personaList) {
   const persona = personaList[0];
   const configs = {
-    Coding: { temperature: 0.0, max_tokens: 55000, top_p: 0.85 },
-    'Kritikus Brutal': { temperature: 0.3, max_tokens: 8000, top_p: 0.85 },
-    Santai: { temperature: 0.8, max_tokens: 8000, top_p: 0.95 },
-    Rosalia: { temperature: 0.95, max_tokens: 8000, top_p: 0.95 },
-    Auto: { temperature: 0.7, max_tokens: 8000, top_p: 0.9 }
+    Coding: { temperature: 0.0, max_tokens: 35000, top_p: 0.85 },
+    'Kritikus Brutal': { temperature: 0.3, max_tokens: 5000, top_p: 0.85 },
+    Santai: { temperature: 0.8, max_tokens: 3000, top_p: 0.95 },
+    Rosalia: { temperature: 0.95, max_tokens: 3000, top_p: 0.95 },
+    Auto: { temperature: 0.7, max_tokens: 5000, top_p: 0.9 }
   };
   return configs[persona] || configs.Auto;
 }
