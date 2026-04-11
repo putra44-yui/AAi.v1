@@ -2524,10 +2524,15 @@ export default async function handler(req, res) {
       familyMemoryTarget,
       familyQueryContext
     })) {
+      const trimmedCheckpointSummary = looksTechnicalMessage(effectiveCheckpointSummary);
       promptHistorySummary = '';
       promptRecentHistory = [];
+      if (trimmedCheckpointSummary) {
+        effectiveCheckpointSummary = '';
+      }
       perf.mark('family_topic_history_trimmed', {
         trimmed_recent_history_count: recentHistory.length,
+        trimmed_checkpoint_summary: trimmedCheckpointSummary,
         target_person_id: familyMemoryTarget?.id || null,
         target_name: familyMemoryTarget?.name || null
       });
