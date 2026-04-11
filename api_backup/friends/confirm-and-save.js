@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import * as chatMemory from '../_lib/chat-memory.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -46,9 +47,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'User or person not found' });
     }
 
-    let friendPersonId;
-
-    // If existing_person_id provided, link to existing person
+    let validatedExistingPersonId = null;
     if (existing_person_id) {
       const { data: existingPerson, error: existingError } = await supabase
         .from('persons')
@@ -60,99 +59,26 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Existing person not found' });
       }
 
-      friendPersonId = existing_person_id;
-    } else {
-      // Reuse existing person by name if present, otherwise create.
-      const normalizedName = friend_name.trim();
-      const { data: existingByName } = await supabase
-        .from('persons')
-        .select('id, name')
-        .ilike('name', normalizedName)
-        .maybeSingle();
-
-      if (existingByName?.id) {
-        friendPersonId = existingByName.id;
-      } else {
-        const { data: newPerson, error: createError } = await supabase
-          .from('persons')
-          .insert({
-            name: normalizedName,
-            description: `Friend of ${user.person_id} - introduced via chat`
-          })
-          .select('id')
-          .single();
-
-        if (createError) {
-          return res.status(500).json({ error: 'Failed to create friend person', details: createError });
-        }
-
-        friendPersonId = newPerson.id;
-      }
+      validatedExistingPersonId = existing_person_id;
     }
 
-    // Create bidirectional relationship
-    let relError = null;
-    const relationshipWithMeta = [
-      {
-        person_a: user.person_id,
-        person_b: friendPersonId,
-        relation_type: relationship_type,
-        friend_status: 'active',
-        introduction_context: intro_message?.substring(0, 500)
-      },
-      {
-        person_a: friendPersonId,
-        person_b: user.person_id,
-        relation_type: relationship_type,
-        friend_status: 'active',
-        introduction_context: intro_message?.substring(0, 500)
-      }
-    ];
+    const confirmResult = await chatMemory.confirmFriend(supabase, {
+      ownerPersonId: user.person_id,
+      friendPersonId: validatedExistingPersonId,
+      friendName: friend_name,
+      relationshipType: relationship_type,
+      introMessage: intro_message,
+      placeholderPersonId: user.person_id
+    });
 
-    const relationshipBasic = [
-      {
-        person_a: user.person_id,
-        person_b: friendPersonId,
-        relation_type: relationship_type
-      },
-      {
-        person_a: friendPersonId,
-        person_b: user.person_id,
-        relation_type: relationship_type
-      }
-    ];
+    const friendPersonId = confirmResult.friendPersonId;
 
-    const { error: relErrorWithMeta } = await supabase
-      .from('relationships')
-      .insert(relationshipWithMeta)
-      .select('id')
-      .limit(1);
-
-    if (relErrorWithMeta) {
-      const relErrMsg = String(relErrorWithMeta.message || '').toLowerCase();
-      const missingMetaColumns =
-        relErrMsg.includes('friend_status') ||
-        relErrMsg.includes('introduction_context');
-
-      if (missingMetaColumns) {
-        const { error: relErrorBasic } = await supabase
-          .from('relationships')
-          .insert(relationshipBasic)
-          .select('id')
-          .limit(1);
-        relError = relErrorBasic;
-      } else {
-        relError = relErrorWithMeta;
-      }
-    }
-
-    if (relError) {
-      const relErrMsg = String(relError.message || '').toLowerCase();
-      const isDuplicate = relError.code === '23505' || relErrMsg.includes('duplicate');
-      if (!isDuplicate) {
-        console.error('Relationship creation error:', relError);
-        return res.status(500).json({ error: 'Failed to create relationship', details: relError });
-      }
+    if (confirmResult.relationshipWarning) {
+      console.warn('confirm-and-save relationship warning:', {
+        user_id,
+        friend_name,
+        relationship_warning: confirmResult.relationshipWarning
+      });
     }
 
     // Create initial memory from intro message
@@ -197,11 +123,18 @@ export default async function handler(req, res) {
       }
     }
 
+    const confirmed = Boolean(confirmResult.confirmed);
     return res.status(200).json({
       success: true,
+      confirmed,
       friend_id: friendPersonId,
       person_id: friendPersonId,
-      message: `Friend ${friend_name} saved successfully`
+      relationship_mode: confirmResult.relationshipMode || null,
+      relationship_validation: confirmResult.relationshipValidation || null,
+      relationship_warning: confirmResult.relationshipWarning || null,
+      message: confirmed
+        ? `Friend ${friend_name} saved successfully`
+        : `Friend ${friend_name} saved with relationship warning`
     });
 
   } catch (err) {

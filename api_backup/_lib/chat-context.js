@@ -1,4 +1,4 @@
-import { buildMemoryContext, normalizeMemoryType } from './chat-memory.js';
+import { buildMemoryContext, extractStructuredMemoryMetadata, normalizeMemoryType } from './chat-memory.js';
 
 const CLARIFY_BLOCK_START = '[AAI_CLARIFY]';
 const CLARIFY_BLOCK_END = '[/AAI_CLARIFY]';
@@ -34,12 +34,38 @@ export function buildLastChatContext(historyRows = [], maxLines = 8) {
   return lines.join('\n');
 }
 
+function getPromptIdentityFields(person = {}, currentAge = '?') {
+  const ownerName = String(person?.identity_anchor || person?.owner_name || person?.name || '-').trim() || '-';
+  const currentSubject = String(person?.current_subject || person?.name || ownerName).trim() || ownerName;
+  const relationToOwner = String(person?.relation_to_owner || person?.role || 'tamu').trim() || 'tamu';
+  const hasOwnerAnchor = Boolean(person?.identity_anchor || person?.owner_name);
+
+  return {
+    ownerName,
+    currentSubject,
+    relationToOwner,
+    currentAge,
+    hasOwnerAnchor
+  };
+}
+
 export function buildIdentityContext(person = {}, currentAge = '?', familyContext = '', relationContext = '') {
+  const identity = getPromptIdentityFields(person, currentAge);
+
   return [
     '[IDENTITAS]',
-    `Nama: ${person?.name || '-'}`,
-    `Peran: ${person?.role || '-'}`,
-    `Usia: ${currentAge || '?'}`,
+    ...(identity.hasOwnerAnchor
+      ? [
+          `Identitas inti: ${identity.ownerName}`,
+          `Subjek aktif sesi: ${identity.currentSubject}`,
+          `Relasi subjek ke owner: ${identity.relationToOwner}`,
+          `Usia subjek aktif: ${identity.currentAge || '?'}`
+        ]
+      : [
+          `Nama: ${person?.name || '-'}`,
+          `Peran: ${person?.role || '-'}`,
+          `Usia: ${currentAge || '?'}`
+        ]),
     '',
     '[KELUARGA]',
     familyContext || '-',
@@ -50,6 +76,7 @@ export function buildIdentityContext(person = {}, currentAge = '?', familyContex
 }
 
 export function buildConsistencyLock(person = {}, relevantSelection = {}) {
+  const identity = getPromptIdentityFields(person);
   const typeLabels = {
     pattern: 'pola perilaku',
     kebiasaan: 'kebiasaan',
@@ -65,7 +92,13 @@ export function buildConsistencyLock(person = {}, relevantSelection = {}) {
 
   return [
     '[CONSISTENCY LOCK]',
-    `Kamu adalah representasi AI untuk ${person?.name || 'user'} sebagai ${person?.role || 'anggota keluarga'}.`,
+    ...(identity.hasOwnerAnchor
+      ? [
+          `Kamu adalah representasi AI warisan untuk ${identity.ownerName}.`,
+          `Subjek aktif sesi saat ini: ${identity.currentSubject} (${identity.relationToOwner}).`,
+          `Jangan gabungkan sifat, kebiasaan, emosi, atau preferensi ${identity.currentSubject} ke profil inti ${identity.ownerName} kecuali dikonfirmasi eksplisit.`
+        ]
+      : [`Kamu adalah representasi AI untuk ${person?.name || 'user'} sebagai ${person?.role || 'anggota keluarga'}.`]),
     `Jawaban harus konsisten dengan memori terpilih, terutama pada: ${prioritizedTraits.join(', ') || 'identitas, pola perilaku, dan preferensi yang tersedia'}.`,
     'Jika data kurang, gunakan inferensi minimal yang paling masuk akal dan jangan nyatakan sebagai fakta pasti.',
     'Jangan membuat sifat, kebiasaan, emosi, atau preferensi yang bertentangan dengan memori yang tersedia.'
@@ -265,7 +298,10 @@ export function buildFriendContextBlock(friends = []) {
     .map(friend => {
       const memoriesText = friend.memories && Array.isArray(friend.memories)
         ? friend.memories
-            .map(mem => `${mem.value || mem.key}`)
+            .map(mem => {
+              const metadata = extractStructuredMemoryMetadata(mem || {});
+              return `${metadata.value || mem.value || mem.key}`;
+            })
             .filter(Boolean)
             .join(', ')
         : 'Belum ada informasi tersimpan';

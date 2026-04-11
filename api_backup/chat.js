@@ -9,7 +9,7 @@ import * as chatProvider from './_lib/chat-provider.js';
 import * as chatFiles from './_lib/chat-files.js';
 import * as speechStyle from './_lib/speech-style.js';
 import * as traceGuard from './_lib/trace-guard.js';
-import { formatMemoryContent, saveMemoryWithLockGuard } from '../lib/lock-guard';
+import { formatMemoryContent, getLockedMemoryKeys, saveMemoryWithLockGuard } from '../lib/lock-guard.js';
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -27,6 +27,15 @@ const DEFAULT_MAX_INJECTED_MEMORIES = 120;
 const CHECKPOINT_SUMMARY_START = '[SESSION_CHECKPOINT]';
 const CHECKPOINT_SUMMARY_END = '[/SESSION_CHECKPOINT]';
 const REASONING_PREVIEW_ENABLED = String(process.env.AAI_REASONING_PREVIEW_ENABLED || '').toLowerCase() === 'true';
+const SAFE_PROMPT_TOKEN_LIMIT = 8000;
+const AUTO_COMPACT_TRIGGER_RATIO = 0.75;
+const AUTO_COMPACT_TRIGGER_TOKENS = Math.floor(SAFE_PROMPT_TOKEN_LIMIT * AUTO_COMPACT_TRIGGER_RATIO);
+const CONTEXT_WARNING_RATIO = 0.85;
+const CONTEXT_HARD_WARNING_TOKENS = Math.floor(SAFE_PROMPT_TOKEN_LIMIT * CONTEXT_WARNING_RATIO);
+const CONTEXT_FALLBACK_HISTORY_COUNT = 4;
+const CONTEXT_FALLBACK_MEMORY_LIMIT = 6;
+const DEFAULT_ACCOUNT_OWNER_NAME = 'Teguh Putra';
+const DEFAULT_ACCOUNT_OWNER_USERNAME = 'teguh';
 
 const AMBIGUOUS_TERMS = ['ini', 'itu', 'dia', 'mereka', 'yang tadi', 'kayak kemarin', 'seperti biasa'];
 const REASONING_STREAMING_TITLE = 'AAI sedang berpikir';
@@ -62,10 +71,362 @@ function compactText(value = '', maxChars = 160) {
   return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
+function getReadableMemoryValue(memory = {}) {
+  const metadata = chatMemory.extractStructuredMemoryMetadata(memory || {});
+  return String(metadata.value || memory?.value || memory?.key || '').trim();
+}
+
 function estimatePromptChars(messages = []) {
   return (Array.isArray(messages) ? messages : []).reduce((total, message) => {
     return total + String(message?.content || '').length;
   }, 0);
+}
+
+/**
+ * Heuristic token estimator until a provider-specific tokenizer is wired in.
+ */
+function estimateTokens(input = '') {
+  if (Array.isArray(input)) {
+    return Math.ceil(estimatePromptChars(input) / 4);
+  }
+
+  if (input && typeof input === 'object') {
+    return Math.ceil(JSON.stringify(input).length / 4);
+  }
+
+  return Math.ceil(String(input || '').length / 4);
+}
+
+function buildPipelineWarningEntry(code = '', detail = {}) {
+  return {
+    code: String(code || 'pipeline_warning').trim() || 'pipeline_warning',
+    ...detail
+  };
+}
+
+function buildRuntimeIdentityContext({ person = {}, user = {} } = {}) {
+  const accountOwner = String(process.env.ACCOUNT_OWNER_NAME || DEFAULT_ACCOUNT_OWNER_NAME).trim() || DEFAULT_ACCOUNT_OWNER_NAME;
+  const currentSubject = String(person?.name || accountOwner).trim() || accountOwner;
+  const currentSubjectRole = String(person?.role || '').trim().toLowerCase();
+  const normalizedOwner = chatMemory.normalizeMemoryText(accountOwner);
+  const normalizedSubject = chatMemory.normalizeMemoryText(currentSubject);
+  const normalizedUsername = String(user?.username || '').trim().toLowerCase();
+  const isOwnerIdentity = normalizedOwner && normalizedSubject === normalizedOwner;
+  const isOwnerUser = normalizedUsername === DEFAULT_ACCOUNT_OWNER_USERNAME;
+  const relationToOwner = (isOwnerIdentity || isOwnerUser || currentSubjectRole === 'ayah')
+    ? 'diri_sendiri'
+    : (currentSubjectRole || 'tamu');
+
+  return {
+    accountOwner,
+    currentSubject,
+    relationToOwner,
+    promptPerson: {
+      ...(person || {}),
+      name: accountOwner,
+      role: 'warisan_digital',
+      identity_anchor: accountOwner,
+      owner_name: accountOwner,
+      current_subject: currentSubject,
+      relation_to_owner: relationToOwner,
+      current_subject_role: currentSubjectRole || relationToOwner
+    }
+  };
+}
+
+function normalizeUsername(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function resolveOwnerPersonContext({ supabase, allPersons = [], accountOwner = '', ownerUsername = '' } = {}) {
+  const normalizedOwnerName = chatMemory.normalizeMemoryText(accountOwner || '');
+  const ownerByName = (Array.isArray(allPersons) ? allPersons : []).find(personRow => {
+    const normalizedPersonName = chatMemory.normalizeMemoryText(personRow?.name || '');
+    if (!normalizedPersonName || !normalizedOwnerName) return false;
+    return normalizedPersonName === normalizedOwnerName || chatMemory.jaccardSimilarity(normalizedPersonName, normalizedOwnerName) >= 0.9;
+  });
+
+  if (ownerByName?.id) return ownerByName;
+
+  const normalizedOwnerUsername = normalizeUsername(ownerUsername);
+  if (!normalizedOwnerUsername) return null;
+
+  const { data: ownerUser, error: ownerUserError } = await supabase
+    .from('users')
+    .select('person_id')
+    .eq('username', normalizedOwnerUsername)
+    .maybeSingle();
+
+  if (ownerUserError) throw ownerUserError;
+  if (!ownerUser?.person_id) return null;
+
+  const ownerFromList = (Array.isArray(allPersons) ? allPersons : []).find(personRow => personRow?.id === ownerUser.person_id);
+  if (ownerFromList?.id) return ownerFromList;
+
+  const { data: ownerPerson, error: ownerPersonError } = await supabase
+    .from('persons')
+    .select('id, name, date_of_birth, role')
+    .eq('id', ownerUser.person_id)
+    .maybeSingle();
+
+  if (ownerPersonError) throw ownerPersonError;
+  return ownerPerson || null;
+}
+
+function detectOwnerFocusedQuery(userMessage = '', ownerContext = {}) {
+  const normalizedMessage = chatMemory.normalizeMemoryText(userMessage || '');
+  const ownerName = String(ownerContext.ownerPerson?.name || ownerContext.accountOwner || '').trim();
+  const normalizedOwnerName = chatMemory.normalizeMemoryText(ownerName);
+  const ownerRole = String(ownerContext.ownerPerson?.role || '').trim().toLowerCase();
+  const genericOwnerAliases = ['teguh', 'owner', 'warisan'];
+  const ownerRelationAliases = ownerRole === 'ayah'
+    ? ['ayah', 'ayahku', 'papa', 'papaku', 'bapak', 'bapakku', 'abi', 'ayah dulu']
+    : [];
+  const ownerNameTokens = normalizedOwnerName
+    ? normalizedOwnerName.split(' ').filter(token => token.length >= 4)
+    : [];
+  const aliases = uniqueList([
+    ownerName,
+    normalizedOwnerName,
+    ...ownerNameTokens,
+    ...ownerRelationAliases,
+    ...genericOwnerAliases
+  ].map(alias => chatMemory.normalizeMemoryText(alias)).filter(Boolean));
+
+  const matchedAliases = aliases.filter(alias => normalizedMessage.includes(alias));
+  const ownerFocusedQuery = matchedAliases.length > 0;
+
+  return {
+    ownerFocusedQuery,
+    matchedAliases,
+    querySeed: ownerFocusedQuery
+      ? uniqueList([userMessage, ownerName, ...matchedAliases].filter(Boolean)).join(' ')
+      : userMessage
+  };
+}
+
+function buildFamilyResolverEntries({ allPersons = [], currentPerson = null, ownerPerson = null } = {}) {
+  const currentRole = String(currentPerson?.role || '').trim().toLowerCase();
+  const childCount = (Array.isArray(allPersons) ? allPersons : []).filter(personRow => {
+    return personRow?.id && String(personRow?.role || '').trim().toLowerCase() === 'anak';
+  }).length;
+
+  return (Array.isArray(allPersons) ? allPersons : [])
+    .map(personRow => {
+      if (!personRow?.id || !personRow?.name) return null;
+
+      const role = String(personRow.role || '').trim().toLowerCase();
+      const aliases = [];
+
+      if (role === 'ayah') {
+        aliases.push('ayah', 'ayahku', 'abi', 'abiku', 'bapak', 'bapakku', 'papa', 'papaku');
+      }
+
+      if (role === 'ibu') {
+        aliases.push('ibu', 'ibuku', 'ummi', 'ummiku', 'mama', 'mamaku', 'bunda', 'bundaku');
+      }
+
+      if (role === 'anak' && childCount === 1) {
+        aliases.push('anak', 'anakku', 'anaknya');
+      }
+
+      if (currentRole === 'ayah' && role === 'ibu') {
+        aliases.push('istri', 'istriku');
+      }
+
+      if (currentRole === 'ibu' && role === 'ayah') {
+        aliases.push('suami', 'suamiku');
+      }
+
+      if (ownerPerson?.id && personRow.id === ownerPerson.id) {
+        aliases.push('owner', 'warisan');
+      }
+
+      return {
+        id: personRow.id,
+        name: personRow.name,
+        relation: role,
+        aliases: uniqueList(aliases)
+      };
+    })
+    .filter(Boolean);
+}
+
+function resolveFamilyMemberFromReference(reference = '', allPersons = [], familyMembers = []) {
+  const normalizedReference = chatMemory.normalizeMemoryText(reference || '');
+  if (!normalizedReference) return null;
+
+  const familyEntryMatch = (Array.isArray(familyMembers) ? familyMembers : []).find(entry => {
+    if (!entry?.id || !entry?.name) return false;
+
+    if (chatMemory.normalizeMemoryText(entry.name) === normalizedReference) return true;
+    return (Array.isArray(entry.aliases) ? entry.aliases : []).some(alias => {
+      return chatMemory.normalizeMemoryText(alias) === normalizedReference;
+    });
+  });
+
+  if (familyEntryMatch?.id) {
+    return (Array.isArray(allPersons) ? allPersons : []).find(personRow => personRow?.id === familyEntryMatch.id) || null;
+  }
+
+  const rankedMatches = (Array.isArray(allPersons) ? allPersons : [])
+    .map(personRow => {
+      const normalizedName = chatMemory.normalizeMemoryText(personRow?.name || '');
+      if (!normalizedName) return null;
+
+      const exact = normalizedName === normalizedReference ? 1 : 0;
+      const contains = !exact && (normalizedName.includes(normalizedReference) || normalizedReference.includes(normalizedName)) ? 1 : 0;
+      const similarity = chatMemory.jaccardSimilarity(normalizedName, normalizedReference);
+
+      return {
+        person: personRow,
+        exact,
+        contains,
+        similarity
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.exact !== left.exact) return right.exact - left.exact;
+      if (right.contains !== left.contains) return right.contains - left.contains;
+      return right.similarity - left.similarity;
+    });
+
+  const bestMatch = rankedMatches[0];
+  if (!bestMatch) return null;
+  if (bestMatch.exact || bestMatch.contains || bestMatch.similarity >= 0.84) {
+    return bestMatch.person || null;
+  }
+
+  return null;
+}
+
+function resolveFamilyQueryContext({
+  userMessage = '',
+  currentPerson = null,
+  currentSubject = '',
+  allPersons = [],
+  ownerPerson = null,
+  accountOwner = ''
+} = {}) {
+  const familyMembers = buildFamilyResolverEntries({ allPersons, currentPerson, ownerPerson });
+  const ownerFocusContext = detectOwnerFocusedQuery(userMessage, {
+    accountOwner,
+    ownerPerson
+  });
+  const subjectInfo = chatMemory.resolveSubject(ownerFocusContext.querySeed || userMessage, [], {
+    currentPersonName: currentSubject,
+    familyMembers,
+    familyNames: (allPersons || []).map(personRow => personRow.name).filter(Boolean)
+  });
+  const matchedPerson = resolveFamilyMemberFromReference(subjectInfo?.subject || '', allPersons, familyMembers);
+  const targetPerson = matchedPerson || (ownerFocusContext.ownerFocusedQuery ? ownerPerson : null);
+  const targetTerms = uniqueList([
+    targetPerson?.name,
+    subjectInfo?.subject,
+    subjectInfo?.relation,
+    ...ownerFocusContext.matchedAliases
+  ].filter(Boolean));
+
+  return {
+    familyMembers,
+    ownerFocusContext,
+    subjectInfo,
+    targetPerson,
+    useTargetMemoryPool: Boolean(targetPerson?.id && currentPerson?.id && targetPerson.id !== currentPerson.id),
+    querySeed: uniqueList([userMessage, ...targetTerms].filter(Boolean)).join(' ') || userMessage,
+    accessReasonCode: targetPerson?.id && ownerPerson?.id && targetPerson.id === ownerPerson.id
+      ? 'owner_legacy_prompt_retrieval'
+      : 'family_legacy_prompt_retrieval'
+  };
+}
+
+/**
+ * Thin LLM wrapper so compaction can reuse the active provider wiring.
+ */
+async function callLLM({ apiKey, payload }) {
+  return chatProvider.callOpenRouterWithRetry({ apiKey, payload });
+}
+
+function buildCompactionFallback({ history = [], selectedMemories = [], previousSummary = '', userMessage = '' } = {}) {
+  const timeline = (Array.isArray(history) ? history : [])
+    .slice(-10)
+    .map((message, index) => {
+      const role = message?.role === 'assistant' ? 'AI' : message?.role === 'user' ? 'User' : 'System';
+      return `- ${index + 1}. [${role}] ${compactHistoryMessage(message?.content || '', 220)}`;
+    });
+  const memorySummary = chatMemory.buildMemoryContext((selectedMemories || []).slice(0, 8));
+  const intent = chatMemory.analyzeMemoryIntent(userMessage || '').intent;
+
+  return chatContext.compactHistoryMessage([
+    'Tujuan utama:',
+    `- Intent aktif: ${intent || 'general'}`,
+    previousSummary ? 'Ringkasan sebelumnya:' : '',
+    previousSummary ? compactHistoryMessage(previousSummary, 420) : '',
+    'Timeline ringkas:',
+    ...(timeline.length > 0 ? timeline : ['- Belum ada histori percakapan yang cukup panjang.']),
+    'Memori penting:',
+    memorySummary || 'Belum ada memori penting tambahan.'
+  ].filter(Boolean).join('\n'), 2200);
+}
+
+async function compactSessionHistory({
+  apiKey,
+  history = [],
+  selectedMemories = [],
+  previousSummary = '',
+  userMessage = '',
+  personName = 'User',
+  subjectName = '',
+  modelConfig = {}
+} = {}) {
+  const historyTimeline = (Array.isArray(history) ? history : [])
+    .slice(-16)
+    .map((message, index) => {
+      const role = message?.role === 'assistant' ? 'AI' : message?.role === 'user' ? 'User' : 'System';
+      return `${index + 1}. [${role}] ${compactHistoryMessage(message?.content || '', 260)}`;
+    })
+    .join('\n');
+  const memoryContext = chatMemory.buildMemoryContext((selectedMemories || []).slice(0, 10));
+
+  const payload = {
+    stream: false,
+    temperature: 0.2,
+    top_p: Math.min(Number(modelConfig.top_p || 0.85), 0.85),
+    max_tokens: Math.min(1600, Number(modelConfig.max_tokens || 1600)),
+    messages: [
+      {
+        role: 'system',
+        content: `Kamu sedang memadatkan konteks sesi untuk ${personName}. Subjek aktif sesi saat ini: ${subjectName || personName}. Jangan campurkan pola subjek aktif ke identitas inti ${personName} kecuali dinyatakan eksplisit. Buat ringkasan checkpoint yang ringkas, akurat, dan siap diinjeksi sebagai system context.\nFormat wajib:\nTujuan utama:\n- ...\nIntent utama:\n- ...\nTimeline kronologis:\n- ...\nKeputusan penting:\n- ...\nMemori aktif yang relevan:\n- ...\nRisiko / constraint:\n- ...\nNext step:\n- ...\nJangan tambahkan fakta baru.`
+      },
+      {
+        role: 'user',
+        content: [
+          previousSummary ? `Checkpoint sebelumnya:\n${previousSummary}` : '',
+          `Pesan user terbaru:\n${userMessage}`,
+          `Histori yang perlu dipadatkan:\n${historyTimeline || '- Tidak ada histori.'}`,
+          `Memori aktif:\n${memoryContext || '- Belum ada memori penting.'}`
+        ].filter(Boolean).join('\n\n')
+      }
+    ]
+  };
+
+  try {
+    const providerResult = await callLLM({ apiKey, payload });
+    if (!providerResult.ok) {
+      return buildCompactionFallback({ history, selectedMemories, previousSummary, userMessage });
+    }
+
+    const responseBody = await providerResult.response.json();
+    const content = String(responseBody?.choices?.[0]?.message?.content || '').trim();
+    if (!content) {
+      return buildCompactionFallback({ history, selectedMemories, previousSummary, userMessage });
+    }
+
+    return chatContext.compactHistoryMessage(content, 2200);
+  } catch {
+    return buildCompactionFallback({ history, selectedMemories, previousSummary, userMessage });
+  }
 }
 
 function buildPromptRelevantSelection(selection = {}, options = {}) {
@@ -81,12 +442,23 @@ function buildPromptRelevantSelection(selection = {}, options = {}) {
     const dedupeKey = String(item.id || `${item.key || ''}:${item.value || ''}`);
     if (seenKeys.has(dedupeKey)) return;
     seenKeys.add(dedupeKey);
+    const metadata = chatMemory.extractStructuredMemoryMetadata(item || {});
     selected.push({
       ...item,
       key: compactText(item?.key || '', 80),
-      value: compactText(item?.value || '', 140)
+      value: String(item?.value || ''),
+      display_value: compactText(metadata.value || item?.value || '', 140),
+      display_subject: metadata.subject || null,
+      display_relation: metadata.relation || null
     });
   };
+
+  for (const item of items) {
+    if (selected.length >= promptLimit) break;
+    if (chatMemory.isLegacyMemory(item) || String(item?.memory_scope || '').trim().toLowerCase() === 'stable') {
+      pushItem(item);
+    }
+  }
 
   for (const item of items) {
     if (selected.length >= promptLimit) break;
@@ -380,7 +752,7 @@ function humanizeMemoryLabel(input = '') {
 }
 
 function buildMemoryBullet(memory = {}) {
-  const value = String(memory.value || '').trim();
+  const value = getReadableMemoryValue(memory);
   const fallback = humanizeMemoryLabel(memory.key || 'memori tanpa detail');
   return `- ${value || fallback}`;
 }
@@ -412,11 +784,25 @@ function buildMemoryContext(memories = []) {
 }
 
 function buildIdentityContext(person = {}, currentAge = '?', familyContext = '', relationContext = '') {
+  const ownerName = String(person?.identity_anchor || person?.owner_name || person?.name || '-').trim() || '-';
+  const currentSubject = String(person?.current_subject || person?.name || ownerName).trim() || ownerName;
+  const relationToOwner = String(person?.relation_to_owner || person?.role || 'tamu').trim() || 'tamu';
+  const hasOwnerAnchor = Boolean(person?.identity_anchor || person?.owner_name);
+
   return [
     '[IDENTITAS]',
-    `Nama: ${person?.name || '-'}`,
-    `Peran: ${person?.role || '-'}`,
-    `Usia: ${currentAge || '?'}`,
+    ...(hasOwnerAnchor
+      ? [
+          `Identitas inti: ${ownerName}`,
+          `Subjek aktif sesi: ${currentSubject}`,
+          `Relasi subjek ke owner: ${relationToOwner}`,
+          `Usia subjek aktif: ${currentAge || '?'}`
+        ]
+      : [
+          `Nama: ${person?.name || '-'}`,
+          `Peran: ${person?.role || '-'}`,
+          `Usia: ${currentAge || '?'}`
+        ]),
     '',
     '[KELUARGA]',
     familyContext || '-',
@@ -427,6 +813,10 @@ function buildIdentityContext(person = {}, currentAge = '?', familyContext = '',
 }
 
 function buildConsistencyLock(person = {}, relevantSelection = {}) {
+  const ownerName = String(person?.identity_anchor || person?.owner_name || person?.name || 'user').trim() || 'user';
+  const currentSubject = String(person?.current_subject || person?.name || ownerName).trim() || ownerName;
+  const relationToOwner = String(person?.relation_to_owner || person?.role || 'anggota keluarga').trim() || 'anggota keluarga';
+  const hasOwnerAnchor = Boolean(person?.identity_anchor || person?.owner_name);
   const typeLabels = {
     pattern: 'pola perilaku',
     kebiasaan: 'kebiasaan',
@@ -442,7 +832,13 @@ function buildConsistencyLock(person = {}, relevantSelection = {}) {
 
   return [
     '[CONSISTENCY LOCK]',
-    `Kamu adalah representasi AI untuk ${person?.name || 'user'} sebagai ${person?.role || 'anggota keluarga'}.`,
+    ...(hasOwnerAnchor
+      ? [
+          `Kamu adalah representasi AI warisan untuk ${ownerName}.`,
+          `Subjek aktif sesi saat ini: ${currentSubject} (${relationToOwner}).`,
+          `Jangan gabungkan sifat, kebiasaan, emosi, atau preferensi ${currentSubject} ke profil inti ${ownerName} kecuali dikonfirmasi eksplisit.`
+        ]
+      : [`Kamu adalah representasi AI untuk ${person?.name || 'user'} sebagai ${person?.role || 'anggota keluarga'}.`]),
     `Jawaban harus konsisten dengan memori terpilih, terutama pada: ${prioritizedTraits.join(', ') || 'identitas, pola perilaku, dan preferensi yang tersedia'}.`,
     'Jika data kurang, gunakan inferensi minimal yang paling masuk akal dan jangan nyatakan sebagai fakta pasti.',
     'Jangan membuat sifat, kebiasaan, emosi, atau preferensi yang bertentangan dengan memori yang tersedia.'
@@ -565,7 +961,7 @@ function computeFreshnessScore(updatedAt) {
 function computeRelevanceToQuery(memory = {}, message = '', preferredTypes = []) {
   const normalizedType = normalizeMemoryType(memory.memory_type || 'fakta');
   const query = normalizeMemoryText(message);
-  const memoryText = [memory.key, memory.value, memory.category, normalizedType]
+  const memoryText = [memory.key, getReadableMemoryValue(memory), memory.category, normalizedType]
     .map(part => normalizeMemoryText(part || ''))
     .join(' ')
     .trim();
@@ -1791,7 +2187,7 @@ export default async function handler(req, res) {
 
     
     // 1. User & Person
-    let userQuery = supabase.from('users').select('id, person_id');
+    let userQuery = supabase.from('users').select('id, person_id, username');
     if (user_id) userQuery = userQuery.eq('id', user_id);
     else if (username) userQuery = userQuery.eq('username', username);
     else throw new Error("user_id atau username wajib");
@@ -1851,11 +2247,19 @@ export default async function handler(req, res) {
     ]);
 
     const person = personResult?.data || null;
+    const runtimeIdentity = buildRuntimeIdentityContext({ person, user });
+    const accountOwner = runtimeIdentity.accountOwner;
+    const currentSubject = runtimeIdentity.currentSubject;
+    const relationToOwner = runtimeIdentity.relationToOwner;
+    const promptIdentityPerson = runtimeIdentity.promptPerson;
+    const ownerUsername = normalizeUsername(process.env.ACCOUNT_OWNER_USERNAME || DEFAULT_ACCOUNT_OWNER_USERNAME);
     perf.mark('base_context_queries_done', {
       has_person: Boolean(person?.id),
       family_count: Array.isArray(allPersonsResult?.data) ? allPersonsResult.data.length : 0,
       relation_count: Array.isArray(relationsResult?.data) ? relationsResult.data.length : 0,
-      history_rows: Array.isArray(chatHistoryResult?.data) ? chatHistoryResult.data.length : 0
+      history_rows: Array.isArray(chatHistoryResult?.data) ? chatHistoryResult.data.length : 0,
+      account_owner: accountOwner,
+      current_subject: currentSubject
     });
 
     const currentAge = calculateAge(person?.date_of_birth);
@@ -1873,6 +2277,22 @@ export default async function handler(req, res) {
 
     // 2. Family context
     const allPersons = allPersonsResult?.data || [];
+    const ownerPerson = await resolveOwnerPersonContext({
+      supabase,
+      allPersons,
+      accountOwner,
+      ownerUsername
+    });
+    const familyQueryContext = resolveFamilyQueryContext({
+      userMessage,
+      currentPerson: person,
+      currentSubject,
+      allPersons,
+      ownerPerson,
+      accountOwner
+    });
+    const familyMemoryTarget = familyQueryContext.targetPerson;
+    const shouldUseFamilyMemoryPool = Boolean(familyQueryContext.useTargetMemoryPool);
     const familyContext = (allPersons || []).map(p => {
       const age = calculateAge(p.date_of_birth);
       const dob = p.date_of_birth ? new Date(p.date_of_birth).toISOString().split('T')[0] : 'tidak diketahui';
@@ -1895,15 +2315,7 @@ export default async function handler(req, res) {
       .filter(p => p.role === 'anak' && p.id)
       .map(p => p.id);
 
-    const [memoriesResult, droppedResult, ...childMemoryResults] = await Promise.all([
-      supabase
-        .from('person_memory')
-        .select('id, key, value, confidence, observation_count, updated_at, priority_score, memory_type, category, status')
-        .eq('person_id', user.person_id)
-        .eq('status', 'active')
-        .order('priority_score', { ascending: false })
-        .order('updated_at', { ascending: false })
-        .limit(injectedMemoryLimit),
+    const [droppedResult, ...childMemoryResults] = await Promise.all([
       supabase
         .from('person_memory')
         .select('key, value')
@@ -1923,14 +2335,13 @@ export default async function handler(req, res) {
       )
     ]);
 
-    const { data: memories } = memoriesResult;
     const droppedMemories = (droppedResult.data || []).filter(m => m.key || m.value);
     const childMemoriesData = childPersonIds.map((childId, idx) => {
       const childPerson = (allPersons || []).find(p => p.id === childId);
       return { name: childPerson?.name || 'Anak', memories: childMemoryResults[idx]?.data || [] };
     }).filter(c => c.memories.length > 0);
     perf.mark('memory_queries_done', {
-      active_memory_count: Array.isArray(memories) ? memories.length : 0,
+      active_memory_count: 0,
       dropped_memory_count: droppedMemories.length,
       child_memory_groups: childMemoriesData.length
     });
@@ -1949,8 +2360,30 @@ export default async function handler(req, res) {
 
     const sessionState = sessionStateResult?.data || null;
 
-    const persistedCheckpointSummary = String(sessionState?.compact_checkpoint_summary || '').trim();
+    const persistedCheckpointState = chatMemory.safeParseCheckpointSummary(sessionState?.compact_checkpoint_summary || '');
+    const persistedCheckpointSummary = persistedCheckpointState.summary;
+    const persistedCheckpointMetadata = persistedCheckpointState.metadata;
     const checkpointMessageId = sessionState?.compact_checkpoint_message_id || null;
+    const pipelineWarnings = [];
+    const pipelineWarningCodes = new Set();
+    const registerPipelineWarning = (code, detail = {}) => {
+      if (pipelineWarningCodes.has(code)) return null;
+      pipelineWarningCodes.add(code);
+      const warning = buildPipelineWarningEntry(code, {
+        trace_id: traceId,
+        session_id: session_id || null,
+        ...detail
+      });
+      pipelineWarnings.push(warning);
+      console.warn('[Pipeline][Warning]', JSON.stringify(warning));
+      return warning;
+    };
+
+    if (sessionState?.compact_checkpoint_summary && !persistedCheckpointSummary) {
+      registerPipelineWarning('checkpoint_summary_missing', {
+        has_raw_checkpoint: Boolean(sessionState?.compact_checkpoint_summary)
+      });
+    }
 
     const chatHistoryRows = chatHistoryResult?.data || [];
 
@@ -1987,50 +2420,227 @@ export default async function handler(req, res) {
       ? checkpointScopedHistory.slice(-effectiveMaxHistory)
       : checkpointScopedHistory;
 
-    const chatHistory = [
-      ...(persistedCheckpointSummary
-        ? [{ role: 'system', content: `Checkpoint sesi aktif (gunakan sebagai konteks utama):\n${persistedCheckpointSummary}` }]
-        : []),
-      ...(olderHistorySummary ? [{ role: 'system', content: olderHistorySummary }] : []),
-      ...recentHistory.map(m => ({ role: m.role, content: m.content }))
-    ];
-
-    // ── SPEECH PATTERN PROFILE ──
     // Dihitung dari histori sesi terbaru + pesan saat ini.
     // Tidak butuh DB extra — cukup dari recentHistory yang sudah di-load.
     const speechProfile = speechStyle.buildSpeechProfile(recentHistory, userMessage);
     const emotionGuidance = chatPreview.buildRuntimeEmotionGuidance(userMessage, recentHistory);
-    const relevantSelection = chatMemory.selectRelevantMemories(memories || [], userMessage, {
+
+    const relevantSelection = await chatMemory.selectRelevantMemories([], userMessage, {
+      supabase,
+      personId: user.person_id,
+      sessionId: session_id || null,
       limit: experimentProfile.relevantMemoryLimit,
+      legacyLimit: injectedMemoryLimit,
+      dynamicLimit: isCompactCheckpointRequest ? 3 : 5,
+      dynamicPoolLimit: Math.max(injectedMemoryLimit, experimentProfile.relevantMemoryLimit),
       weights: experimentProfile.weights,
       minPreferredRelevance: experimentProfile.minPreferredRelevance,
       minOtherRelevance: experimentProfile.minOtherRelevance,
       speechProfile,
       emotionHints: emotionGuidance,
       recurrentTopics: speechProfile?.recurrentTopics || [],
-      familyNames: (allPersons || []).map(p => p.name).filter(Boolean)
+      familyMembers: familyQueryContext.familyMembers,
+      familyNames: (allPersons || []).map(p => p.name).filter(Boolean),
+      currentPersonName: currentSubject
     });
-    const promptRelevantSelection = buildPromptRelevantSelection(relevantSelection, {
-      maxItems: isCompactCheckpointRequest ? 8 : (isDirectShortQuestion ? 6 : 12)
+
+    const familyRelevantSelection = shouldUseFamilyMemoryPool
+      ? await chatMemory.selectRelevantMemories([], familyQueryContext.querySeed, {
+          supabase,
+          personId: familyMemoryTarget.id,
+          sessionId: null,
+          limit: Math.min(experimentProfile.relevantMemoryLimit, 16),
+          legacyLimit: Math.min(injectedMemoryLimit, 40),
+          dynamicLimit: 4,
+          dynamicPoolLimit: Math.min(Math.max(24, experimentProfile.relevantMemoryLimit), 48),
+          weights: experimentProfile.weights,
+          minPreferredRelevance: Math.max(0.08, experimentProfile.minPreferredRelevance - 0.06),
+          minOtherRelevance: Math.max(0.14, experimentProfile.minOtherRelevance - 0.08),
+          speechProfile,
+          emotionHints: emotionGuidance,
+          recurrentTopics: speechProfile?.recurrentTopics || [],
+          familyMembers: familyQueryContext.familyMembers,
+          familyNames: (allPersons || []).map(p => p.name).filter(Boolean),
+          currentPersonName: familyMemoryTarget?.name || accountOwner
+        })
+      : { items: [], legacyItems: [], dynamicItems: [], allMemories: [] };
+
+    const allActiveMemories = Array.isArray(relevantSelection.allMemories) ? relevantSelection.allMemories : [];
+    perf.mark('memory_selection_done', {
+      active_memory_count: allActiveMemories.length,
+      selected_memory_count: Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0,
+      checkpoint_history: Boolean(relevantSelection.checkpointSummary || persistedCheckpointSummary),
+      family_memory_pool_enabled: shouldUseFamilyMemoryPool,
+      family_target_person_id: familyMemoryTarget?.id || null,
+      family_selected_memory_count: Array.isArray(familyRelevantSelection.items) ? familyRelevantSelection.items.length : 0
     });
-    const speechStyleBlock = buildCompactSpeechStylePrompt(speechProfile, person?.name || 'User');
+
+    let effectiveCheckpointSummary = String(relevantSelection.checkpointSummary || persistedCheckpointSummary || '').trim();
+    let promptHistorySummary = olderHistorySummary;
+    let promptRecentHistory = recentHistory;
+    let promptRelevantMaxItems = isCompactCheckpointRequest ? 8 : (isDirectShortQuestion ? 6 : 12);
+    let familyPromptMaxItems = shouldUseFamilyMemoryPool ? 6 : 0;
+
+    const estimateSelectionTokens = (memoryItems = []) => estimateTokens((memoryItems || []).map(memory => {
+      const metadata = chatMemory.extractStructuredMemoryMetadata(memory || {});
+      return [memory?.key, metadata.subject, metadata.relation, metadata.value, metadata.semantic_category]
+        .filter(Boolean)
+        .join(' ');
+    }));
+
+    const computePromptBudgetEstimate = ({
+      memoryItems = (relevantSelection.items || []).slice(0, promptRelevantMaxItems),
+      familyMemoryItems = (familyRelevantSelection.items || []).slice(0, familyPromptMaxItems)
+    } = {}) => {
+      const historyTokenEstimate = estimateTokens(promptRecentHistory.map(message => ({ role: message.role, content: message.content })))
+        + estimateTokens(promptHistorySummary)
+        + estimateTokens(effectiveCheckpointSummary);
+      return historyTokenEstimate + estimateSelectionTokens(memoryItems) + estimateSelectionTokens(familyMemoryItems);
+    };
+
+    const applyRemainingContextFallback = (code, detail = {}) => {
+      const retainedRecentHistoryCount = promptRecentHistory.length > 0
+        ? Math.min(CONTEXT_FALLBACK_HISTORY_COUNT, promptRecentHistory.length)
+        : 0;
+      promptHistorySummary = '';
+      promptRecentHistory = retainedRecentHistoryCount > 0
+        ? promptRecentHistory.slice(-retainedRecentHistoryCount)
+        : [];
+      if (effectiveCheckpointSummary) {
+        effectiveCheckpointSummary = compactHistoryMessage(effectiveCheckpointSummary, 1200);
+      }
+      promptRelevantMaxItems = Math.min(promptRelevantMaxItems, CONTEXT_FALLBACK_MEMORY_LIMIT);
+      familyPromptMaxItems = Math.min(familyPromptMaxItems, 3);
+      const estimatedTokensAfterFallback = computePromptBudgetEstimate();
+      registerPipelineWarning(code, {
+        estimated_tokens_after_fallback: estimatedTokensAfterFallback,
+        retained_recent_history: promptRecentHistory.length,
+        retained_memory_limit: promptRelevantMaxItems,
+        retained_family_memory_limit: familyPromptMaxItems,
+        has_checkpoint: Boolean(effectiveCheckpointSummary),
+        ...detail
+      });
+      return estimatedTokensAfterFallback;
+    };
+
+    let promptBudgetEstimate = computePromptBudgetEstimate();
+    const shouldAutoCompact = Boolean(
+      session_id
+      && !isCompactCheckpointRequest
+      && promptBudgetEstimate > AUTO_COMPACT_TRIGGER_TOKENS
+      && checkpointScopedHistory.length > 4
+    );
+
+    if (shouldAutoCompact) {
+      const compactedSummary = await compactSessionHistory({
+        apiKey,
+        history: checkpointScopedHistory.slice(-MAX_HISTORY_MESSAGES_COMPACT),
+        selectedMemories: relevantSelection.items || [],
+        previousSummary: effectiveCheckpointSummary,
+        userMessage,
+        personName: accountOwner,
+        subjectName: currentSubject
+      });
+
+      if (compactedSummary) {
+        effectiveCheckpointSummary = compactedSummary;
+        promptHistorySummary = '';
+        promptRecentHistory = recentHistory.slice(-Math.min(4, recentHistory.length || 0));
+        promptBudgetEstimate = computePromptBudgetEstimate();
+
+        try {
+          const serializedAutoCheckpoint = chatMemory.stringifyCheckpointSummary({
+            summary: compactedSummary,
+            memories: allActiveMemories,
+            metadata: persistedCheckpointMetadata,
+            lastIntent: relevantSelection.intent,
+            tokenUsageEstimate: promptBudgetEstimate
+          });
+
+          if (!serializedAutoCheckpoint) {
+            registerPipelineWarning('checkpoint_summary_empty_after_auto_compaction', {
+              estimated_tokens: promptBudgetEstimate
+            });
+          } else {
+            const { error: autoCompactPersistError } = await supabase
+              .from('sessions')
+              .update({
+                compact_checkpoint_summary: serializedAutoCheckpoint,
+                compact_checkpoint_at: new Date().toISOString()
+              })
+              .eq('id', session_id);
+
+            if (autoCompactPersistError) throw autoCompactPersistError;
+          }
+        } catch (autoCompactErr) {
+          console.error('[Checkpoint] Gagal simpan auto-compaction:', autoCompactErr.message);
+          registerPipelineWarning('checkpoint_auto_compaction_persist_failed', {
+            error: autoCompactErr.message,
+            estimated_tokens: promptBudgetEstimate
+          });
+        }
+
+        perf.mark('auto_compaction_applied', {
+          estimated_tokens: promptBudgetEstimate,
+          summary_chars: compactedSummary.length
+        });
+      } else {
+        promptBudgetEstimate = applyRemainingContextFallback('checkpoint_summary_unavailable', {
+          stage: 'auto_compaction',
+          estimated_tokens_before_fallback: promptBudgetEstimate
+        });
+      }
+    }
+
+    if (promptBudgetEstimate > CONTEXT_HARD_WARNING_TOKENS) {
+      promptBudgetEstimate = applyRemainingContextFallback('prompt_budget_over_85_percent', {
+        estimated_tokens_before_fallback: promptBudgetEstimate
+      });
+    }
+
+    const chatHistory = [
+      ...(effectiveCheckpointSummary
+        ? [{ role: 'system', content: `Checkpoint sesi aktif (gunakan sebagai konteks utama):\n${effectiveCheckpointSummary}` }]
+        : []),
+      ...(promptHistorySummary ? [{ role: 'system', content: promptHistorySummary }] : []),
+      ...promptRecentHistory.map(m => ({ role: m.role, content: m.content }))
+    ];
+
+    let promptRelevantSelection = buildPromptRelevantSelection(relevantSelection, {
+      maxItems: promptRelevantMaxItems
+    });
+    const familyPromptSelection = shouldUseFamilyMemoryPool
+      ? buildPromptRelevantSelection(familyRelevantSelection, {
+          maxItems: familyPromptMaxItems
+        })
+      : { items: [], legacyItems: [], dynamicItems: [] };
+    promptBudgetEstimate = computePromptBudgetEstimate({
+      memoryItems: promptRelevantSelection.items || [],
+      familyMemoryItems: familyPromptSelection.items || []
+    });
+    const speechStyleBlock = buildCompactSpeechStylePrompt(speechProfile, currentSubject || 'User');
     promptMemoryCountForPerf = Array.isArray(promptRelevantSelection.items)
       ? promptRelevantSelection.items.length
       : 0;
     perf.mark('prompt_signals_ready', {
       selected_memories: Array.isArray(relevantSelection.items) ? relevantSelection.items.length : 0,
       prompt_memories: promptMemoryCountForPerf,
-      recent_history_messages: recentHistory.length,
-      checkpoint_history: Boolean(persistedCheckpointSummary)
+      family_prompt_memories: Array.isArray(familyPromptSelection.items) ? familyPromptSelection.items.length : 0,
+      recent_history_messages: promptRecentHistory.length,
+      checkpoint_history: Boolean(effectiveCheckpointSummary),
+      auto_compact: shouldAutoCompact,
+      estimated_tokens: promptBudgetEstimate,
+      warning_count: pipelineWarnings.length
     });
 
-    const cognitiveProfile = (memories || []).reduce((acc, memory) => {
+    const cognitiveProfile = (allActiveMemories || []).reduce((acc, memory) => {
       const normalizedKey = chatMemory.normalizeMemoryKey(memory?.key || '');
       if (!normalizedKey || acc[normalizedKey]) return acc;
       if (!['profil_mbti', 'pola_pikir_inti', 'prinsip_keputusan', 'nilai_hidup'].includes(normalizedKey)) {
         return acc;
       }
-      const value = String(memory?.value || '').trim();
+      const metadata = chatMemory.extractStructuredMemoryMetadata(memory || {});
+      const value = String(metadata.value || memory?.value || '').trim();
       if (!value) return acc;
       acc[normalizedKey] = value;
       return acc;
@@ -2041,7 +2651,7 @@ export default async function handler(req, res) {
       (/\bintp(?:-[at])?\b/i.test(userMessage) ? 'INTP-A' : '')
     ).trim().toUpperCase();
     const isIntpUser = userMbtiUpper.startsWith('INTP');
-    const isRosaliaUser = /rosalia/i.test(String(person?.name || ''));
+    const isRosaliaUser = /rosalia/i.test(String(currentSubject || ''));
     const talksAboutRosalia = /\brosalia\b|\bistri\b|\bsayang\b/i.test(userMessage);
     const isFastDecisionContext = /kode|coding|bug|deploy|urgent|deadline|cepat|sekarang|produksi|server|incident|keputusan\s+cepat|decision-fast|kerja|work/i.test(msgLower);
 
@@ -2068,12 +2678,12 @@ export default async function handler(req, res) {
 
     const systemIdentityPrompt = {
       role: 'system',
-      content: `Konteks identitas keluarga:\n${chatContext.buildIdentityContext(person, currentAge, familyContext, relationContext)}`
+      content: `Konteks identitas keluarga:\n${chatContext.buildIdentityContext(promptIdentityPerson, currentAge, familyContext, relationContext)}`
     };
 
     const systemConsistencyPrompt = {
       role: 'system',
-      content: chatContext.buildConsistencyLock(person, promptRelevantSelection)
+      content: chatContext.buildConsistencyLock(promptIdentityPerson, promptRelevantSelection)
     };
 
     const emotionEvidence = limitList(emotionGuidance.evidence, 4);
@@ -2105,9 +2715,34 @@ export default async function handler(req, res) {
         memoryContextText,
         '',
         '[LAST CHAT]',
-        chatContext.buildLastChatContext(recentHistory, isCompactCheckpointRequest ? 6 : 5)
+        chatContext.buildLastChatContext(promptRecentHistory, isCompactCheckpointRequest ? 6 : 5)
       ].join('\n')
     };
+
+    let systemFamilyMemoryPrompt = null;
+    if (shouldUseFamilyMemoryPool) {
+      const familyMemoryContextText = chatMemory.buildMemoryContext(familyPromptSelection.items || []);
+      if (!Array.isArray(familyPromptSelection.items) || familyPromptSelection.items.length === 0) {
+        registerPipelineWarning('family_memory_pool_empty', {
+          target_person_id: familyMemoryTarget?.id || null,
+          target_name: familyMemoryTarget?.name || familyQueryContext.subjectInfo?.subject || null
+        });
+      }
+
+      systemFamilyMemoryPrompt = {
+        role: 'system',
+        content: [
+          `[MEMORI SUBJEK KELUARGA: ${String(familyMemoryTarget?.name || familyQueryContext.subjectInfo?.subject || accountOwner).toUpperCase()}]`,
+          `Pertanyaan user mengarah ke ${familyMemoryTarget?.name || familyQueryContext.subjectInfo?.subject || accountOwner}${familyMemoryTarget?.role ? ` (${familyMemoryTarget.role})` : ''}.`,
+          `Identitas inti AI tetap ${accountOwner}, tetapi untuk pertanyaan ini prioritaskan memori subjek keluarga yang sedang ditanyakan.`,
+          `Subjek aktif sesi tetap ${currentSubject}. Jangan pindahkan sifat atau kebiasaan ${familyMemoryTarget?.name || familyQueryContext.subjectInfo?.subject || 'subjek keluarga'} ke ${currentSubject} atau ke profil inti ${accountOwner} kecuali user menanyakan perbandingan secara eksplisit.`,
+          familyQueryContext.subjectInfo?.relation
+            ? `Relasi yang terbaca di pertanyaan: ${familyQueryContext.subjectInfo.relation}.`
+            : '',
+          familyMemoryContextText || 'Belum ada memori keluarga yang cukup untuk menjawab detail pertanyaan ini.'
+        ].join('\n')
+      };
+    }
 
     const systemEmotionGuidancePrompt = {
       role: 'system',
@@ -2180,13 +2815,14 @@ export default async function handler(req, res) {
     const systemPrompt = {
       role: "system",
       content: `Kamu adalah AAi, AI keluarga yang cerdas dan ramah.
+    Kamu adalah AAi, asisten inti untuk ${accountOwner}.
+    Saat ini yang berinteraksi: ${currentSubject} (role: ${relationToOwner}).
 
 Persona aktif: ${personaList.join(' + ')}
 ${combinedSystem}
 
 ATURAN PENTING:
 - Gunakan bahasa Indonesia sehari-hari + emoji.
-- Default jawaban: ringkas, langsung ke inti, dan mudah dibaca.
 - WAJIB jawab inti pertanyaan user pada kalimat pertama.
 - Untuk pertanyaan faktual/langsung, JANGAN mulai jawaban dengan "aku ingat..." atau ringkasan memori kecuali user memang menanyakannya.
 - Hindari format list bernomor (1, 2, 3) kecuali user memang meminta format langkah/urutan.
@@ -2234,7 +2870,7 @@ ATURAN DETEKSI & MANAJEMEN TEMAN (PENTING):
   * "Aku teman [nama pemilik akun], namaku [nama teman]"
   * "Namaku [nama], aku teman [nama pemilik akun]"
   * "Saya [nama], teman dari [nama pemilik akun]"
-  * Atau variasi serupa dengan "teman", "sahabat"
+  * Atau variasi serupa dengan "teman", "sahabat", keluarga dekat, atau istilah serupa yang menunjukkan hubungan personal dekat.
 - LANGKAH PERTAMA (WAJIB): Cek konteks [TEMAN-TEMAN YANG DIKENAL] terlebih dahulu.
   * Jika nama tersebut (atau nama serupa/mirip) SUDAH ADA di daftar teman, JANGAN output tag [SUGGEST-FRIEND:...].
   * Sambut mereka dengan hangat menggunakan memori yang sudah tersimpan.
@@ -2246,7 +2882,14 @@ ATURAN DETEKSI & MANAJEMEN TEMAN (PENTING):
 - Ingat: tujuan tag ini agar sistem bisa menyarankan ke user untuk menyimpan teman baru, sehingga AI bisa mengingat mereka ke depannya.
 
 ATURAN MEMORI & PENGENALAN POLA (SANGAT PENTING – SELALU IKUTI):
-Visi: kamu sedang membangun representasi digital ${person?.name}. Setiap percakapan adalah data.
+Visi: kamu sedang membangun representasi digital ${accountOwner}. Setiap percakapan adalah data.
+Subjek aktif sesi ini: ${currentSubject} (role: ${relationToOwner}).
+Aturan inti warisan:
+- Identitas representasi digital tetap ${accountOwner}.
+- Catat semua input dari ${currentSubject} dengan subject eksplisit.
+- Jangan gabungkan pola/kebiasaan ${currentSubject} ke profil ${accountOwner} kecuali dikonfirmasi langsung.
+- ${familyMemoryTarget?.name ? `Jika user sedang membahas ${familyMemoryTarget.name}, gunakan subject eksplisit ${familyMemoryTarget.name}.` : 'Jika user sedang membahas anggota keluarga lain, gunakan subject eksplisit nama orang itu.'}
+- Jika subjek benar-benar tidak terdeteksi, default ke ${currentSubject}, bukan otomatis ke ${accountOwner}.
 Prioritas utama: rekam POLA dan INSIGHT yang bermakna, bukan sekadar fakta permukaan.
 
 APA YANG WAJIB DIREKAM (pilih yang paling signifikan, maks 3 per respons):
@@ -2381,6 +3024,26 @@ MENGHAPUS MEMORI:
       preview_enabled: Boolean(previewPayload)
     });
 
+    try {
+      await chatMemory.recordLegacyMemoryAccesses(supabase, user.person_id, relevantSelection.legacyItems || [], {
+        sessionId: currentSessionId,
+        sourceMessageId: finalUserMessageId,
+        intent: relevantSelection.intent,
+        reasonCode: 'legacy_prompt_retrieval'
+      });
+
+      if (shouldUseFamilyMemoryPool && familyMemoryTarget?.id) {
+        await chatMemory.recordLegacyMemoryAccesses(supabase, familyMemoryTarget.id, familyRelevantSelection.legacyItems || [], {
+          sessionId: currentSessionId,
+          sourceMessageId: finalUserMessageId,
+          intent: familyRelevantSelection.intent || relevantSelection.intent,
+          reasonCode: familyQueryContext.accessReasonCode
+        });
+      }
+    } catch (legacyAccessErr) {
+      console.error('[Memory] Gagal touch legacy access:', legacyAccessErr.message);
+    }
+
     // ── STREAMING ──
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -2464,7 +3127,7 @@ MENGHAPUS MEMORI:
           ...friend,
           memories: limitList(friend.memories, promptFriendLimit).map(memory => ({
             ...memory,
-            value: compactText(memory?.value || memory?.key || '', 90)
+            value: compactText(getReadableMemoryValue(memory) || memory?.key || '', 90)
           }))
         }));
       // ALWAYS build friend context block (even if empty) so LLM knows what to reference
@@ -2488,10 +3151,22 @@ MENGHAPUS MEMORI:
     if (droppedMemories.length > 0) {
       const droppedLines = droppedMemories
         .slice(0, isCompactCheckpointRequest ? 4 : 5)
-        .map(m => `- ${compactText(m.key, 40)}: ${compactText(m.value, 90)}`);
+        .map(m => `- ${compactText(m.key, 40)}: ${compactText(getReadableMemoryValue(m), 90)}`);
       systemDroppedMemoryPrompt = {
         role: 'system',
         content: `[JEJAK MEMORI YANG PERNAH DILEPAS]\nMemori berikut pernah diminta dilupakan user. Jejak datanya masih tersimpan ringan.\nGunakan HANYA jika user tanya soal hal yang sudah dilupakan dengan sebutan seperti 'masih ingat soal X?', 'apa kau masih ingat', atau mempertanyakan hal lupa.\nSaat itu, sebutkan: "Aku masih ingat sedikit jejaknya — [data]." Jangan bawa sewaktu tidak ditanya.\n${droppedLines.join('\\n')}`
+      };
+    }
+
+    let systemRuntimeWarningPrompt = null;
+    if (pipelineWarnings.length > 0) {
+      const warningLines = pipelineWarnings
+        .slice(0, 4)
+        .map(warning => `- ${warning.code}`)
+        .join('\n');
+      systemRuntimeWarningPrompt = {
+        role: 'system',
+        content: `[KONTEKS TERBATAS]\nSebagian konteks sesi dipadatkan atau dipangkas karena checkpoint tidak lengkap atau budget konteks terlalu tinggi. Gunakan recent history dan memori relevan yang masih tersisa. Jika konteks tidak cukup, minta klarifikasi singkat dan jangan mengarang.\n${warningLines}`
       };
     }
 
@@ -2506,7 +3181,7 @@ MENGHAPUS MEMORI:
           const headerLine = `${child.name}:`;
           const memLines = (child.memories || [])
             .slice(0, isCompactCheckpointRequest ? 2 : 3)
-            .map(m => `  - ${compactText(m.value || m.key, 90)}`);
+            .map(m => `  - ${compactText(getReadableMemoryValue(m) || m.key, 90)}`);
           return [headerLine, ...memLines];
         })
         .slice(0, isCompactCheckpointRequest ? 12 : 16);
@@ -2523,6 +3198,8 @@ MENGHAPUS MEMORI:
         systemIdentityPrompt,
         systemConsistencyPrompt,
         ...(isDirectShortQuestion ? [] : [systemMemoryContextPrompt]),
+        ...(systemFamilyMemoryPrompt ? [systemFamilyMemoryPrompt] : []),
+        ...(systemRuntimeWarningPrompt ? [systemRuntimeWarningPrompt] : []),
         ...(systemFriendContextPrompt ? [systemFriendContextPrompt] : []),
         systemEmotionGuidancePrompt,
         systemIntentSignalsPrompt,
@@ -2548,6 +3225,7 @@ MENGHAPUS MEMORI:
       prompt_chars: promptCharsForPerf,
       prompt_messages: openRouterPayload.messages.length,
       prompt_memories: promptMemoryCountForPerf,
+      family_prompt_memories: Array.isArray(familyPromptSelection.items) ? familyPromptSelection.items.length : 0,
       known_friend_count: knownFriendsData.length,
       dropped_memory_count: droppedMemories.length,
       child_memory_groups: childMemoriesData.length
@@ -2674,7 +3352,14 @@ MENGHAPUS MEMORI:
     if (true) {
       // ── PARSE & STRIP MEMORY CONTROL TAGS ──
       const memoryOps = chatMemory.parseMemoryInstructionTags(fullReply);
-      const memoryQuality = chatMemory.filterMemoryUpserts(memoryOps.memoryUpserts, { maxItems: 3 });
+      const memoryQuality = chatMemory.filterMemoryUpserts(memoryOps.memoryUpserts, {
+        maxItems: 3,
+        userMessage,
+        familyMembers: familyQueryContext.familyMembers,
+        familyNames: (allPersons || []).map(p => p.name).filter(Boolean),
+        currentPersonName: currentSubject,
+        knownFriends: knownFriendsData
+      });
       let detectedMemories = memoryQuality.accepted;
       const rejectedMemoryCandidates = memoryQuality.rejected;
       const detectedForgetKeys = memoryOps.forgetKeys;
@@ -2804,16 +3489,38 @@ MENGHAPUS MEMORI:
 
       if (isCompactCheckpointRequest && currentSessionId && aiMsgData?.id) {
         try {
-          await supabase
-            .from('sessions')
-            .update({
-              compact_checkpoint_summary: checkpointSummaryToPersist || chatContext.compactHistoryMessage(cleanReply, 2600),
-              compact_checkpoint_message_id: aiMsgData.id,
-              compact_checkpoint_at: new Date().toISOString()
-            })
-            .eq('id', currentSessionId);
+          const serializedCheckpoint = chatMemory.stringifyCheckpointSummary({
+            summary: checkpointSummaryToPersist || chatContext.compactHistoryMessage(cleanReply, 2600),
+            memories: allActiveMemories,
+            metadata: persistedCheckpointMetadata,
+            lastIntent: relevantSelection.intent,
+            tokenUsageEstimate: promptBudgetEstimate
+          });
+
+          if (!serializedCheckpoint) {
+            registerPipelineWarning('checkpoint_summary_empty_after_explicit_request', {
+              session_id: currentSessionId,
+              assistant_message_id: aiMsgData.id
+            });
+          } else {
+            const { error: checkpointPersistError } = await supabase
+              .from('sessions')
+              .update({
+                compact_checkpoint_summary: serializedCheckpoint,
+                compact_checkpoint_message_id: aiMsgData.id,
+                compact_checkpoint_at: new Date().toISOString()
+              })
+              .eq('id', currentSessionId);
+
+            if (checkpointPersistError) throw checkpointPersistError;
+          }
         } catch (checkpointErr) {
           console.error('[Checkpoint] Gagal simpan checkpoint sesi:', checkpointErr.message);
+          registerPipelineWarning('checkpoint_explicit_persist_failed', {
+            session_id: currentSessionId,
+            assistant_message_id: aiMsgData.id,
+            error: checkpointErr.message
+          });
         }
       }
       perf.mark('assistant_persisted', {
@@ -2916,22 +3623,85 @@ MENGHAPUS MEMORI:
         }
       }
 
+      let provisionalFriendTrackCount = 0;
+      if (friendSuggestions.length > 0 && user.person_id) {
+        for (const suggestion of friendSuggestions) {
+          try {
+            const trackResult = await chatMemory.trackProvisionalFriend(
+              supabase,
+              user.person_id,
+              suggestion.intro_msg || userMessage,
+              {
+                sourceMessageId: aiMsgData?.id || null,
+                sourcePersonId: user.person_id,
+                currentPersonName: currentSubject,
+                familyNames: (allPersons || []).map(p => p.name).filter(Boolean),
+                knownFriends: knownFriendsData
+              }
+            );
+
+            if (trackResult?.tracked) {
+              provisionalFriendTrackCount += 1;
+            }
+          } catch (trackErr) {
+            console.error('[Friend Memory] Gagal track provisional friend:', trackErr.message);
+          }
+        }
+      }
+
       // ── UPSERT/ARCHIVE MEMORI AI SECARA BACKGROUND ──
+      let lockedKeys = null;
+      const lifecyclePersonIds = new Set();
       if ((detectedMemories.length > 0 || detectedForgetKeys.length > 0 || rejectedMemoryCandidates.length > 0) && user.person_id) {
         const memoryAuditEvents = [];
+        const touchedPersonIds = lifecyclePersonIds;
+        const memoryPoolByPersonId = new Map();
         const buildAuditEvent = (event = {}) => ({
-          person_id: user.person_id,
+          person_id: event.person_id || user.person_id,
           session_id: currentSessionId,
           source_message_id: event.source_message_id || aiMsgData?.id || null,
           ...event
         });
-        const { data: existingMemories } = await supabase
-          .from('person_memory')
-          .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope')
-          .eq('person_id', user.person_id)
-          .in('status', ['active', 'archived']);
+        const rememberTouchedPerson = (personId) => {
+          if (personId) touchedPersonIds.add(personId);
+        };
+        const resolveTargetPerson = (reference = '', fallbackPersonId = null) => {
+          const resolvedPerson = resolveFamilyMemberFromReference(reference, allPersons, familyQueryContext.familyMembers);
+          if (resolvedPerson?.id) return resolvedPerson;
 
-        const memoryPool = Array.isArray(existingMemories) ? [...existingMemories] : [];
+          if (!fallbackPersonId) return null;
+          return (allPersons || []).find(personRow => personRow?.id === fallbackPersonId) || null;
+        };
+        const loadMemoryPool = async (personId) => {
+          if (!personId) return [];
+          if (memoryPoolByPersonId.has(personId)) {
+            return memoryPoolByPersonId.get(personId);
+          }
+
+          const { data: existingMemories } = await supabase
+            .from('person_memory')
+            .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope, source_person_id')
+            .eq('person_id', personId)
+            .in('status', ['active', 'archived']);
+
+          const pool = Array.isArray(existingMemories) ? [...existingMemories] : [];
+          memoryPoolByPersonId.set(personId, pool);
+          return pool;
+        };
+        try {
+          lockedKeys = await getLockedMemoryKeys({
+            supabase,
+            userId: user.id
+          });
+        } catch (lockKeysErr) {
+          console.error('[Memory] Gagal ambil locked keys:', lockKeysErr.message);
+          lockedKeys = new Set();
+        }
+        const currentPersonNameNormalized = chatMemory.normalizeMemoryText(currentSubject || '');
+        const getComparableValue = (memory = {}) => {
+          const metadata = chatMemory.extractStructuredMemoryMetadata(memory || {});
+          return String(metadata.value || memory?.value || '').trim();
+        };
 
         if (rejectedMemoryCandidates.length > 0) {
           for (const rejected of rejectedMemoryCandidates) {
@@ -2946,11 +3716,47 @@ MENGHAPUS MEMORI:
         }
 
         for (const mem of detectedMemories) {
+          let targetPersonId = user.person_id;
+          let targetPersonName = currentSubject;
           try {
             const normalizedKey = chatMemory.normalizeMemoryKey(mem.key);
             const normalizedType = chatMemory.normalizeMemoryType(mem.memoryType);
             const normalizedValue = String(mem.value || '').trim();
             const normalizedCategory = String(mem.category || 'umum').trim().toLowerCase().slice(0, 60) || 'umum';
+            const memoryInput = {
+              key: normalizedKey,
+              value: normalizedValue,
+              memoryType: normalizedType,
+              category: normalizedCategory
+            };
+            const incomingMetadata = chatMemory.extractStructuredMemoryMetadata(memoryInput);
+            const normalizedSubject = chatMemory.normalizeMemoryText(incomingMetadata.subject || '');
+            const targetPerson = resolveTargetPerson(incomingMetadata.subject || '', familyMemoryTarget?.id || user.person_id)
+              || person
+              || { id: user.person_id, name: currentSubject };
+            targetPersonId = targetPerson?.id || user.person_id;
+            targetPersonName = String(targetPerson?.name || incomingMetadata.subject || currentSubject).trim() || currentSubject;
+            const targetLockedKeys = targetPersonId === user.person_id ? lockedKeys : new Set();
+            const shouldUseLockGuard = targetPersonId === user.person_id;
+            const memoryPool = await loadMemoryPool(targetPersonId);
+            rememberTouchedPerson(targetPersonId);
+            const sourcePersonId = normalizedSubject && currentPersonNameNormalized && normalizedSubject !== currentPersonNameNormalized
+              ? user.person_id
+              : null;
+
+            if (chatMemory.shouldSkipAutomatedMutation(memoryInput, { lockedKeys: targetLockedKeys })) {
+              memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
+                event_type: 'memory_skip_automated_mutation',
+                reason_code: targetLockedKeys?.has(normalizedKey) ? 'locked_key' : (normalizedCategory === 'provisional_friend' ? 'provisional_friend' : 'legacy_category'),
+                payload: {
+                  key: normalizedKey,
+                  category: normalizedCategory
+                }
+              }));
+              continue;
+            }
+
             const evidenceChain = buildEvidenceChain({
               traceId,
               userMessage,
@@ -2962,17 +3768,22 @@ MENGHAPUS MEMORI:
                 category: normalizedCategory
               }
             });
-            const guardResult = await saveMemoryWithLockGuard({
-              supabase,
-              userId: user.id,
-              memoryKey: normalizedKey,
-              content: formatMemoryContent(normalizedKey, normalizedValue),
-              evidenceChain
-            });
-            lockStatus = mergeLockStatus(lockStatus, guardResult.status);
+            const guardResult = shouldUseLockGuard
+              ? await saveMemoryWithLockGuard({
+                  supabase,
+                  userId: user.id,
+                  memoryKey: normalizedKey,
+                  content: formatMemoryContent(normalizedKey, normalizedValue),
+                  evidenceChain
+                })
+              : { status: 'saved', memoryId: null, draftId: null };
+            if (shouldUseLockGuard) {
+              lockStatus = mergeLockStatus(lockStatus, guardResult.status);
+            }
 
             if (guardResult.status === 'draft' || guardResult.status === 'locked') {
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: guardResult.status === 'draft' ? 'memory_locked_to_draft' : 'memory_locked_skip',
                 memory_id: guardResult.memoryId,
                 reason_code: guardResult.status === 'draft' ? 'lock_guard_draft' : 'lock_guard_locked',
@@ -2988,33 +3799,48 @@ MENGHAPUS MEMORI:
               continue;
             }
 
-            memoryAuditEvents.push(buildAuditEvent({
-              event_type: 'memory_lock_guard_saved',
-              memory_id: guardResult.memoryId,
-              reason_code: 'lock_guard_saved',
-              payload: {
-                key: normalizedKey,
-                trace_id: traceId,
-                lock_status: guardResult.status
-              }
-            }));
-            const memoryInput = {
-              key: normalizedKey,
-              value: normalizedValue,
-              memoryType: normalizedType,
-              category: normalizedCategory
-            };
+            if (shouldUseLockGuard) {
+              memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
+                event_type: 'memory_lock_guard_saved',
+                memory_id: guardResult.memoryId,
+                reason_code: 'lock_guard_saved',
+                payload: {
+                  key: normalizedKey,
+                  trace_id: traceId,
+                  lock_status: guardResult.status
+                }
+              }));
+            }
             const memoryScope = chatMemory.resolveMemoryScope(memoryInput);
+            const incomingClaimHash = chatMemory.buildMemoryClaimHash(memoryInput);
             const exact = memoryPool.find(item =>
+              item.status === 'active' &&
+              chatMemory.buildMemoryClaimHash(item) === incomingClaimHash
+            ) || memoryPool.find(item =>
               item.status === 'active' &&
               chatMemory.normalizeMemoryType(item.memory_type) === normalizedType &&
               chatMemory.normalizeMemoryKey(item.key) === normalizedKey
             );
 
+            if (exact?.id && chatMemory.shouldSkipAutomatedMutation(exact, { lockedKeys: targetLockedKeys })) {
+              memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
+                event_type: 'memory_skip_automated_mutation',
+                memory_id: exact.id,
+                reason_code: 'existing_memory_protected',
+                payload: {
+                  key: exact.key,
+                  category: exact.category
+                }
+              }));
+              continue;
+            }
+
             const sameValueMatch = exact || memoryPool.find(item => {
               if (item.status !== 'active') return false;
               if (chatMemory.normalizeMemoryType(item.memory_type) !== normalizedType) return false;
-              return chatMemory.jaccardSimilarity(item.value, normalizedValue) >= 0.86;
+              return chatMemory.jaccardSimilarity(getComparableValue(item), incomingMetadata.value || normalizedValue) >= 0.86;
             });
 
             const fuzzy = sameValueMatch || memoryPool.find(item => {
@@ -3023,14 +3849,29 @@ MENGHAPUS MEMORI:
               return chatMemory.jaccardSimilarity(item.key, normalizedKey) >= 0.72;
             });
 
+            if (fuzzy?.id && chatMemory.shouldSkipAutomatedMutation(fuzzy, { lockedKeys: targetLockedKeys })) {
+              memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
+                event_type: 'memory_skip_automated_mutation',
+                memory_id: fuzzy.id,
+                reason_code: 'existing_memory_protected',
+                payload: {
+                  key: fuzzy.key,
+                  category: fuzzy.category
+                }
+              }));
+              continue;
+            }
+
             const persistedKey = sameValueMatch?.id
               ? chatMemory.normalizeMemoryKey(sameValueMatch.key)
               : normalizedKey;
-            const conflictDetected = fuzzy?.id ? isMeaningfulMemoryConflict(fuzzy.value, normalizedValue) : false;
+            const fuzzyValue = getComparableValue(fuzzy || {});
+            const conflictDetected = fuzzy?.id ? isMeaningfulMemoryConflict(fuzzyValue, incomingMetadata.value || normalizedValue) : false;
             const evidenceAssessment = chatMemory.assessMemoryEvidence(memoryInput, emotionGuidance, speechProfile);
             const evidenceStatusOverride = conflictDetected && memoryScope === 'stable' ? 'conflict' : '';
             const evidencePayload = chatMemory.buildMemoryEvidenceRecord({
-              personId: user.person_id,
+              personId: targetPersonId,
               memoryId: fuzzy?.id || null,
               memory: memoryInput,
               sourceMessageId: aiMsgData?.id,
@@ -3041,10 +3882,11 @@ MENGHAPUS MEMORI:
               speechProfile,
               statusOverride: evidenceStatusOverride
             });
-            const existingEvidence = await findMemoryEvidenceByContextHash(user.person_id, evidencePayload.unique_context_hash);
+            const existingEvidence = await findMemoryEvidenceByContextHash(targetPersonId, evidencePayload.unique_context_hash);
 
             if (existingEvidence?.id) {
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: 'memory_evidence_duplicate_context',
                 memory_id: existingEvidence.memory_id || fuzzy?.id || null,
                 evidence_id: existingEvidence.id,
@@ -3068,13 +3910,14 @@ MENGHAPUS MEMORI:
               });
 
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: 'stable_memory_conflict_detected',
                 memory_id: fuzzy.id,
                 evidence_id: insertedConflictEvidence?.id || null,
                 reason_code: 'stable_conflict_pending_review',
                 payload: {
                   key: normalizedKey,
-                  old_value: fuzzy.value,
+                  old_value: fuzzyValue,
                   new_value: normalizedValue,
                   memory_scope: memoryScope,
                   reliability_score: evidencePayload.reliability_score,
@@ -3093,6 +3936,7 @@ MENGHAPUS MEMORI:
               });
 
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: 'memory_evidence_deferred',
                 memory_id: fuzzy?.id || null,
                 evidence_id: insertedProvisionalEvidence?.id || null,
@@ -3123,6 +3967,7 @@ MENGHAPUS MEMORI:
 
               if (duplicate) {
                 memoryAuditEvents.push(buildAuditEvent({
+                  person_id: targetPersonId,
                   event_type: 'memory_evidence_duplicate_context',
                   memory_id: fuzzy.id,
                   reason_code: 'duplicate_context_hash_race',
@@ -3154,6 +3999,7 @@ MENGHAPUS MEMORI:
                   confidence: aggregateMetrics.confidence,
                   priority_score: aggregateMetrics.priorityScore,
                   source_message_id: aiMsgData?.id,
+                  source_person_id: sourcePersonId || fuzzy?.source_person_id || null,
                   deleted_at: null,
                   deleted_by: null,
                   deletion_reason: null
@@ -3173,9 +4019,11 @@ MENGHAPUS MEMORI:
                   observation_count: aggregateMetrics.observationCount,
                   confidence: aggregateMetrics.confidence
                 };
+                memoryPool[poolIdx].source_person_id = sourcePersonId || fuzzy?.source_person_id || null;
               }
 
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: 'memory_updated',
                 memory_id: fuzzy.id,
                 evidence_id: insertedEvidence?.id || null,
@@ -3188,7 +4036,7 @@ MENGHAPUS MEMORI:
                   reliability_score: evidencePayload.reliability_score
                 }
               }));
-              console.log(`[Memory] Update "${persistedKey}" for person ${user.person_id}`);
+              console.log(`[Memory] Update "${persistedKey}" for person ${targetPersonId} (${targetPersonName})`);
               continue;
             }
 
@@ -3198,7 +4046,7 @@ MENGHAPUS MEMORI:
               memoryScope
             });
             const insertPayload = {
-              person_id: user.person_id,
+              person_id: targetPersonId,
               key: variantKey,
               value: normalizedValue,
               memory_type: normalizedType,
@@ -3208,13 +4056,14 @@ MENGHAPUS MEMORI:
               confidence: insertMetrics.confidence,
               observation_count: insertMetrics.observationCount,
               priority_score: insertMetrics.priorityScore,
-              source_message_id: aiMsgData?.id
+              source_message_id: aiMsgData?.id,
+              source_person_id: sourcePersonId
             };
 
             const { data: insertedMemory } = await supabase
               .from('person_memory')
               .insert(insertPayload)
-              .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope')
+              .select('id, key, value, memory_type, category, status, observation_count, confidence, memory_scope, source_person_id')
               .single();
 
             if (insertedMemory) memoryPool.push(insertedMemory);
@@ -3229,6 +4078,7 @@ MENGHAPUS MEMORI:
 
             if (duplicate) {
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: targetPersonId,
                 event_type: 'memory_evidence_duplicate_context',
                 memory_id: insertedMemory?.id || null,
                 reason_code: 'duplicate_context_after_insert',
@@ -3242,6 +4092,7 @@ MENGHAPUS MEMORI:
             }
 
             memoryAuditEvents.push(buildAuditEvent({
+              person_id: targetPersonId,
               event_type: conflictDetected ? 'memory_conflict_variant_created' : 'memory_inserted',
               memory_id: insertedMemory?.id || null,
               evidence_id: insertedEvidence?.id || null,
@@ -3250,7 +4101,7 @@ MENGHAPUS MEMORI:
                 ? {
                     base_key: normalizedKey,
                     variant_key: insertedMemory?.key || variantKey,
-                    old_value: fuzzy?.value || null,
+                    old_value: fuzzyValue || null,
                     new_value: normalizedValue,
                     memory_scope: memoryScope
                   }
@@ -3260,10 +4111,11 @@ MENGHAPUS MEMORI:
                     confidence: insertMetrics.confidence
                   }
             }));
-            console.log(`[Memory] Insert "${insertedMemory?.key || variantKey}" for person ${user.person_id}`);
+            console.log(`[Memory] Insert "${insertedMemory?.key || variantKey}" for person ${targetPersonId} (${targetPersonName})`);
           } catch (memErr) {
             console.error(`[Memory] Gagal upsert "${mem.key}":`, memErr.message);
             memoryAuditEvents.push(buildAuditEvent({
+              person_id: targetPersonId,
               event_type: 'memory_processing_failed',
               reason_code: 'upsert_failed',
               payload: {
@@ -3275,17 +4127,40 @@ MENGHAPUS MEMORI:
         }
 
         if (detectedForgetKeys.length > 0) {
+          const forgetTargetPerson = familyMemoryTarget?.id
+            ? (resolveTargetPerson(familyMemoryTarget.name || '', familyMemoryTarget.id) || familyMemoryTarget)
+            : (person || { id: user.person_id, name: currentSubject });
+          const forgetTargetPersonId = forgetTargetPerson?.id || user.person_id;
+          const forgetTargetPersonName = String(forgetTargetPerson?.name || currentSubject).trim() || currentSubject;
+          const forgetLockedKeys = forgetTargetPersonId === user.person_id ? lockedKeys : new Set();
+          const forgetMemoryPool = await loadMemoryPool(forgetTargetPersonId);
+          rememberTouchedPerson(forgetTargetPersonId);
+
           for (const rawKey of detectedForgetKeys) {
             try {
               const normalizedForgetKey = chatMemory.normalizeMemoryKey(rawKey);
-              const candidate = memoryPool.find(item => {
+              const candidate = forgetMemoryPool.find(item => {
                 if (item.status !== 'active') return false;
                 const keySimilarity = chatMemory.jaccardSimilarity(item.key, normalizedForgetKey);
-                const valueSimilarity = chatMemory.jaccardSimilarity(item.value, normalizedForgetKey);
+                const valueSimilarity = chatMemory.jaccardSimilarity(getComparableValue(item), normalizedForgetKey);
                 return chatMemory.normalizeMemoryKey(item.key) === normalizedForgetKey || keySimilarity >= 0.72 || valueSimilarity >= 0.78;
               });
 
               if (!candidate?.id) continue;
+
+              if (chatMemory.shouldSkipAutomatedMutation(candidate, { lockedKeys: forgetLockedKeys })) {
+                memoryAuditEvents.push(buildAuditEvent({
+                  person_id: forgetTargetPersonId,
+                  event_type: 'memory_drop_skipped',
+                  memory_id: candidate.id,
+                  reason_code: forgetLockedKeys?.has(chatMemory.normalizeMemoryKey(candidate.key)) ? 'locked_key' : 'protected_memory',
+                  payload: {
+                    key: candidate.key,
+                    category: candidate.category
+                  }
+                }));
+                continue;
+              }
 
               await supabase
                 .from('person_memory')
@@ -3299,9 +4174,10 @@ MENGHAPUS MEMORI:
                 .eq('id', candidate.id)
                 .eq('status', 'active');
 
-              const poolIdx = memoryPool.findIndex(item => item.id === candidate.id);
-              if (poolIdx >= 0) memoryPool[poolIdx].status = 'dropped';
+              const poolIdx = forgetMemoryPool.findIndex(item => item.id === candidate.id);
+              if (poolIdx >= 0) forgetMemoryPool[poolIdx].status = 'dropped';
               memoryAuditEvents.push(buildAuditEvent({
+                person_id: forgetTargetPersonId,
                 event_type: 'memory_dropped',
                 memory_id: candidate.id,
                 reason_code: 'user_forget_command',
@@ -3309,7 +4185,7 @@ MENGHAPUS MEMORI:
                   key: candidate.key
                 }
               }));
-              console.log(`[Memory] Drop "${candidate.key}" for person ${user.person_id}`);
+              console.log(`[Memory] Drop "${candidate.key}" for person ${forgetTargetPersonId} (${forgetTargetPersonName})`);
             } catch (forgetErr) {
               console.error(`[Memory] Gagal archive "${rawKey}":`, forgetErr.message);
             }
@@ -3319,7 +4195,7 @@ MENGHAPUS MEMORI:
         if (memoryAuditEvents.length > 0) {
           await writeLegacyAuditEntries(memoryAuditEvents);
           console.log('[Memory][Audit]', JSON.stringify({
-            person_id: user.person_id,
+            person_ids: [...touchedPersonIds],
             session_id: currentSessionId,
             assistant_message_id: aiMsgData?.id || null,
             event_count: memoryAuditEvents.length,
@@ -3335,6 +4211,19 @@ MENGHAPUS MEMORI:
           user_message_id: finalUserMessageId
         })}\n\n`);
         res.flush?.();
+      }
+
+      if (user.person_id) {
+        const lifecycleTargets = uniqueList([...lifecyclePersonIds, user.person_id]);
+        for (const lifecyclePersonId of lifecycleTargets) {
+          const lifecycleOptions = lifecyclePersonId === user.person_id
+            ? { userId: user.id, lockedKeys: lockedKeys || undefined }
+            : {};
+
+          void chatMemory.applyMemoryDecayAndBudget(supabase, lifecyclePersonId, lifecycleOptions).catch((lifecycleErr) => {
+            console.error(`[Memory][Lifecycle] Gagal apply decay/budget untuk person ${lifecyclePersonId}:`, lifecycleErr.message);
+          });
+        }
       }
 
       // 3. File processing fallback (hanya jika queue/job belum siap)
@@ -3366,6 +4255,7 @@ MENGHAPUS MEMORI:
       perf.mark('post_stream_side_effects_done', {
         memory_upserts: detectedMemories.length,
         memory_forgets: detectedForgetKeys.length,
+        provisional_friend_tracks: provisionalFriendTrackCount,
         inline_file_processing: shouldUseInlineFileProcessing,
         lock_status: lockStatus
       });

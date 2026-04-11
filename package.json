@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "postinstall": "node scripts/fix-xlsx-tsconfig.cjs",
+    "verify:memory-pipeline": "node scripts/verify-memory-pipeline.mjs",
     "test": "echo \"Error: no test specified\" && exit 1",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android"
