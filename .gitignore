@@ -9,6 +9,7 @@ node_modules/
 # Web build output
 www/
 .next/
+tsconfig.tsbuildinfo
 
 # Local and temporary folders
 .tmp/

@@ -1,0 +1,24 @@
+### Skenario 1: Payload valid (harus return 200/201 atau 501 placeholder)
+POST http://localhost:3000/api/chat
+Content-Type: application/json
+
+{
+  "message": "Halo, tes migrasi Next.js 16",
+  "user_id": "teguh_test_001"
+}
+
+### Skenario 2: Tanpa message (harus return 400)
+POST http://localhost:3000/api/chat
+Content-Type: application/json
+
+{
+  "user_id": "teguh_test_001"
+}
+
+### Skenario 3: Tanpa user_id (harus return 400)
+POST http://localhost:3000/api/chat
+Content-Type: application/json
+
+{
+  "message": "Cek validasi user"
+}

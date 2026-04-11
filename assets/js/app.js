@@ -41,7 +41,7 @@ function getPreferredDisplayName() {
 }
 
 function getWelcomeIllustrationSrc() {
-  return isMobileViewport() ? '/ayaka.webp' : '/ayaka1.gif';
+  return '/ayaka.webp';
 }
 
 function clearStoredSessionOnUserMismatch() {
