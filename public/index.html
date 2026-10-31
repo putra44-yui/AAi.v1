@@ -15,13 +15,13 @@
 <meta name="twitter:title" content="AAi — Ayaka & Ayato AI" />
 <meta name="twitter:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-mascot-studio.png?v=studio-girl-20261031" />
 <link rel="canonical" href="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
-<link rel="icon" type="image/png" sizes="512x512" href="/aai-mascot-studio.png">
-<meta name="theme-color" content="#f6f2ff" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/aai-192.png">
+<meta name="theme-color" content="#f8f5ff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" sizes="512x512" href="/aai-mascot-studio.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/icons/aai-512.png" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
 <!-- Highlight.js: syntax highlighting untuk code box -->
@@ -1388,6 +1388,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   <div class="aai-rail-divider"></div>
   <button class="aai-rail-action aai-rail-new" type="button" onclick="newChat()" aria-label="Mulai obrolan baru" title="Obrolan baru"><i class="fas fa-plus"></i><span>Baru</span></button>
   <button class="aai-rail-action hamburger" type="button" onclick="toggleSidebar()" aria-label="Buka riwayat percakapan" aria-expanded="false" title="Riwayat chat"><i class="far fa-comments"></i><span>Riwayat</span></button>
+  <button class="aai-rail-action aai-rail-install" type="button" data-aai-install onclick="installAAi()" aria-label="Pasang AAi di perangkat" title="Pasang aplikasi"><i class="fas fa-download"></i><span>Pasang</span></button>
   <div class="aai-rail-spacer"></div>
   <div class="aai-rail-footer" title="Ruang kreatif AAi"><i class="fas fa-gem"></i><span>Ruangmu</span></div>
 </nav>
@@ -1436,6 +1437,11 @@ body.desktop-sidebar-hidden #topbarTitle {
       <div class="settings-menu" id="settingsMenu"></div>
     </div>
   </header>
+  <div class="aai-pwa-notice" id="aaiNetworkNotice" role="status" hidden><i class="fas fa-wifi"></i> AAi sedang offline. Pesan baru butuh koneksi internet.</div>
+  <div class="aai-update-notice" id="aaiUpdateNotice" role="status" hidden>
+    <span><i class="fas fa-gem"></i> Versi AAi terbaru siap digunakan.</span>
+    <button type="button" id="aaiReloadForUpdate">Muat ulang</button>
+  </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
     <div id="filePreview" class="file-preview-container"></div>
@@ -1461,5 +1467,6 @@ body.desktop-sidebar-hidden #topbarTitle {
 </main>
 
 <script src="/assets/js/app.js"></script>
+<script src="/assets/js/pwa.js"></script>
 </body>
 </html>

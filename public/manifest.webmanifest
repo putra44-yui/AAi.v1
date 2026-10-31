@@ -1,20 +1,36 @@
 {
-  "name": "AAi",
+  "id": "/",
+  "name": "AAi — Ayaka & Ayato AI",
   "short_name": "AAi",
-  "description": "AAi — teman ide dan percakapan, Ayaka & Ayato AI",
+  "description": "AAi, teman ide, belajar, dan percakapan keluarga Ayaka & Ayato.",
   "lang": "id-ID",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#f7f8fc",
-  "theme_color": "#171b2d",
+  "background_color": "#f8f5ff",
+  "theme_color": "#f8f5ff",
+  "categories": [
+    "productivity",
+    "education"
+  ],
   "icons": [
     {
-      "src": "/aai-mascot-studio.png",
-      "sizes": "any",
+      "src": "/icons/aai-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icons/aai-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/aai-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

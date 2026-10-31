@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Masuk — AAi</title>
 <meta name="description" content="Masuk ke AAi untuk melanjutkan obrolan bersama Ayaka & Ayato AI." />
-<link rel="icon" type="image/png" href="/aai-mascot-studio.png" />
-<meta name="theme-color" content="#171b2d" />
+<link rel="icon" type="image/png" href="/icons/aai-192.png" />
+<meta name="theme-color" content="#f8f5ff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" sizes="512x512" href="/aai-mascot-studio.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/icons/aai-512.png" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -227,6 +227,7 @@
     <button class="login-btn" id="loginBtn" onclick="handleLogin()">
       Masuk ke AAi
     </button>
+    <button class="login-pwa-install" type="button" data-aai-install onclick="installAAi()"><i class="fas fa-download"></i> Pasang aplikasi AAi</button>
 
     <div class="error-msg" id="errorMsg"></div>
 
@@ -298,14 +299,8 @@
     el.classList.add('show');
   }
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then(registration => registration.update())
-        .catch(() => {});
-    });
-  }
+  // PWA registration is handled by /assets/js/pwa.js.
 </script>
+<script src="/assets/js/pwa.js"></script>
 </body>
 </html>

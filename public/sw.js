@@ -1,124 +1,91 @@
-const CACHE_NAME = 'aai-shell-v11';
+/* AAi PWA shell: public static assets only; no private chat/API caching. */
+const CACHE_NAME = 'aai-shell-v12';
 const PRECACHE_URLS = [
   '/index.html',
   '/login.html',
-  '/assets/js/app.js',
+  '/offline.html',
   '/assets/css/aai-studio.css',
+  '/assets/js/app.js',
+  '/assets/js/pwa.js',
   '/aai-mascot-studio.png',
-  '/manifest.webmanifest',
-  '/ayaka.webp'
+  '/icons/aai-192.png',
+  '/icons/aai-512.png',
+  '/icons/aai-maskable-512.png',
+  '/manifest.webmanifest'
 ];
 
-function isDocumentRequest(request, url) {
-  return request.mode === 'navigate' || [
-    '/',
-    '/index.html',
-    '/login',
-    '/login.html'
-  ].includes(url.pathname);
+function isGoodResponse(response) {
+  return Boolean(response && response.ok && response.type === 'basic');
 }
 
-function shouldCache(response) {
-  return response && response.status === 200 && response.type === 'basic';
+function isPublicAsset(pathname) {
+  return pathname.startsWith('/assets/') ||
+    pathname.startsWith('/icons/') ||
+    ['/manifest.webmanifest', '/aai-mascot-studio.png', '/ayaka.webp'].includes(pathname);
 }
 
-function offlineResponse() {
-  return new Response('Offline', {
-    status: 503,
-    statusText: 'Offline',
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-  });
+async function cacheIfPublic(cache, request, response) {
+  if (isGoodResponse(response)) {
+    try { await cache.put(request, response.clone()); }
+    catch (error) { console.warn('[AAi PWA] Cache write skipped:', error); }
+  }
+  return response;
 }
 
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_URLS))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(
-      keys
-        .filter(key => key !== CACHE_NAME)
-        .map(key => caches.delete(key))
-    );
+    await Promise.all(keys.filter(key =>
+      key.startsWith('aai-shell-') && key !== CACHE_NAME
+    ).map(key => caches.delete(key)));
     await self.clients.claim();
   })());
 });
 
 self.addEventListener('fetch', event => {
-  const req = event.request;
-  const url = new URL(req.url);
+  const request = event.request;
+  if (request.method !== 'GET') return;
 
-  if (req.method !== 'GET') return;
-
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(fetch(req));
-    return;
-  }
-
+  const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Never cache conversations, credentials, attachments, or API responses.
+  if (url.pathname.startsWith('/api/')) return;
 
-  if (isDocumentRequest(req, url)) {
-    event.respondWith(
-      fetch(req)
-        .then(async response => {
-          if (shouldCache(response)) {
-            const copy = response.clone();
-            const cache = await caches.open(CACHE_NAME);
-            await cache.put(req, copy);
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(req);
-          if (cached) return cached;
-          if (url.pathname === '/login') {
-            return (await caches.match('/login.html')) || offlineResponse();
-          }
-          if (url.pathname === '/') {
-            return (await caches.match('/index.html')) || offlineResponse();
-          }
-          return (await caches.match('/')) || offlineResponse();
-        })
-    );
-    return;
-  }
+  const isPage = request.mode === 'navigate' ||
+    ['/', '/index.html', '/login', '/login.html'].includes(url.pathname);
 
-  // Deploying new code must not leave PWA users running an old app.js from
-  // cache. Prefer the network for frontend code and use cache only offline.
-  if (url.pathname.startsWith('/assets/') || url.pathname === '/manifest.webmanifest') {
+  if (isPage) {
     event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
       try {
-        const response = await fetch(req);
-        if (shouldCache(response)) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put(req, response.clone());
-        }
-        return response;
+        const response = await fetch(request);
+        return await cacheIfPublic(cache, request, response);
       } catch {
-        return (await caches.match(req)) || offlineResponse();
+        return (await cache.match(request)) ||
+          (await cache.match('/index.html')) ||
+          (await cache.match('/offline.html')) ||
+          Response.error();
       }
     })());
     return;
   }
 
-  event.respondWith(
-    caches.match(req).then(cached => {
-      const networkFetch = fetch(req)
-        .then(response => {
-          if (shouldCache(response)) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
-          }
-          return response;
-        })
-        .catch(() => cached || offlineResponse());
-
-      return cached || networkFetch;
-    })
-  );
+  if (!isPublicAsset(url.pathname)) return;
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    try {
+      const response = await fetch(request);
+      return await cacheIfPublic(cache, request, response);
+    } catch {
+      return (await cache.match(request)) ||
+        new Response('Aset AAi tidak tersedia saat offline.', {status:503});
+    }
+  })());
 });

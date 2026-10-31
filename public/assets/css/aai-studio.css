@@ -787,3 +787,36 @@ body.aai-login-page .login-btn:hover { background:linear-gradient(105deg,#8465dd
 .msg-row.user .bubble a { color:#e5f4ff; text-decoration:underline; }
 .msg-row.user .bubble code { color:#fff; background:rgba(255,255,255,.18); }
 .msg-row.user .bubble pre { background:#302b53; color:#fff; }
+
+/* AAi PWA: discreet install button and connection/update notices. */
+.aai-rail-install {background:#e9f9ff!important;color:#5b9dc2!important;border-color:#d8edf9!important;margin-top:0!important;}
+.aai-rail-install:hover {background:#dcf4ff!important;color:#4189b5!important;transform:translateY(-2px);}
+.aai-rail-install[hidden],.login-pwa-install[hidden],.aai-pwa-notice[hidden],.aai-update-notice[hidden] {display:none!important;}
+.aai-pwa-notice {
+  position:absolute;z-index:75;top:82px;left:50%;transform:translateX(-50%);
+  width:max-content;max-width:calc(100% - 28px);padding:10px 16px;text-align:center;
+  background:#fff4e6;color:#805a39;border:1px solid #f4dfc4;box-shadow:0 5px 20px rgba(87,68,39,.10);
+  border-radius:999px;font-size:11px;font-weight:700;
+}
+.aai-pwa-notice i{color:#cc9665;margin-right:6px;}
+.aai-update-notice {
+  position:absolute;z-index:76;bottom:135px;right:clamp(15px,4vw,64px);
+  display:flex;align-items:center;gap:16px;padding:12px 14px;
+  background:#fff;border:1px solid #e5ddf5;border-radius:15px;
+  box-shadow:0 12px 34px rgba(75,56,127,.16);color:#6e589f;font-size:11px;font-weight:800;
+}
+.aai-update-notice i {color:#9e8ad9;margin-right:6px;}
+.aai-update-notice button {border:0;border-radius:9px;background:#eae2ff;color:#674eaf;padding:9px 12px;font-size:11px;font-weight:800;cursor:pointer;}
+.aai-update-notice button:hover {background:#dcd0fb;}
+.login-pwa-install {
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  margin-top:14px;width:100%;min-height:44px;padding:11px;
+  border:1px solid #e9def8;background:#faf6ff;color:#7961b5;
+  border-radius:13px;font:700 12px 'Plus Jakarta Sans','DM Sans',sans-serif;cursor:pointer;
+}
+.login-pwa-install:hover {background:#f0e8ff;}
+@media(max-width:720px) {
+ .aai-rail-install {height:51px!important;min-height:51px;}
+ .aai-pwa-notice {top:64px;font-size:10px;border-radius:12px;line-height:1.5;}
+ .aai-update-notice {bottom:100px;right:12px;left:12px;gap:9px;justify-content:space-between;}
+}

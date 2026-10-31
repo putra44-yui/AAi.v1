@@ -3366,10 +3366,4 @@ window.addEventListener('resize', () => {
 });
 setTimeout(scheduleStickyCodeHeadersUpdate, 600);
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .catch(err => console.error('SW register gagal:', err));
-  });
-}
+// PWA registration and updates are handled by /assets/js/pwa.js.
