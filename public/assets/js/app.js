@@ -16,7 +16,7 @@ let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
 let sessionLoadSerial = 0;
-let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
+const currentPersona = 'Auto'; // Single adaptive AAi voice; legacy persona preferences ignored.
 let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
@@ -742,9 +742,7 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = currentModelPreference === 'free-auto'
-    ? `🪄 Gratis · ${currentPersona || 'Auto'}`
-    : (currentPersona || 'Auto');
+  modeLabel.textContent = ''; // Model selection remains in Settings, never on the chat header.
 }
 
 function updateCompactStatus(forceValue = null) {
@@ -1026,12 +1024,17 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const teaserHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
     : '';
+  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" hidden>
+    <summary><i class="fas fa-sparkles" aria-hidden="true"></i><span class="aai-activity-title">AAi sedang memeriksa konteks...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    <ol class="aai-activity-list" id="activity_list_${streamId}"></ol>
+  </details>`;
 
   return `
     <div class="msg-row assistant" id="${streamId}" data-chat-date="${getChatMessageDate().key}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
       ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
+      ${activityHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
           <div class="typing-dot"></div>
@@ -1529,6 +1532,11 @@ async function processStream(response, streamId, onDone) {
   const previewEl = document.getElementById(`preview_${streamId}`);
   const previewBodyEl = document.getElementById(`preview_body_${streamId}`);
   const previewStreamEl = document.getElementById(`preview_stream_${streamId}`);
+  const activityEl = document.getElementById(`activity_${streamId}`);
+  const activityListEl = document.getElementById(`activity_list_${streamId}`);
+  const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
+  let activityHasMemory = false;
+  let activitySourceCount = 0;
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
   let fullText  = '';
@@ -1783,6 +1791,21 @@ async function processStream(response, streamId, onDone) {
       return;
     }
 
+    if (parsed.phase === 'progress') {
+      if (activityEl && activityListEl && typeof parsed.message === 'string') {
+        activityEl.hidden = false;
+        activityEl.open = true;
+        const item = document.createElement('li');
+        item.textContent = parsed.message.slice(0, 220);
+        activityListEl.appendChild(item);
+        if (activityTitleEl) activityTitleEl.textContent = parsed.message.slice(0, 120);
+        if (parsed.step === 'memory') activityHasMemory = true;
+        if (parsed.step === 'found') activitySourceCount = Number(parsed.source_count) || 0;
+        scrollBottom();
+      }
+      return;
+    }
+
     if (parsed.session_id) {
       syncSessionFromStream(parsed);
     }
@@ -1859,6 +1882,15 @@ async function processStream(response, streamId, onDone) {
       }
 
       gotDone = true;
+      if (activityEl && !activityEl.hidden) {
+        activityEl.open = false;
+        activityEl.classList.add('is-complete');
+        if (activityTitleEl) {
+          activityTitleEl.textContent = activitySourceCount
+            ? 'AAi memeriksa ' + activitySourceCount + ' sumber web'
+            : activityHasMemory ? 'AAi memakai ingatan yang relevan' : 'Jejak kerja AAi';
+        }
+      }
       flushStreamingRender(true);
       stopPreviewTicker('', true);
       actionsEl.style.display = 'flex';
@@ -3239,21 +3271,7 @@ function toggleSettingsMenu() {
   if (menu.classList.contains('show')) renderSettingsMenu();
 }
 function renderSettingsMenu() {
-  const personas = [
-    { val: 'Auto',            label: '✨ Auto' },
-    { val: 'Santai',          label: '😌 Santai' },
-    { val: 'Coding',          label: '💻 Coding Expert' },
-    { val: 'Kritikus Brutal', label: '🔥 Kritikus' },
-    { val: 'Rosalia',         label: '🌹 Rosalia' }
-  ];
-  let html = `<div class="settings-header">Persona AI</div>`;
-  personas.forEach(p => {
-    html += `<button class="settings-item ${currentPersona===p.val?'active':''}" onclick="selectPersonaUI('${p.val}')">
-      <span>${p.label}</span><i class="fas fa-check check"></i>
-    </button>`;
-  });
-
-  html += '<div class="settings-header">Model AI · pilih manual</div>';
+  let html = '<div class="settings-header">Model AI · pilih manual</div>';
   const models = [
     { val: 'main', label: '⚡ Qwen · utama' },
     { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' }
@@ -3270,12 +3288,6 @@ function selectModelUI(val) {
   if (val !== 'main' && val !== 'free-auto') return;
   currentModelPreference = val;
   localStorage.setItem('aai_model_preference', val);
-  updateModeLabel();
-  renderSettingsMenu();
-}
-function selectPersonaUI(val) {
-  currentPersona = val;
-  localStorage.setItem('aai_persona', val);
   updateModeLabel();
   renderSettingsMenu();
 }

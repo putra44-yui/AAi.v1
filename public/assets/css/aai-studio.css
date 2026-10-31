@@ -1306,3 +1306,45 @@ body:not(.aai-login-page) .bubble table.aai-table-cards tbody td:first-child {
     line-height: 1.65;
   }
 }
+
+/* Evidence-based activity trail: only backend-reported events, never fabricated reasoning. */
+body:not(.aai-login-page) .aai-activity {
+  width: min(100%, 720px);
+  margin: 6px 0 9px;
+  border: 1px solid rgba(137, 111, 200, .20);
+  border-radius: 15px;
+  background: linear-gradient(120deg, rgba(243, 239, 255, .85), rgba(247, 250, 255, .85));
+  color: #514777;
+  overflow: hidden;
+}
+body:not(.aai-login-page) .aai-activity[hidden] { display: none; }
+body:not(.aai-login-page) .aai-activity summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 13px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+body:not(.aai-login-page) .aai-activity summary::-webkit-details-marker { display: none; }
+body:not(.aai-login-page) .aai-activity summary .aai-activity-title { flex: 1; }
+body:not(.aai-login-page) .aai-activity summary .fa-sparkles { color: #8d69c3; }
+body:not(.aai-login-page) .aai-activity summary .fa-chevron-down { font-size: 11px; transition: transform .2s ease; }
+body:not(.aai-login-page) .aai-activity[open] summary .fa-chevron-down { transform: rotate(180deg); }
+body:not(.aai-login-page) .aai-activity-list {
+  margin: 0 13px 12px 31px;
+  padding: 0 0 0 11px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #625984;
+}
+body:not(.aai-login-page) .aai-activity-list li + li { margin-top: 5px; }
+body:not(.aai-login-page) .aai-activity.is-complete { background: rgba(246, 244, 252, .68); }
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-activity { width: 100%; }
+  body:not(.aai-login-page) .aai-activity summary { font-size: 13.5px; padding: 11px 12px; }
+  body:not(.aai-login-page) .aai-activity-list { font-size: 13.5px; }
+}

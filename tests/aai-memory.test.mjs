@@ -5,10 +5,10 @@ import {
   resolveAAiPersona, selectRelevantAAiMemories, extractAAiMemoryTags, createAAiMemoryStreamFilter, readableAAiMemoryValue,
 } from '../src/aai-context.ts';
 
-test('Auto persona respects the person and coding intent', () => {
-  assert.equal(resolveAAiPersona('Auto', 'Bantu bug JavaScript', 'Teguh Putra'), 'Coding');
-  assert.equal(resolveAAiPersona('Auto', 'Halo', 'Rosalia'), 'Rosalia');
-  assert.equal(resolveAAiPersona('Auto', 'Halo', 'Teguh Putra'), 'Santai');
+test('legacy persona choices always resolve to one adaptive AAi voice', () => {
+  assert.equal(resolveAAiPersona('Kritikus Brutal', 'Bantu bug JavaScript', 'Teguh Putra'), 'Auto');
+  assert.equal(resolveAAiPersona('Rosalia', 'Halo, sayang', 'Rosalia'), 'Auto');
+  assert.equal(resolveAAiPersona('Auto', 'Tolong kritik gagasanku', 'Teguh Putra'), 'Auto');
 });
 
 test('memory relevance excludes unrelated private context', () => {

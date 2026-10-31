@@ -11,5 +11,15 @@
       "/login",
       "/login/"
     ]
-  }
+  },
+  "ratelimits": [
+    {
+      "name": "AAI_WEB_SEARCH_LIMITER",
+      "namespace_id": "311021",
+      "simple": {
+        "limit": 12,
+        "period": 60
+      }
+    }
+  ]
 }

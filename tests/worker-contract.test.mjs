@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v19/);
+  assert.match(sw, /aai-shell-v20/);
   assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -88,4 +88,21 @@ test('root edits skip nonexistent parent validation', () => {
   const source = read('src/chat.ts');
   assert.match(source, /if \(parentId\) \{\s*const \{ data: parent, error \}/);
   assert.doesNotMatch(source, /else \{\s*const \{ data: parent, error \}/);
+});
+
+
+test('Web search is server-side and progress is tied to actual results', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  const web = read('src/aai-web.ts');
+  assert.match(server, /collectWebSources\(webDecision/);
+  assert.match(server, /phase: 'progress'/);
+  assert.match(web, /env, 'TAVILY_API_KEY'/);
+  assert.match(web, /env, 'EXA_API_KEY'/);
+  const wrangler = JSON.parse(read('wrangler.jsonc'));
+  assert.equal(wrangler.ratelimits[0].name, 'AAI_WEB_SEARCH_LIMITER');
+  assert.match(server, /webSearchAllowed/);
+  assert.doesNotMatch(client, /TAVILY_API_KEY|EXA_API_KEY/);
+  assert.match(client, /parsed\.phase === 'progress'/);
+  assert.doesNotMatch(client, /Persona AI/);
 });

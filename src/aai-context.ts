@@ -70,13 +70,9 @@ export function selectRelevantAAiMemories(memories: Memory[], message: string, l
       /^(nama_panggilan|gaya_bahasa|gaya_jawab|panggilan_user|gaya_komunikasi)$/.test(memory.key ?? ''))
     .sort((a,b) => b.score - a.score).slice(0, limit).map(({memory}) => memory);
 }
-export function resolveAAiPersona(requested: string, text: string, personName = ''): string {
-  if (requested && requested !== 'Auto') return requested;
-  if (/Rosalia/i.test(personName)) return 'Rosalia';
-  if (/\b(kritik brutal|roasting|kritik keras|debat tanpa basa-basi)\b/i.test(text)) return 'Kritikus Brutal';
-  if (/\b(kode|coding|bug|javascript|typescript|python|sql|program|deploy|git|api|vscode|error|function|komponen|database|react|html|css)\b/i.test(text)) return 'Coding';
-  if (/\b(istri|rosalia|sayang|cinta)\b/i.test(text)) return 'Rosalia';
-  return 'Santai';
+// Legacy API: older clients may still send persona_name. AAi now adapts in one voice.
+export function resolveAAiPersona(_requested: string, _text: string, _personName = ''): string {
+  return 'Auto';
 }
 function summarizeMemory(memory: Memory): string {
   const label = (memory.key ?? '').replace(/_/g, ' ').slice(0, 70);
@@ -109,10 +105,6 @@ export async function loadAAiContext(
   const rawMemories = (memoriesResult.data ?? []) as Memory[];
   const selected = selectRelevantAAiMemories(rawMemories, message);
   const personaUsed = resolveAAiPersona(requestedPersona, message, person?.name ?? '');
-  const { data: personas, error: personaError } = await supabase.from('ai_personas')
-    .select('name, system_prompt').eq('name', personaUsed).limit(1);
-  if (personaError) throw personaError;
-  const dbPersona = personas?.[0]?.system_prompt;
 
   const identityLines = [
     'Pengguna saat ini: ' + (person?.name || user.username || 'tidak diketahui') + '.',
@@ -123,8 +115,7 @@ export async function loadAAiContext(
   const systemMessages: AAiSystemMessage[] = [
     { role: 'system', content: BASE_SYSTEM },
     { role: 'system', content: '[IDENTITAS AKUN DAN KELUARGA]\n' + identityLines.join('\n') },
-    { role: 'system', content: '[GAYA PERSONA: ' + personaUsed + ']\n'
-      + (dbPersona ? String(dbPersona).slice(0, 5000) : 'Hangat, cermat, dan natural sesuai kebutuhan pengguna.') },
+    { role: 'system', content: '[GAYA AAi ADAPTIF]\nBertutur hangat, natural, dan jelas. Pilih kedalaman teknis serta ketegasan kritik berdasarkan maksud pengguna dan risiko kesalahan, bukan pemicu kata kunci atau karakter/persona terpisah. Saat pengguna meminta kritik, berikan penilaian tajam yang dibatasi bukti. Untuk bercanda atau obrolan pribadi, jangan berubah menjadi auditor. Untuk surat resmi, gunakan gaya formal tanpa kehilangan ketelitian.' },
   ];
   if (selected.length > 0) {
     systemMessages.push({

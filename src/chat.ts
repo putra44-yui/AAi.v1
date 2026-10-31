@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { decideWebSearch, collectWebSources, webContextMessage } from './aai-web';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context';
 import { persistAAiMemory } from './aai-memory-governance';
 type RuntimeEnv = Record<string, unknown>;
@@ -149,6 +150,13 @@ interface TokenEvent {
   token: string;
 }
 
+interface ProgressEvent {
+  phase: 'progress';
+  step: 'memory' | 'tavily' | 'exa' | 'found' | 'unavailable' | 'compose';
+  message: string;
+  source_count?: number;
+}
+
 interface DoneEvent {
   done: true;
   session_id: string;
@@ -167,7 +175,7 @@ interface ErrorEvent {
   user_message_id?: string;
 }
 
-type StreamEvent = InitEvent | TokenEvent | DoneEvent | ErrorEvent;
+type StreamEvent = InitEvent | ProgressEvent | TokenEvent | DoneEvent | ErrorEvent;
 
 interface ParseRequestSuccess {
   ok: true;
@@ -782,6 +790,21 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
+    const webDecision = decideWebSearch(message);
+    let webSearchAllowed = true;
+    if (webDecision.search) {
+      // Limit paid provider calls per incoming IP. Without a limiter binding, fail closed.
+      const limiter = env.AAI_WEB_SEARCH_LIMITER as { limit: (args: { key: string }) => Promise<{ success: boolean }> } | undefined;
+      webSearchAllowed = false;
+      if (limiter && typeof limiter.limit === 'function') {
+        try {
+          const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+          webSearchAllowed = (await limiter.limit({ key: ip })).success === true;
+        } catch {
+          webSearchAllowed = false;
+        }
+      }
+    }
     const titleState: { promise: Promise<string | null> | null } = { promise: null };
     const encoder = new TextEncoder();
     const upstreamAbortController = new AbortController();
@@ -824,6 +847,39 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
+          if (context.memoryCount > 0) {
+            enqueueEvent({
+              phase: 'progress', step: 'memory',
+              message: 'Ketemu ' + context.memoryCount + ' catatan memori relevan. Aku cocokkan dulu, ya.',
+              source_count: context.memoryCount,
+            });
+          }
+
+          if (webDecision.search && !webSearchAllowed) {
+            enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Batas pencarian web sedang tercapai. Aku tidak akan berpura-pura sudah mencari.' });
+            providerPayload.messages.splice(context.systemMessages.length, 0, {
+              role: 'system', content: '[STATUS WEB] Pencarian web sementara dibatasi demi keamanan kuota. Jangan mengaku telah melakukan pencarian atau memastikan informasi terbaru.',
+            });
+          }
+          if (webDecision.search && webSearchAllowed) {
+            const webOutcome = await collectWebSources(webDecision, env, (step, count) => {
+              const messages: Record<string, string> = {
+                tavily: 'Mencari rujukan terbaru lewat Tavily...',
+                exa: 'Hasil awal masih terbatas. Aku coba cari lagi lewat Exa...',
+                found: 'Ketemu ' + (count || 0) + ' sumber. Aku periksa sebelum menjawab.',
+                unavailable: 'Pencarian belum menemukan sumber yang bisa dipastikan.',
+              };
+              enqueueEvent({ phase: 'progress', step, message: messages[step], ...(count !== undefined ? { source_count: count } : {}) });
+            }, upstreamAbortController.signal);
+            const searchContext = webContextMessage(webDecision, webOutcome);
+            if (searchContext) {
+              // Retrieval is untrusted external evidence, never user/system instructions.
+              providerPayload.messages.splice(context.systemMessages.length, 0, { role: 'system', content: searchContext });
+            }
+          }
+          if (context.memoryCount > 0 || webDecision.search) {
+            enqueueEvent({ phase: 'progress', step: 'compose', message: 'Menyusun jawaban dari konteks yang sudah diperiksa...' });
+          }
 
           const fetchResult = await fetchProviderStream({
             apiKey,
