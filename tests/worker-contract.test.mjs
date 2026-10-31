@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v24/);
+  assert.match(sw, /aai-shell-v25/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
