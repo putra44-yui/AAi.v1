@@ -1507,3 +1507,11 @@ body:not(.aai-login-page) .aai-stream-code { white-space: pre-wrap; overflow-wra
   body:not(.aai-login-page) .aai-activity-list { line-height: 1.45; font-size: 13px; }
   body:not(.aai-login-page) .aai-activity-step-icon { width: 23px; height: 23px; flex-basis: 23px; }
 }
+
+/* Explicit web-tool permission, kept behind the mobile-friendly + menu. */
+body:not(.aai-login-page) .composer-web-permission { min-width: 0; }
+body:not(.aai-login-page) .composer-web-permission.is-on { background: #eff9fc; }
+body:not(.aai-login-page) .composer-web-permission.is-on .composer-action-icon { background: #dff3fb; color: #327d9b; }
+body:not(.aai-login-page) .composer-web-switch { margin-left: auto; padding-left: 3px; color: #aa9aba; font-size: 22px; }
+body:not(.aai-login-page) .composer-web-permission.is-on .composer-web-switch { color: #56a7c6; }
+body:not(.aai-login-page) .composer-web-permission .composer-action-text small { line-height: 1.45; }

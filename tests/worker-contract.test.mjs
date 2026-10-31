@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v25/);
+  assert.match(sw, /aai-shell-v26/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -176,4 +176,21 @@ test('AAi streams sanitized Markdown without reprocessing settled blocks', () =>
   assert.equal(boundary('**Halo**\n\nLanjut'), 10);
   assert.equal(boundary('```js\nconst x = 1;\n\nconst y = 2;\n'), 0, 'Never split an unclosed code fence');
   assert.equal(boundary('```js\nconst x = 1;\n```\n\nTeks'), 24);
+});
+
+test('web tool permission is explicit, off by default, and checked on the server', () => {
+  const client = read('public/assets/js/app.js');
+  const html = read('public/index.html');
+  const server = read('src/chat.ts');
+  const policy = read('src/aai-web.ts');
+  assert.match(client, /aai_web_tool_permission/);
+  assert.match(client, /let currentWebPermission = localStorage\.getItem\('aai_web_tool_permission'\) === 'allow' \? 'allow' : 'deny'/);
+  assert.equal((client.match(/web_permission: currentWebPermission/g) || []).length, 3, 'Send/edit/regenerate all carry the permission');
+  assert.match(html, /role="menuitemcheckbox" aria-checked="false"/);
+  assert.match(html, /id="webPermissionBtn"/);
+  assert.match(server, /webPermission: WebToolPermission/);
+  assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
+  assert.match(server, /applyWebToolPermission\(requestedWebDecision, requestBody\.value\.webPermission\)/);
+  assert.match(server, /if \(webDecision\.search && webSearchAllowed\)/);
+  assert.match(policy, /permission === 'allow' \? decision : \{ search: false/);
 });

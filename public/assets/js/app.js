@@ -18,6 +18,8 @@ let currentSessionMeta = null;
 let sessionLoadSerial = 0;
 const currentPersona = 'Auto'; // Single adaptive AAi voice; legacy persona preferences ignored.
 let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
+// External search requires an affirmative, persisted user choice (off by default).
+let currentWebPermission = localStorage.getItem('aai_web_tool_permission') === 'allow' ? 'allow' : 'deny';
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
@@ -2112,6 +2114,7 @@ async function sendMessage(text, files = []) {
         user_id: currentUser.id,
         persona_name: currentPersona,
         model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentMessageId,
         files: files
@@ -2269,6 +2272,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         user_id: currentUser.id,
         persona_name: frozenPersona,
         model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
         memory_experiment_mode: currentMemoryExperimentMode,
         user_message_id: userMessageId
       })
@@ -2432,6 +2436,7 @@ async function sendMessageBranched(text, parentId = null, editedMessageId = null
         user_id: currentUser.id,
         persona_name: currentPersona,
         model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentId,
         branch_root: parentId === null
@@ -3670,6 +3675,26 @@ async function sendCompactCheckpoint() {
   sendMessage('[COMPACT_CHECKPOINT_REQUEST]');
 }
 
+function syncWebToolPermissionUI() {
+  const button = document.getElementById('webPermissionBtn');
+  if (!button) return;
+  const enabled = currentWebPermission === 'allow';
+  button.setAttribute('aria-checked', String(enabled));
+  button.classList.toggle('is-on', enabled);
+  const status = document.getElementById('webPermissionStatus');
+  if (status) status.textContent = enabled
+    ? 'Aktif · AAi boleh memakai Tavily/Exa bila perlu'
+    : 'Nonaktif · AAi menjawab tanpa pencarian web';
+  const indicator = button.querySelector('.composer-web-switch i');
+  if (indicator) indicator.className = enabled ? 'fas fa-toggle-on' : 'fas fa-toggle-off';
+}
+
+function toggleWebToolPermission() {
+  currentWebPermission = currentWebPermission === 'allow' ? 'deny' : 'allow';
+  localStorage.setItem('aai_web_tool_permission', currentWebPermission);
+  syncWebToolPermissionUI();
+}
+
 function closeComposerMenu({ restoreFocus = false } = {}) {
   const menu = document.getElementById('composerActionMenu');
   const button = document.getElementById('composerPlusBtn');
@@ -3690,10 +3715,15 @@ function toggleComposerMenu() {
   }
   menu.hidden = false;
   button.setAttribute('aria-expanded', 'true');
+  syncWebToolPermissionUI();
   menu.querySelector('button')?.focus({ preventScroll: true });
 }
 
 function runComposerAction(action) {
+  if (action === 'web-permission') {
+    toggleWebToolPermission();
+    return; // Keep the menu open so the explicit permission state is visible.
+  }
   closeComposerMenu();
   if (action === 'upload') {
     document.getElementById('fileInput')?.click();
@@ -3735,6 +3765,7 @@ function initComposerUI() {
   updateModeLabel();
   updateCompactStatus();
   updateMobileSendVisibility();
+  syncWebToolPermissionUI();
 }
 
 

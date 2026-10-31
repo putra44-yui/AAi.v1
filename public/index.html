@@ -1448,8 +1448,8 @@ body.desktop-sidebar-hidden #topbarTitle {
     <div class="input-wrap" id="inputWrap">
       <div class="composer-plus-wrap">
         <button type="button" class="composer-plus-btn" id="composerPlusBtn"
-                onclick="toggleComposerMenu()" title="Lampiran dan Compact"
-                aria-label="Opsi tambahan: lampirkan file atau Compact"
+                onclick="toggleComposerMenu()" title="Lampiran, izin web, dan Compact"
+                aria-label="Opsi tambahan: lampiran, izin web, dan Compact"
                 aria-haspopup="menu" aria-expanded="false" aria-controls="composerActionMenu">
           <i class="fas fa-plus" aria-hidden="true"></i>
         </button>
@@ -1459,6 +1459,14 @@ body.desktop-sidebar-hidden #topbarTitle {
                   onclick="runComposerAction('upload')">
             <span class="composer-action-icon"><i class="fas fa-paperclip" aria-hidden="true"></i></span>
             <span class="composer-action-text"><strong>Lampirkan file</strong><small>Foto, PDF, atau dokumen</small></span>
+          </button>
+          <button type="button" role="menuitemcheckbox" aria-checked="false"
+                  class="composer-menu-action composer-web-permission" id="webPermissionBtn"
+                  onclick="runComposerAction('web-permission')"
+                  aria-label="Izinkan atau nonaktifkan pencarian web">
+            <span class="composer-action-icon"><i class="fas fa-globe" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Izin pencarian web</strong><small id="webPermissionStatus">Nonaktif · hanya pengetahuan model</small></span>
+            <span class="composer-web-switch" aria-hidden="true"><i class="fas fa-toggle-off"></i></span>
           </button>
           <button type="button" role="menuitem" class="composer-menu-action"
                   id="compactBtn" onclick="runComposerAction('compact')">

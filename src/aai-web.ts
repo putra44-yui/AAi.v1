@@ -1,6 +1,12 @@
 /** Web search for AAi: only server-side; never send keys to the browser. */
 export type WebSource = { url: string; title: string; snippet: string; publishedDate?: string };
 export type WebSearchDecision = { search: boolean; query: string; explicit: boolean };
+export type WebToolPermission = 'allow' | 'deny';
+
+// The model and keyword router never grant their own permission to call external tools.
+export function applyWebToolPermission(decision: WebSearchDecision, permission: WebToolPermission): WebSearchDecision {
+  return permission === 'allow' ? decision : { search: false, query: '', explicit: false };
+}
 export type WebSearchProgress = (step: 'tavily' | 'exa' | 'found' | 'unavailable', count?: number) => void;
 export type WebSearchOutcome = { sources: WebSource[]; provider: 'tavily' | 'exa' | null; attempted: boolean };
 

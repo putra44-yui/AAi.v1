@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../src/aai-web.ts', import.meta.url), 'utf8
 const transpiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { decideWebSearch, hasWebSearchOptOut } = await import(
+const { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission } = await import(
   'data:text/javascript;base64,' + Buffer.from(transpiled).toString('base64')
 );
 
@@ -67,4 +67,15 @@ test('server honors no-web constraints beyond the keyword router', () => {
   assert.match(server, /Tanpa pencarian web, sesuai permintaanmu/);
   assert.match(server, /Jangan mengaku memakai Tavily, Exa/);
   assert.match(server, /if \(webDecision.search && webSearchAllowed\)/);
+});
+
+test('an explicit web permission gate is fail-closed before any provider call', () => {
+  const lookup = decideWebSearch('Cari sumber resmi kapan Node.js 24 dirilis.');
+  assert.equal(lookup.search, true);
+  const denied = applyWebToolPermission(lookup, 'deny');
+  assert.deepEqual(denied, { search: false, query: '', explicit: false });
+  assert.equal(applyWebToolPermission(lookup, 'allow').search, true);
+  // An explicit message-level prohibition still wins, even when globally enabled.
+  const blocked = decideWebSearch('Cari berita terbaru, tetapi jangan mencari web.');
+  assert.equal(applyWebToolPermission(blocked, 'allow').search, false);
 });

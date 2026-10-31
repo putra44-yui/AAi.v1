@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { decideWebSearch, hasWebSearchOptOut, collectWebSources, webContextMessage } from './aai-web.ts';
+import { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 type RuntimeEnv = Record<string, unknown>;
@@ -102,6 +102,7 @@ interface ParsedChatRequest {
   updateOnly: boolean;
   personaName: string;
   modelPreference: 'main' | 'free-auto';
+  webPermission: WebToolPermission;
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -276,6 +277,8 @@ function parseRequestBody(input: string): ParseRequestResult {
   const updateOnly = parsedValue.update_only === true;
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
   const modelPreference = readTrimmedString(parsedValue.model_preference) === 'free-auto' ? 'free-auto' : 'main';
+  // Missing or unrecognized permission always fails closed, including old clients.
+  const webPermission: WebToolPermission = parsedValue.web_permission === 'allow' ? 'allow' : 'deny';
 
   return {
     ok: true,
@@ -291,6 +294,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       updateOnly,
       personaName,
       modelPreference,
+      webPermission,
     },
   };
 }
@@ -868,12 +872,16 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
     const webSearchOptedOut = hasWebSearchOptOut(message);
-    const webDecision = decideWebSearch(message);
-    if (webSearchOptedOut) {
-      // Challenge factual opinions if needed, but never override explicit tool limits.
+    const webPermissionGranted = requestBody.value.webPermission === 'allow';
+    const requestedWebDecision = decideWebSearch(message);
+    const webDecision = applyWebToolPermission(requestedWebDecision, requestBody.value.webPermission);
+    if (webSearchOptedOut || !webPermissionGranted) {
+      // Distinguish disagreement about facts from the user's binding tool limits.
       providerPayload.messages.splice(context.systemMessages.length, 0, {
         role: 'system',
-        content: '[BATASAN PENGGUNA] Pengguna meminta tanpa pencarian web. Jawab hanya dari pengetahuan dan konteks yang tersedia. Jangan mengaku memakai Tavily, Exa, atau memverifikasi sumber terkini. Bila belum yakin, katakan terus terang dan tawarkan pengecekan hanya setelah pengguna mengizinkan.',
+        content: webSearchOptedOut
+          ? '[BATASAN PENGGUNA] Pengguna meminta tanpa pencarian web. Jawab hanya dari pengetahuan dan konteks yang tersedia. Jangan mengaku memakai Tavily, Exa, atau memverifikasi sumber terkini. Bila belum yakin, katakan terus terang dan tawarkan pengecekan hanya setelah pengguna mengizinkan.'
+          : '[IZIN TOOLS] Pengguna belum mengizinkan pencarian web pada perangkat ini. Jangan mengaku memakai Tavily, Exa, atau memverifikasi sumber terkini. Gunakan pengetahuanmu sendiri dengan batasan yang jujur; jika perlu sumber terbaru, jelaskan bahwa izin Web dapat diaktifkan melalui tombol +.',
       });
     }
     let webSearchAllowed = true;
@@ -944,6 +952,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             enqueueEvent({
               phase: 'progress', step: 'assess',
               message: 'Tanpa pencarian web, sesuai permintaanmu.',
+            });
+          } else if (!webPermissionGranted && requestedWebDecision.search) {
+            enqueueEvent({
+              phase: 'progress', step: 'assess',
+              message: 'Web belum diizinkan. Menjawab tanpa pencarian eksternal.',
             });
           }
           if (webDecision.search && !webSearchAllowed) {
