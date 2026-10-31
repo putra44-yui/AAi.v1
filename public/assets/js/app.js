@@ -1214,18 +1214,46 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
   return { bubbleEl, actionsEl };
 }
 
-function ensureStreamingPlainNode(bubbleEl) {
+function ensureStreamingMarkdownNode(bubbleEl) {
   if (!bubbleEl) return null;
 
-  let streamingNode = bubbleEl.querySelector('.streaming-plain[data-stream-live="true"]');
-  if (streamingNode) return streamingNode;
+  let root = bubbleEl.querySelector('.aai-streaming-markdown[data-stream-live="true"]');
+  if (root) return root;
 
+  // Keep completed blocks mounted. Only the unfinished tail is re-rendered.
   bubbleEl.textContent = '';
-  streamingNode = document.createElement('div');
-  streamingNode.className = 'streaming-plain';
-  streamingNode.setAttribute('data-stream-live', 'true');
-  bubbleEl.appendChild(streamingNode);
-  return streamingNode;
+  root = document.createElement('div');
+  root.className = 'aai-streaming-markdown';
+  root.setAttribute('data-stream-live', 'true');
+  root.innerHTML = '<div class="aai-streaming-committed"></div><div class="aai-streaming-live"></div>';
+  bubbleEl.appendChild(root);
+  return root;
+}
+
+// Blank lines end stable Markdown blocks; never split an open fenced code block.
+function findStableStreamMarkdownBoundary(text) {
+  let boundary = 0;
+  let fence = '';
+  let fenceWidth = 0;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    const newline = text.indexOf('\n', lineStart);
+    if (newline < 0) break;
+    const line = text.slice(lineStart, newline).replace(/\r$/, '');
+    const marker = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/.exec(line);
+    if (marker) {
+      const kind = marker[1][0];
+      if (!fence) {
+        fence = kind;
+        fenceWidth = marker[1].length;
+      } else if (kind === fence && marker[1].length >= fenceWidth && !marker[2].trim()) {
+        fence = '';
+      }
+    }
+    if (!fence && !line.trim()) boundary = newline + 1;
+    lineStart = newline + 1;
+  }
+  return boundary;
 }
 
 function safeDecodeURIComponent(input = '') {
@@ -1639,11 +1667,11 @@ async function processStream(response, streamId, onDone) {
   let gotDone   = false;
   let renderScheduled = false;
   let streamingNode = null;
-  let renderedTextLength = 0;
+  let streamingCommittedLength = 0;
   let renderTimer = null;
   let renderFrame = null;
   let lastRenderAt = 0;
-  const STREAM_RENDER_INTERVAL_MS = 34;
+  const STREAM_RENDER_INTERVAL_MS = 105;
   let streamScrollFrame = null;
   let lastStreamScrollAt = 0;
   const STREAM_SCROLL_INTERVAL_MS = 90;
@@ -1786,17 +1814,28 @@ async function processStream(response, streamId, onDone) {
       bubbleEl.innerHTML = formatContent(fullText);
       bubbleEl.classList.remove('stream-cursor');
       streamingNode = null;
-      renderedTextLength = 0;
+      streamingCommittedLength = 0;
     } else {
-      streamingNode = streamingNode || ensureStreamingPlainNode(bubbleEl);
+      streamingNode = streamingNode || ensureStreamingMarkdownNode(bubbleEl);
       if (streamingNode) {
-        const nextChunk = fullText.slice(renderedTextLength);
-        if (nextChunk) {
-          streamingNode.textContent += nextChunk;
-          renderedTextLength = fullText.length;
-        } else if (renderedTextLength !== fullText.length) {
-          streamingNode.textContent = fullText;
-          renderedTextLength = fullText.length;
+        const committedEl = streamingNode.querySelector('.aai-streaming-committed');
+        const liveEl = streamingNode.querySelector('.aai-streaming-live');
+        const pending = fullText.slice(streamingCommittedLength);
+        const boundary = findStableStreamMarkdownBoundary(pending);
+        if (boundary > 0 && committedEl) {
+          committedEl.insertAdjacentHTML('beforeend', formatContent(pending.slice(0, boundary)));
+          streamingCommittedLength += boundary;
+        }
+        if (liveEl) {
+          const tailText = fullText.slice(streamingCommittedLength);
+          // Lightweight, sanitized Markdown. No syntax highlighting per token.
+          // Failure must never stop the SSE reader or lose the accumulated reply.
+          try {
+            liveEl.innerHTML = tailText ? formatContent(tailText, { streaming: true }) : '';
+          } catch (error) {
+            console.warn('[AAi stream] Markdown preview failed:', error);
+            liveEl.textContent = tailText;
+          }
         }
       }
       bubbleEl.classList.add('stream-cursor');
@@ -1917,7 +1956,7 @@ async function processStream(response, streamId, onDone) {
     if (parsed.token) {
       if (firstToken) {
         streamingNode = null;
-        renderedTextLength = 0;
+        streamingCommittedLength = 0;
         firstToken = false;
         stopPreviewTicker('', true);
       }
@@ -3206,6 +3245,13 @@ renderer.code = function(code, language) {
 </div>`;
 };
 
+// In-flight code fences stay lightweight; full syntax highlight runs once after completion.
+const streamingMarkdownRenderer = new marked.Renderer();
+streamingMarkdownRenderer.code = function(code) {
+  const raw = typeof code === 'object' ? (code.text || '') : code;
+  return '<pre class="aai-stream-code"><code>' + escHtml(String(raw || '')) + '</code></pre>';
+};
+
 marked.setOptions({ renderer, breaks: true });
 
 document.addEventListener('click', event => {
@@ -3258,7 +3304,7 @@ function toggleCodeWindow(btn) {
 
   requestAnimationFrame(scheduleStickyCodeHeadersUpdate);
 }
-function formatContent(text) {
+function formatContent(text, { streaming = false } = {}) {
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
   let preppedText = String(text || '')
     .replace(/\[SUGGEST-FRIEND:[\s\S]*?\]/gi,
@@ -3269,7 +3315,7 @@ function formatContent(text) {
       '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(46,125,50,.14);color:#2e7d32;font-weight:700;">&lt;memory&gt;</span>')
     .replace(/\[type=pattern;category=[^\]]*;key=[^\]]*;value=[^\]]*\]/gi, '');
 
-  let html = marked.parse(preppedText);
+  let html = marked.parse(preppedText, streaming ? { renderer: streamingMarkdownRenderer, breaks: true } : undefined);
   html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi,
     `<div class="source-card">🌐 <a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2a7a9e">$1</a></div>`);
 

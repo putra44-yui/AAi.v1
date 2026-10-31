@@ -159,3 +159,21 @@ test('AAi asks its selected LLM for tentative knowledge before web tool evidence
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
   assert.ok(client.includes("strategy: 'fa-compass'"));
 });
+
+test('AAi streams sanitized Markdown without reprocessing settled blocks', () => {
+  const client = read('public/assets/js/app.js');
+  const css = read('public/assets/css/aai-studio.css');
+  assert.match(client, /function ensureStreamingMarkdownNode/);
+  assert.match(client, /function findStableStreamMarkdownBoundary/);
+  assert.match(client, /formatContent\(tailText, \{ streaming: true \}\)/);
+  assert.match(client, /streamingMarkdownRenderer\.code/);
+  assert.match(client, /const STREAM_RENDER_INTERVAL_MS = 105;/);
+  assert.doesNotMatch(client, /streamingNode\.textContent \+= nextChunk/);
+  assert.match(css, /\.aai-streaming-committed/);
+  const source = client.match(/function findStableStreamMarkdownBoundary\(text\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(source, 'Missing stable Markdown boundary parser');
+  const boundary = new Function(source + '\nreturn findStableStreamMarkdownBoundary;')();
+  assert.equal(boundary('**Halo**\n\nLanjut'), 10);
+  assert.equal(boundary('```js\nconst x = 1;\n\nconst y = 2;\n'), 0, 'Never split an unclosed code fence');
+  assert.equal(boundary('```js\nconst x = 1;\n```\n\nTeks'), 24);
+});

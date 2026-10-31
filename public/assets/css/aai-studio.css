@@ -1491,3 +1491,19 @@ body:not(.aai-login-page) .aai-activity .aai-preface {
   color: #77708d;
   letter-spacing: 0;
 }
+
+/* Compact, readable activity trail; keep the LLM's note inside the disclosure. */
+body:not(.aai-login-page) .aai-activity { margin: 3px 0 6px; }
+body:not(.aai-login-page) .aai-activity summary { padding: 2px 0 4px; font-size: 12.5px; }
+body:not(.aai-login-page) .aai-activity .aai-preface { margin: 3px 0 6px; font-size: 13px; line-height: 1.48; }
+body:not(.aai-login-page) .aai-activity-list { margin: 3px 0 6px; }
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-step { gap: 7px; margin: 0 0 4px; padding: 0; line-height: 1.4; }
+body:not(.aai-login-page) .aai-activity-step-icon { width: 22px; height: 22px; flex-basis: 22px; border-radius: 7px; font-size: 11px; }
+body:not(.aai-login-page) .aai-activity-step-text { padding-top: 1px; line-height: 1.4; }
+body:not(.aai-login-page) .aai-streaming-committed,
+body:not(.aai-login-page) .aai-streaming-live { display: contents; }
+body:not(.aai-login-page) .aai-stream-code { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-activity-list { line-height: 1.45; font-size: 13px; }
+  body:not(.aai-login-page) .aai-activity-step-icon { width: 23px; height: 23px; flex-basis: 23px; }
+}
