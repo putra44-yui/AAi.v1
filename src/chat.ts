@@ -850,7 +850,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           if (context.memoryCount > 0) {
             enqueueEvent({
               phase: 'progress', step: 'memory',
-              message: 'Ketemu ' + context.memoryCount + ' catatan memori relevan. Aku cocokkan dulu, ya.',
+              message: 'Memuat ' + context.memoryCount + ' catatan konteks yang berkaitan dengan percakapan.',
               source_count: context.memoryCount,
             });
           }
@@ -866,7 +866,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               const messages: Record<string, string> = {
                 tavily: 'Mencari rujukan terbaru lewat Tavily...',
                 exa: 'Hasil awal masih terbatas. Aku coba cari lagi lewat Exa...',
-                found: 'Ketemu ' + (count || 0) + ' sumber. Aku periksa sebelum menjawab.',
+                found: 'Ketemu ' + (count || 0) + ' hasil pencarian. Aku cocokkan dengan pertanyaanmu.',
                 unavailable: 'Pencarian belum menemukan sumber yang bisa dipastikan.',
               };
               enqueueEvent({ phase: 'progress', step, message: messages[step], ...(count !== undefined ? { source_count: count } : {}) });

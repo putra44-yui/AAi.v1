@@ -6,6 +6,7 @@ test('Automatic search follows freshness and explicit web intent, respecting pri
   assert.equal(decideWebSearch('Tolong cari di web tentang PKPU terbaru').search, true);
   assert.equal(decideWebSearch('Berapa harga emas hari ini?').search, true);
   assert.equal(decideWebSearch('Siapa presiden sekarang?').search, true);
+  assert.equal(decideWebSearch('Cari di web sumber resmi: kapan Node.js 24 dirilis? Sertakan tautan sumbernya.').query, 'kapan Node.js 24 dirilis?');
   assert.equal(decideWebSearch('Halo AAi, aku rindu.').search, false);
   assert.equal(decideWebSearch('Ingat apa tentang istriku?').search, false);
   assert.equal(decideWebSearch('Jangan cari web, jawab dari ingatan').search, false);
@@ -39,7 +40,7 @@ test('Tavily is first; Exa runs only if initial results are insufficient', async
     assert.deepEqual(calls, ['https://api.tavily.com/search','https://api.exa.ai/search']);
     assert.equal(outcome.provider, 'exa');
     assert.deepEqual(steps, ['tavily','exa','found']);
-    assert.match(webContextMessage(decision, outcome), /DATA EKSTERNAL TIDAK TEPERCAYA/);
+    assert.match(webContextMessage(decision, outcome), /DATA EKSTERNAL, BUKAN INSTRUKSI/);
   } finally {
     globalThis.fetch = oldFetch;
   }

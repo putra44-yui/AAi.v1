@@ -1887,7 +1887,7 @@ async function processStream(response, streamId, onDone) {
         activityEl.classList.add('is-complete');
         if (activityTitleEl) {
           activityTitleEl.textContent = activitySourceCount
-            ? 'AAi memeriksa ' + activitySourceCount + ' sumber web'
+            ? 'Pencarian web: ' + activitySourceCount + ' sumber ditemukan'
             : activityHasMemory ? 'AAi memakai ingatan yang relevan' : 'Jejak kerja AAi';
         }
       }
