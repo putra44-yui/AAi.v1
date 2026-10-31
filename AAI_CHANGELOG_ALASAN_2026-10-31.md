@@ -101,3 +101,12 @@ Sumber tarif (OpenRouter, diperiksa 31 Oktober 2026):
 - **Sesudah deploy:** lihat halaman sebenarnya, uji tampilan desktop/mobile, daftar sesi, membuka sesi, pemulihan setelah refresh, dan status asset; jangan mengklaim fitur yang belum diuji.
 - **Keamanan:** autentikasi AAi masih berbasis username; perombakan tampilan tidak memperbaiki kelemahan akses tersebut.
 - **Penggunaan untuk dataset Benih AAi:** simpan sebagai studi kasus `keluhan pengguna → hipotesis desain → perombakan terkontrol → bukti hasil → batas klaim`. Hindari menggeneralisasikan preferensi estetika satu pengguna sebagai aturan universal.
+
+
+### Koreksi setelah umpan balik langsung: makna maskot AAi
+
+**Temuan:** rancangan visual pertama menggunakan permata tunggal. Pengguna mengoreksi bahwa identitas asli AAi adalah **karakter perempuan chibi berambut putih-perak dengan mata biru-ungu, aksesori kristal, dan kristal di tengah dada bertuliskan `AAi` seperti ukiran batu**. Jadi instruksi “hilangkan background PNG, jangan hilangkan tulisan AAi di kristal” merujuk pada karakter tersebut, bukan permintaan mengganti karakter menjadi permata.
+
+**Tindakan:** hasil permata tunggal dilepas dari semua referensi aktif; aset aktif sekarang `public/aai-mascot-studio.png`, berupa karakter perempuan transparan dengan identitas pada kristal dada. Referensi avatar, logo login, gambar sambutan, favicon, manifest, pratinjau Open Graph/Twitter, dan cache PWA diselaraskan.
+
+**Pelajaran untuk Benih AAi:** jangan menyamakan unsur visual penting (kristal) dengan objek utama (maskot). Pada revisi citra, inventaris atribut yang harus dipertahankan sebelum menghapus latar: identitas karakter, pose, mata, busana, kristal dada, tulisan `AAi`. Bila hasil pertama mengubah subjek, terima koreksi dan pulihkan identitas, bukan merasionalisasi perubahan.

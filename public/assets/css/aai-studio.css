@@ -353,3 +353,15 @@ body.aai-login-page .footer-note span { color:#7770d9; background:none; -webkit-
   .session-empty { padding:18px 10px; }
   .empty-session { min-height:200px; }
 }
+
+/* Character-first art direction and narrower title on compact laptops. */
+#topbarTitle { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; max-width:100%; }
+.topbar-brandline { flex:1; overflow:hidden; }
+.topbar-spacer { flex:0; }
+.logo-icon { border-radius:12px; overflow:hidden; background:rgba(255,255,255,.07); }
+.logo-icon img { transform:scale(1.28) translateY(5%); object-fit:cover!important; object-position:50% 28%!important; }
+.assistant .avatar { overflow:hidden; }
+.assistant .avatar img { transform:scale(1.55) translateY(10%); object-fit:cover!important; object-position:50% 26%!important; }
+body.aai-login-page .logo-icon { border-radius:11px; background:#f0effb; overflow:hidden; }
+body.aai-login-page .logo-icon img { transform:scale(1.28) translateY(5%); }
+@media (max-width:1120px) { .topbar-status { display:none; } }

@@ -43,7 +43,7 @@ function getPreferredDisplayName() {
 }
 
 function getWelcomeIllustrationSrc() {
-  return '/aai-crystal.png';
+  return '/aai-mascot-studio.png';
 }
 
 function clearStoredSessionOnUserMismatch() {
@@ -976,7 +976,7 @@ function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') 
   return `
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="avatar" >
-        <img src="/aai-crystal.png" alt="AAi" >
+        <img src="/aai-mascot-studio.png" alt="AAi" >
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Manrope',sans-serif;">
@@ -2538,7 +2538,7 @@ function newChat(options = {}) {
   document.getElementById('chatArea').innerHTML = `
     <section class="aai-welcome" aria-label="Selamat datang di AAi">
       <div class="aai-welcome-copy">
-        <span class="aai-kicker"><i class="fas fa-sparkles"></i> AYAKA & AYATO INTELLIGENCE</span>
+        <span class="aai-kicker"><i class="fas fa-gem"></i> AYAKA & AYATO INTELLIGENCE</span>
         <h1>Halo, <span>${escHtml(getPreferredDisplayName())}.</span><br>Ada ide apa hari ini?</h1>
         <p>Tempat untuk berpikir jernih, mencari jawaban, dan ngobrol sesukamu. Mulai dari satu pertanyaan saja.</p>
         <div class="aai-prompt-heading">MULAI DARI SINI</div>
@@ -2550,7 +2550,7 @@ function newChat(options = {}) {
         </div>
       </div>
       <div class="aai-welcome-art">
-        <img src="${getWelcomeIllustrationSrc()}" alt="Kristal AAi dengan identitas AAi di dalamnya" />
+        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot AAi dengan kristal bertuliskan AAi di dadanya" />
       </div>
     </section>`;
   document.getElementById('topbarTitle').textContent = 'AAi · Ayaka & Ayato';
