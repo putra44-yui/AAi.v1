@@ -1,11 +1,11 @@
-const CACHE_NAME = 'aai-shell-v8';
+const CACHE_NAME = 'aai-shell-v9';
 const PRECACHE_URLS = [
+  '/index.html',
+  '/login.html',
   '/assets/js/app.js',
   '/assets/css/aai-crystal.css',
   '/aai-mascot.jpg',
   '/manifest.webmanifest',
-  '/ayaka.gif',
-  '/ayaka1.gif',
   '/ayaka.webp',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
@@ -87,6 +87,24 @@ self.addEventListener('fetch', event => {
           return (await caches.match('/')) || offlineResponse();
         })
     );
+    return;
+  }
+
+  // Deploying new code must not leave PWA users running an old app.js from
+  // cache. Prefer the network for frontend code and use cache only offline.
+  if (url.pathname.startsWith('/assets/') || url.pathname === '/manifest.webmanifest') {
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(req);
+        if (shouldCache(response)) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(req, response.clone());
+        }
+        return response;
+      } catch {
+        return (await caches.match(req)) || offlineResponse();
+      }
+    })());
     return;
   }
 

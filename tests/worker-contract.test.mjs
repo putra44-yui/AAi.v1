@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
 
@@ -31,4 +31,15 @@ test('OSS free is explicitly opt-in, not an automatic fallback', () => {
   assert.match(server, /modelPreference === 'oss-test'/);
   assert.match(client, /model_preference: currentModelPreference/);
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
+});
+
+test('PWA precache references real files and prefers network for updated app code', () => {
+  const sw = read('public/sw.js');
+  const list = sw.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/);
+  assert.ok(list, 'Precache list must exist');
+  for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
+    assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
+  }
+  assert.match(sw, /aai-shell-v9/);
+  assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
