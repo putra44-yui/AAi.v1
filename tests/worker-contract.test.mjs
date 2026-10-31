@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v21/);
+  assert.match(sw, /aai-shell-v22/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -117,4 +117,19 @@ test('AAi displays measured collapsible activity and readable named source links
   assert.match(client, /link\.classList\.add\('aai-source-link'\)/);
   assert.match(css, /\.aai-source-link::after/);
   assert.match(css, /content: '↗'/);
+});
+
+test('AAi streams an honest preface, icon steps, and an automatically saved summary', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  const css = read('public/assets/css/aai-studio.css');
+  assert.ok(server.includes("phase: 'preface'"), 'Server must send a preface before tool work');
+  assert.ok(server.includes("phase: 'progress'"), 'Server must stream real milestones');
+  assert.ok(server.includes('Merangkum sumber dan menyusun jawaban'));
+  assert.ok(client.includes("parsed.phase === 'preface'"));
+  assert.ok(client.includes('renderActivityStepHTML'));
+  assert.ok(client.includes('prefaceEl?.textContent'));
+  assert.ok(client.includes('buildStoredActivityPanelHTML(messageId)'));
+  assert.ok(css.includes('.aai-activity-step-icon'));
+  assert.ok(css.includes('.aai-preface'));
 });

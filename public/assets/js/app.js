@@ -1025,14 +1025,31 @@ function formatActivityDuration(ms) {
   return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
 }
 
-function saveActivityTrace(messageId, durationMs, steps) {
+function saveActivityTrace(messageId, durationMs, steps, preface = '') {
   if (!messageId || !Array.isArray(steps) || !steps.length) return;
   try {
     const traces = getStoredActivityTraces();
-    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(0, 14), savedAt: Date.now() };
+    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(0, 14), preface: String(preface).slice(0, 240), savedAt: Date.now() };
     const latest = Object.entries(traces).sort((left, right) => (right[1]?.savedAt || 0) - (left[1]?.savedAt || 0)).slice(0, 80);
     localStorage.setItem(AAI_ACTIVITY_STORE_KEY, JSON.stringify(Object.fromEntries(latest)));
   } catch { /* Storage may be disabled; live activity still works. */ }
+}
+
+const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
+  memory: 'fa-brain',
+  tavily: 'fa-search',
+  exa: 'fa-globe',
+  found: 'fa-book-open',
+  unavailable: 'fa-exclamation-circle',
+  compose: 'fa-feather-alt'
+});
+
+function renderActivityStepHTML(entry) {
+  const step = entry && typeof entry === 'object' ? entry.step : '';
+  const message = entry && typeof entry === 'object' ? entry.message : entry;
+  const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
+  return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
+    + '<span class="aai-activity-step-text">' + escHtml(String(message || '').slice(0, 220)) + '</span></li>';
 }
 
 function buildStoredActivityPanelHTML(messageId) {
@@ -1040,9 +1057,12 @@ function buildStoredActivityPanelHTML(messageId) {
   const trace = getStoredActivityTraces()[messageId];
   if (!trace || !Array.isArray(trace.steps) || !trace.steps.length) return '';
   const label = 'Memproses selama ' + formatActivityDuration(trace.durationMs);
-  return `<details class="aai-activity is-complete aai-saved-activity">
+  const intro = typeof trace.preface === 'string' && trace.preface.trim()
+    ? '<p class="aai-preface">' + escHtml(trace.preface) + '</p>'
+    : '';
+  return intro + `<details class="aai-activity is-complete aai-saved-activity">
     <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
-    <ul class="aai-activity-list">${trace.steps.map(step => '<li>' + escHtml(String(step).slice(0, 220)) + '</li>').join('')}</ul>
+    <ul class="aai-activity-list">${trace.steps.map(renderActivityStepHTML).join('')}</ul>
   </details>`;
 }
 
@@ -1069,6 +1089,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
       ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
+      <p class="aai-preface" id="preface_${streamId}">Sebentar, aku cek dulu, ya. ✨</p>
       ${activityHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
@@ -1570,8 +1591,7 @@ async function processStream(response, streamId, onDone) {
   const activityEl = document.getElementById(`activity_${streamId}`);
   const activityListEl = document.getElementById(`activity_list_${streamId}`);
   const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
-  let activityHasMemory = false;
-  let activitySourceCount = 0;
+  const prefaceEl = document.getElementById(`preface_${streamId}`);
   const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
   const activityTimeline = [];
   let activityTimer = null;
@@ -1834,18 +1854,24 @@ async function processStream(response, streamId, onDone) {
       return;
     }
 
+    if (parsed.phase === 'preface') {
+      if (prefaceEl && typeof parsed.message === 'string') {
+        prefaceEl.textContent = parsed.message.slice(0, 240);
+        prefaceEl.hidden = false;
+        scrollBottom();
+      }
+      return;
+    }
+
     if (parsed.phase === 'progress') {
       if (activityEl && activityListEl && typeof parsed.message === 'string') {
         activityEl.hidden = false;
         activityEl.open = true;
-        const item = document.createElement('li');
-        item.textContent = parsed.message.slice(0, 220);
-        activityListEl.appendChild(item);
-        if (activityTimeline.length < 14) activityTimeline.push(item.textContent);
+        const step = { step: String(parsed.step || ''), message: parsed.message.slice(0, 220) };
+        activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
+        if (activityTimeline.length < 14) activityTimeline.push(step);
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
         updateActivityClock();
-        if (parsed.step === 'memory') activityHasMemory = true;
-        if (parsed.step === 'found') activitySourceCount = Number(parsed.source_count) || 0;
         scrollBottom();
       }
       return;
@@ -1932,7 +1958,7 @@ async function processStream(response, streamId, onDone) {
         activityEl.open = false;
         activityEl.classList.add('is-complete');
         updateActivityClock(true);
-        saveActivityTrace(parsed.message_id, Date.now() - activityStartedAt, activityTimeline);
+        saveActivityTrace(parsed.message_id, Date.now() - activityStartedAt, activityTimeline, prefaceEl?.textContent || '');
       }
       flushStreamingRender(true);
       stopPreviewTicker('', true);

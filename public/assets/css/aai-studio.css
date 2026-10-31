@@ -1429,3 +1429,54 @@ body:not(.aai-login-page) .bubble a.aai-source-link:hover {
     line-height: 1.7;
   }
 }
+
+
+/* Human-first live activity: AAi speaks briefly, then shows factual steps. */
+body:not(.aai-login-page) .aai-preface {
+  margin: 7px 0 9px;
+  padding: 0;
+  font-size: clamp(15px, 1.1rem, 17px);
+  line-height: 1.65;
+  font-weight: 510;
+  color: #3e3657;
+  letter-spacing: -.01em;
+}
+body:not(.aai-login-page) .aai-preface[hidden] { display: none; }
+body:not(.aai-login-page) .aai-activity-list {
+  margin: 7px 0 13px;
+  padding: 0;
+  border-left: 0;
+}
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 2px 0;
+  margin: 0 0 10px;
+  line-height: 1.6;
+}
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-step::before { display: none; }
+body:not(.aai-login-page) .aai-activity-step-icon {
+  flex: 0 0 29px;
+  width: 29px;
+  height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(131, 101, 204, .11);
+  color: #8467bd;
+  font-size: 13px;
+  margin-top: 0;
+}
+body:not(.aai-login-page) .aai-activity-step-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+  color: #6d6780;
+}
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-preface { font-size: 16px; }
+  body:not(.aai-login-page) .aai-activity-list li.aai-activity-step { gap: 9px; }
+  body:not(.aai-login-page) .aai-activity-step-icon { width: 28px; flex-basis: 28px; height: 28px; }
+}

@@ -150,6 +150,11 @@ interface TokenEvent {
   token: string;
 }
 
+interface PrefaceEvent {
+  phase: 'preface';
+  message: string;
+}
+
 interface ProgressEvent {
   phase: 'progress';
   step: 'memory' | 'tavily' | 'exa' | 'found' | 'unavailable' | 'compose';
@@ -175,7 +180,7 @@ interface ErrorEvent {
   user_message_id?: string;
 }
 
-type StreamEvent = InitEvent | ProgressEvent | TokenEvent | DoneEvent | ErrorEvent;
+type StreamEvent = InitEvent | PrefaceEvent | ProgressEvent | TokenEvent | DoneEvent | ErrorEvent;
 
 interface ParseRequestSuccess {
   ok: true;
@@ -847,10 +852,18 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
+          const preface = webDecision.search
+            ? webSearchAllowed
+              ? 'Oke, aku cari sumber web yang bisa kita cek dulu, ya. 🔎'
+              : 'Aku bantu dari informasi yang ada dulu, ya. Pencarian web sedang dibatasi.'
+            : context.memoryCount > 0
+              ? 'Sebentar, aku ingat konteks obrolan kita dulu, ya. ✨'
+              : 'Oke, aku susun jawabannya dulu, ya. ✨';
+          enqueueEvent({ phase: 'preface', message: preface });
           if (context.memoryCount > 0) {
             enqueueEvent({
               phase: 'progress', step: 'memory',
-              message: 'Memuat ' + context.memoryCount + ' catatan konteks yang berkaitan dengan percakapan.',
+              message: 'Mengingat ' + context.memoryCount + ' catatan konteks percakapan...',
               source_count: context.memoryCount,
             });
           }
@@ -864,9 +877,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           if (webDecision.search && webSearchAllowed) {
             const webOutcome = await collectWebSources(webDecision, env, (step, count) => {
               const messages: Record<string, string> = {
-                tavily: 'Mencari rujukan terbaru lewat Tavily...',
-                exa: 'Hasil awal masih terbatas. Aku coba cari lagi lewat Exa...',
-                found: 'Ketemu ' + (count || 0) + ' hasil pencarian. Aku cocokkan dengan pertanyaanmu.',
+                tavily: 'Mencari referensi web melalui Tavily...',
+                exa: 'Hasil awal belum cukup. Mencari lagi melalui Exa...',
+                found: 'Menemukan ' + (count || 0) + ' sumber. Memeriksa ringkasannya...',
                 unavailable: 'Pencarian belum menemukan sumber yang bisa dipastikan.',
               };
               enqueueEvent({ phase: 'progress', step, message: messages[step], ...(count !== undefined ? { source_count: count } : {}) });
@@ -877,9 +890,14 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               providerPayload.messages.splice(context.systemMessages.length, 0, { role: 'system', content: searchContext });
             }
           }
-          if (context.memoryCount > 0 || webDecision.search) {
-            enqueueEvent({ phase: 'progress', step: 'compose', message: 'Menyusun jawaban dari konteks yang sudah diperiksa...' });
-          }
+          // Every response gets a real preparation milestone, even without tools.
+          enqueueEvent({
+            phase: 'progress',
+            step: 'compose',
+            message: webDecision.search && webSearchAllowed
+              ? 'Merangkum sumber dan menyusun jawaban...'
+              : 'Menyusun jawaban dari konteks yang tersedia...',
+          });
 
           const fetchResult = await fetchProviderStream({
             apiKey,
