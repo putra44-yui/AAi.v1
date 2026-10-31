@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AAi — Ruang Ide & Percakapan</title>
+<title>AAi ✦ Ruang Kreatifmu</title>
 <meta name="description" content="AAi — ruang ngobrol, belajar, dan berkarya bersama Ayaka & Ayato AI." />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="AAi — Ayaka & Ayato AI" />
@@ -16,7 +16,7 @@
 <meta name="twitter:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-mascot-studio.png?v=studio-girl-20261031" />
 <link rel="canonical" href="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
 <link rel="icon" type="image/png" sizes="512x512" href="/aai-mascot-studio.png">
-<meta name="theme-color" content="#171b2d" />
+<meta name="theme-color" content="#f6f2ff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
@@ -1379,76 +1379,85 @@ body.desktop-sidebar-hidden #topbarTitle {
   </div>
 </div>
 
-<aside class="sidebar" id="sidebar">
+
+<nav class="aai-rail" aria-label="Navigasi utama">
+  <a class="aai-rail-brand" href="/" aria-label="AAi, beranda">
+    <img src="/aai-mascot-studio.png" alt="Maskot perempuan AAi" />
+    <span>AAi</span>
+  </a>
+  <div class="aai-rail-divider"></div>
+  <button class="aai-rail-action aai-rail-new" type="button" onclick="newChat()" aria-label="Mulai obrolan baru" title="Obrolan baru"><i class="fas fa-plus"></i><span>Baru</span></button>
+  <button class="aai-rail-action hamburger" type="button" onclick="toggleSidebar()" aria-label="Buka riwayat percakapan" aria-expanded="false" title="Riwayat chat"><i class="far fa-comments"></i><span>Riwayat</span></button>
+  <div class="aai-rail-spacer"></div>
+  <div class="aai-rail-footer" title="Ruang kreatif AAi"><i class="fas fa-gem"></i><span>Ruangmu</span></div>
+</nav>
+
+<aside class="sidebar" id="sidebar" aria-label="Laci riwayat percakapan">
   <div class="sidebar-header">
-    <a class="logo" href="/" aria-label="AAi — Beranda">
-      <div class="logo-icon"><img src="/aai-mascot-studio.png" alt="Maskot AAi" /></div>
-      <div class="logo-text-stack">
-        <span class="logo-name">AAi</span>
-        <span class="logo-subtitle">Ayaka &amp; Ayato AI</span>
-      </div>
-    </a>
-    <button class="new-chat-btn" type="button" onclick="newChat()"><i class="fas fa-plus"></i><span>Obrolan baru</span></button>
+    <div class="aai-drawer-heading">
+      <div><span class="aai-drawer-overline">RUANG CERITA</span><h2>Percakapanmu <span>✦</span></h2></div>
+      <button class="aai-drawer-close" type="button" onclick="toggleSidebar()" aria-label="Tutup riwayat"><i class="fas fa-times"></i></button>
+    </div>
+    <button class="new-chat-btn" type="button" onclick="newChat()"><i class="fas fa-plus"></i><span>Mulai obrolan baru</span></button>
   </div>
   <div class="sidebar-library">
     <div class="sidebar-section-row">
-      <span class="sidebar-section-label">Percakapan</span>
+      <span class="sidebar-section-label">Obrolan sebelumnya</span>
       <span class="sidebar-section-hint">RIWAYAT</span>
     </div>
     <div id="sessionList" aria-label="Daftar percakapan"></div>
   </div>
   <div class="user-card">
     <div class="user-info">
-      <div class="user-avatar-mini"><i class="fas fa-user"></i></div>
+      <div class="user-avatar-mini"><i class="far fa-user"></i></div>
       <div style="display:flex;flex-direction:column;min-width:0;">
-        <span id="cardUsername" style="font-weight:600;font-size:14px;color:var(--text);">Person</span>
+        <span id="cardUsername" style="font-weight:700;font-size:13px;">Person</span>
         <span id="cardFamilyRole" class="user-role-badge">Anggota Keluarga</span>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()" type="button" title="Keluar" aria-label="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+    <button class="logout-btn" onclick="logout()" type="button" title="Keluar akun" aria-label="Keluar"><i class="fas fa-sign-out-alt"></i></button>
   </div>
 </aside>
+<div class="aai-drawer-backdrop" id="drawerBackdrop" onclick="toggleSidebar()" aria-hidden="true"></div>
 
 <main class="main">
   <header class="topbar">
-    <button class="hamburger" type="button" aria-label="Buka menu" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
     <div class="topbar-brandline">
-      <span class="topbar-eyebrow">AAi / RUANG OBROLAN</span>
-      <span id="topbarTitle">AAi · Ayaka &amp; Ayato</span>
+      <span class="topbar-eyebrow"><i class="fas fa-sparkles" aria-hidden="true"></i> AAi · CREATIVE SPACE</span>
+      <span id="topbarTitle">Ruang baru untuk ide-ide besar</span>
     </div>
     <span class="topbar-spacer"></span>
-    <span class="topbar-status"><span class="topbar-status-dot"></span>Teman ide harian</span>
+    <span class="topbar-status"><span class="topbar-status-dot"></span> Teman ide harian</span>
+    <div class="settings-wrapper aai-top-settings">
+      <button class="settings-btn" type="button" onclick="toggleSettingsMenu()" title="Pilihan model dan persona" aria-label="Pengaturan model dan persona">
+        <i class="fas fa-sliders-h"></i>
+        <span class="mode-label" id="modeLabel">Auto</span>
+      </button>
+      <div class="settings-menu" id="settingsMenu"></div>
+    </div>
   </header>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
-  <div id="filePreview" class="file-preview-container"></div>
-
-  <div class="input-wrap" id="inputWrap">
-    <textarea id="messageInput" rows="1" placeholder="Tulis pesan untuk AAi..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
-    <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
-    <div class="input-controls-row">
-      <div class="upload-container">
-        <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" style="display:none;">
-        <button class="upload-btn" onclick="document.getElementById('fileInput').click()" title="Lampirkan File/Gambar">
-          <i class="fas fa-paperclip"></i>
+    <div id="filePreview" class="file-preview-container"></div>
+    <div class="input-wrap" id="inputWrap">
+      <textarea id="messageInput" rows="1" placeholder="Tanya, cerita, atau mulai dari sebuah ide..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
+      <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
+      <div class="input-controls-row">
+        <div class="aai-composer-hint"><i class="fas fa-magic"></i><span>Teman berpikir &amp; berkarya</span></div>
+        <div class="aai-control-spacer"></div>
+        <div class="upload-container">
+          <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" style="display:none;">
+          <button class="upload-btn" onclick="document.getElementById('fileInput').click()" title="Lampirkan File/Gambar" aria-label="Lampirkan file"><i class="fas fa-paperclip"></i></button>
+        </div>
+        <button class="quick-compact-btn" id="compactBtn" onclick="sendCompactCheckpoint()" title="Ringkas konteks + checkpoint">
+          <i class="fas fa-compress-alt"></i><span class="compact-label">Compact</span>
         </button>
+        <button class="send-btn" id="sendBtn" onclick="handleSend()" title="Kirim pesan" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
       </div>
-      <div class="settings-wrapper">
-        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Mode AI">
-          <i class="fas fa-rocket"></i>
-          <span class="mode-label" id="modeLabel">Auto</span>
-        </button>
-        <div class="settings-menu" id="settingsMenu"></div>
-      </div>
-      <button class="quick-compact-btn" id="compactBtn" onclick="sendCompactCheckpoint()" title="Ringkas konteks + checkpoint">
-        <i class="fas fa-compress-alt"></i><span class="compact-label">Compact</span>
-      </button>
-      <button class="send-btn" id="sendBtn" onclick="handleSend()" title="Kirim pesan" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
     </div>
+    <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
+    <p class="composer-note">AAi bisa keliru — periksa kembali informasi penting.</p>
   </div>
-  <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
-  <p class="composer-note">AAi bisa keliru. Periksa kembali informasi penting sebelum digunakan.</p>
-</div>
 </main>
 
 <script src="/assets/js/app.js"></script>

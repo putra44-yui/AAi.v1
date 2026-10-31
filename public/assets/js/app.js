@@ -17,7 +17,7 @@ let currentSessionId = null;
 let currentSessionMeta = null;
 let sessionLoadSerial = 0;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
-let currentModelPreference = 'main'; // mode uji sementara, kembali ke utama setelah refresh
+let currentModelPreference = localStorage.getItem('aai_model_preference') === 'oss-test' ? 'oss-test' : 'main';
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
@@ -971,37 +971,20 @@ function normalizeAssistantModelLabel(modelName = '', explicitLabel = '') {
     .join(' ');
 }
 
-function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') {
-  const displayLabel = normalizeAssistantModelLabel(modelName, modelLabel);
+function buildAssistantHeaderHTML(versionHtml) {
   return `
     <div style="display:flex;align-items:center;gap:10px;">
-      <div class="avatar" >
-        <img src="/aai-mascot-studio.png" alt="AAi" >
-      </div>
-      <div style="display:flex;flex-direction:column;gap:3px;">
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Manrope',sans-serif;">
-          AAi ${versionHtml}
-        </div>
-        <div class="assistant-model-label" style="font-size:11px;line-height:1.1;color:var(--text-muted);opacity:${displayLabel ? '0.78' : '0'};min-height:12px;">
-          ${escHtml(displayLabel)}
-        </div>
+      <div class="avatar"><img src="/aai-mascot-studio.png" alt="AAi"></div>
+      <div style="font-weight:800;font-size:15px;color:var(--blue-dark);font-family:'Plus Jakarta Sans',sans-serif;">
+        AAi ${versionHtml}
       </div>
     </div>`;
 }
-
+// Internal model metadata stays available for diagnostics, never shown as a chat byline.
 function applyAssistantModelMeta(row, modelName = '', modelLabel = '') {
   if (!row) return;
-
-  const normalizedModel = String(modelName || '').trim();
-  const displayLabel = normalizeAssistantModelLabel(normalizedModel, modelLabel);
-  row.setAttribute('data-model', normalizedModel);
-  row.setAttribute('data-model-label', displayLabel);
-
-  const labelEl = row.querySelector('.assistant-model-label');
-  if (!labelEl) return;
-
-  labelEl.textContent = displayLabel;
-  labelEl.style.opacity = displayLabel ? '0.78' : '0';
+  row.setAttribute('data-model', String(modelName || '').trim());
+  row.setAttribute('data-model-label', String(modelLabel || '').trim());
 }
 
 function buildStreamBubbleHTML(streamId, timeStr) {
@@ -1020,7 +1003,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
 
   return `
     <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
-      ${buildAssistantHeaderHTML('<span class="version-tag">V.1</span>')}
+      ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
@@ -2529,6 +2512,7 @@ function useWelcomePrompt(promptText) {
 function newChat(options = {}) {
   const { preserveStoredSession = false } = options;
   currentSessionId = null;
+  setHistoryDrawerOpen(false);
   sessionLoadSerial += 1;
   currentSessionMeta = null;
   activeRenderJob += 1;
@@ -2537,20 +2521,23 @@ function newChat(options = {}) {
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
     <section class="aai-welcome" aria-label="Selamat datang di AAi">
-      <div class="aai-welcome-copy">
-        <span class="aai-kicker"><i class="fas fa-gem"></i> AYAKA & AYATO INTELLIGENCE</span>
-        <h1>Halo, <span>${escHtml(getPreferredDisplayName())}.</span><br>Ada ide apa hari ini?</h1>
-        <p>Tempat untuk berpikir jernih, mencari jawaban, dan ngobrol sesukamu. Mulai dari satu pertanyaan saja.</p>
-        <div class="aai-prompt-heading">MULAI DARI SINI</div>
-        <div class="aai-prompt-grid">
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku merapikan ide yang sedang kupikirkan')"><i class="far fa-lightbulb"></i> Rapikan ide</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Ajari aku topik baru dengan penjelasan sederhana')"><i class="fas fa-book-open"></i> Belajar sesuatu</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun langkah kerja yang jelas')"><i class="fas fa-list-check"></i> Susun langkah</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Yuk ngobrol santai sebentar')"><i class="far fa-comment-dots"></i> Ngobrol santai</button>
-        </div>
-      </div>
       <div class="aai-welcome-art">
-        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot AAi dengan kristal bertuliskan AAi di dadanya" />
+        <div class="aai-crystal-halo"></div>
+        <span class="aai-floating-star star-a">✦</span><span class="aai-floating-star star-b">✧</span>
+        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot cewek AAi dengan kristal bertuliskan AAi di dadanya" />
+        <span class="aai-art-signature"><i class="fas fa-gem"></i> Meet your creative companion</span>
+      </div>
+      <div class="aai-welcome-copy">
+        <span class="aai-kicker"><i class="fas fa-sun"></i> HI, WELCOME TO AAi WORLD</span>
+        <h1>Halo, <span>${escHtml(getPreferredDisplayName())}!</span><br>Yuk, bikin hal <em>indah.</em></h1>
+        <p>Ada cerita, pertanyaan, atau ide kecil? AAi siap menemanimu mengubahnya jadi sesuatu yang istimewa. ✨</p>
+        <div class="aai-prompt-heading"><span class="aai-prompt-sparkle">✦</span> MAU MULAI DARI MANA?</div>
+        <div class="aai-prompt-grid">
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku merapikan ide yang sedang kupikirkan')"><i class="far fa-lightbulb"></i><span>Rapikan ide</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Ajari aku topik baru dengan penjelasan sederhana')"><i class="fas fa-book-open"></i><span>Belajar hal baru</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun langkah kerja yang jelas')"><i class="fas fa-list-check"></i><span>Susun rencana</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Yuk ngobrol santai sebentar')"><i class="far fa-comment-dots"></i><span>Ngobrol santai</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+        </div>
       </div>
     </section>`;
   document.getElementById('topbarTitle').textContent = 'AAi · Ayaka & Ayato';
@@ -2696,7 +2683,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
           ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Referensi">` : ''}
         </div>`;
     }
-    let versionHtml = `<span class="version-tag">V.1</span>`;
+    let versionHtml = ``;
     if (versionInfo?.total > 1) {
       const prev = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
       const next = versionInfo.current < versionInfo.total ? versionInfo.siblings[versionInfo.current] : null;
@@ -2962,12 +2949,13 @@ function renderSettingsMenu() {
       <span>${m.label}</span><i class="fas fa-check check"></i>
     </button>`;
   });
-  html += '<p class="model-test-note">Model OSS hanya untuk uji manual. Saat halaman dimuat ulang, kembali ke Qwen.</p>';
+  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Model gratis untuk pengujian dan mungkin tidak selalu tersedia.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
 }
 function selectModelUI(val) {
   if (val !== 'main' && val !== 'oss-test') return;
   currentModelPreference = val;
+  localStorage.setItem('aai_model_preference', val);
   updateModeLabel();
   renderSettingsMenu();
 }
@@ -3130,34 +3118,26 @@ async function handleSend() {
   }
 }
 
-function toggleSidebar() {
+function setHistoryDrawerOpen(isOpen) {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
-
-  if (window.innerWidth <= 768) {
-    sidebar.classList.toggle('open');
-    return;
-  }
-
-  document.body.classList.toggle('desktop-sidebar-hidden');
+  sidebar.classList.toggle('open', Boolean(isOpen));
+  const toggle = document.querySelector('.hamburger');
+  if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(isOpen)));
+  document.body.classList.toggle('aai-drawer-visible', Boolean(isOpen));
 }
-document.addEventListener('click', e => {
-  if (window.innerWidth > 768) return;
-  const sidebar   = document.getElementById('sidebar');
-  const hamburger = document.querySelector('.hamburger');
-  if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target))
-    sidebar.classList.remove('open');
+function toggleSidebar() {
+  setHistoryDrawerOpen(!document.getElementById('sidebar')?.classList.contains('open'));
+}
+document.addEventListener('click', (event) => {
+  const drawer = document.getElementById('sidebar');
+  if (!drawer?.classList.contains('open')) return;
+  if (event.target.closest('.aai-drawer-backdrop')) return;
+  if (event.target.closest('.hamburger') || event.target.closest('.aai-drawer-close')) return;
+  if (event.target.closest('.session-item')) setHistoryDrawerOpen(false);
 });
-window.addEventListener('resize', () => {
-  const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-
-  if (window.innerWidth > 768) {
-    sidebar.classList.remove('open');
-    return;
-  }
-
-  document.body.classList.remove('desktop-sidebar-hidden');
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setHistoryDrawerOpen(false);
 });
 async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
