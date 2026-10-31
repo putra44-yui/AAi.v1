@@ -1305,6 +1305,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>
+<link rel="stylesheet" href="/assets/css/aai-crystal.css" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
@@ -1367,26 +1368,11 @@ body.desktop-sidebar-hidden #topbarTitle {
   </div>
 </div>
 
-<div class="modal-overlay" id="clarifyModal">
-  <div class="clarify-modal-box">
-    <div class="clarify-title" id="clarifyTitle">Perlu Detail Tambahan</div>
-    <div class="clarify-desc" id="clarifyDesc">Pilih opsi yang paling sesuai atau isi lainnya agar hasilnya lebih tepat.</div>
-    <div class="clarify-top-actions">
-      <button class="clarify-btn ghost" id="clarifyPresetBtn" onclick="applyPreviousClarifyPreset()">Gunakan Preset Sebelumnya</button>
-    </div>
-    <div class="clarify-grid" id="clarifyQuestions"></div>
-    <div class="clarify-actions">
-      <button class="clarify-btn cancel" onclick="closeClarifyModal()">Nanti Saja</button>
-      <button class="clarify-btn confirm" id="clarifyConfirmBtn" onclick="confirmClarifyAndSend()">Lanjutkan Dengan Jawaban Ini</button>
-    </div>
-  </div>
-</div>
-
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
     <a class="logo" href="/">
       <div class="logo-icon">
-        <img src="/ayaka.webp" alt="AAi Logo" style="width:100%;height:100%;object-fit:contain;border-radius:16px;">
+        <img src="/aai-mascot.jpg" alt="Karakter AAi" style="width:100%;height:100%;object-fit:contain;border-radius:16px;">
       </div>
       <div class="logo-text-stack">
         <span class="logo-name">AAi</span>
@@ -1397,6 +1383,7 @@ body.desktop-sidebar-hidden #topbarTitle {
       <span style="font-size:18px;">&#10022;</span> Obrolan Baru
     </button>
   </div>
+  <span class="sidebar-section-label">Riwayat percakapan</span>
   <div id="sessionList"></div>
   <div class="user-card">
     <div class="user-info">
@@ -1412,17 +1399,18 @@ body.desktop-sidebar-hidden #topbarTitle {
 
 <main class="main">
   <div class="topbar">
-    <span class="hamburger" onclick="toggleSidebar()">&#9776;</span>
-    <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Ayaka dan Ayato</span>
+    <button class="hamburger" type="button" aria-label="Buka menu" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+    <div class="topbar-brandline"><span class="topbar-eyebrow">RUANG OBROLAN</span><span id="topbarTitle">AAi · Ayaka &amp; Ayato</span></div>
     <span class="topbar-spacer"></span>
+    <span class="topbar-status"><span class="topbar-status-dot"></span>Ruang cerita kita</span>
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
   <div id="filePreview" class="file-preview-container"></div>
 
   <div class="input-wrap" id="inputWrap">
-    <textarea id="messageInput" rows="1" placeholder="Ketik pesan..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
-    <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim">&#9654;</button>
+    <textarea id="messageInput" rows="1" placeholder="Ceritakan sesuatu kepada AAi..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
+    <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
     <div class="input-controls-row">
       <div class="upload-container">
         <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" style="display:none;">
@@ -1440,10 +1428,11 @@ body.desktop-sidebar-hidden #topbarTitle {
       <button class="quick-compact-btn" id="compactBtn" onclick="sendCompactCheckpoint()" title="Ringkas konteks + checkpoint">
         <i class="fas fa-compress-alt"></i><span class="compact-label">Compact</span>
       </button>
-      <button class="send-btn" id="sendBtn" onclick="handleSend()">&#9654;</button>
+      <button class="send-btn" id="sendBtn" onclick="handleSend()" title="Kirim pesan" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
     </div>
   </div>
   <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
+  <p class="composer-note">AAi bisa keliru. Periksa kembali informasi penting sebelum digunakan.</p>
 </div>
 </main>
 
