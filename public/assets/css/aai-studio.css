@@ -773,3 +773,17 @@ body.aai-login-page .login-btn:hover { background:linear-gradient(105deg,#8465dd
 
 /* AAi is the public-facing identity; provider labels live exclusively in settings. */
 .assistant-model-label { display:none!important; }
+
+/* Readability tune requested by family: unmistakable user-message contrast. */
+.msg-row.user .bubble {
+  color:#ffffff!important;
+  background:linear-gradient(135deg,#6753ba 0%,#56449f 100%)!important;
+  border:1px solid #6753ba!important;
+  box-shadow:0 9px 22px rgba(88,66,157,.21)!important;
+  font-weight:500;
+  text-align:left;
+}
+.msg-row.user .bubble strong,.msg-row.user .bubble em { color:#ffffff; }
+.msg-row.user .bubble a { color:#e5f4ff; text-decoration:underline; }
+.msg-row.user .bubble code { color:#fff; background:rgba(255,255,255,.18); }
+.msg-row.user .bubble pre { background:#302b53; color:#fff; }
