@@ -58,6 +58,11 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
       const resource = new URL(url).pathname.split('/').at(-1);
       const body = init.body ? JSON.parse(init.body) : null;
       dbCalls.push({ resource, method, body });
+      if (resource === 'users' && method === 'GET') {
+        return Response.json({ id: userId, username: 'teguh', person_id: null });
+      }
+      if (resource === 'persons' && method === 'GET') return Response.json([]);
+      if (resource === 'ai_personas' && method === 'GET') return Response.json([]);
       if (resource === 'sessions' && method === 'POST') {
         return Response.json({ id: sessionId }, { status: 201 });
       }
@@ -87,7 +92,8 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
       .map(c => c.body.role), ['user', 'assistant']);
     assert.equal(dbCalls.find(c => c.resource === 'messages' && c.body?.role === 'assistant').body.content, 'Halo lagi!');
     assert.equal(providerCalls[0].model, 'qwen/qwen3.8-omni-flash');
-    assert.deepEqual(providerCalls[0].messages, [{ role: 'user', content: 'Halo AAi' }]);
+    assert.match(providerCalls[0].messages[0].content, /AAi.*Teguh/);
+    assert.deepEqual(providerCalls[0].messages.at(-1), { role: 'user', content: 'Halo AAi' });
   } finally {
     globalThis.fetch = oldFetch;
   }
@@ -138,6 +144,9 @@ test('previous chat context is sent to Omni Flash along the selected branch only
         });
       }
       const resource = url.pathname.split('/').at(-1);
+      if (resource === 'users' && method === 'GET') return Response.json({ id: userId, username: 'teguh', person_id: null });
+      if (resource === 'persons' && method === 'GET') return Response.json([]);
+      if (resource === 'ai_personas' && method === 'GET') return Response.json([]);
       if (resource === 'sessions' && method === 'GET') return Response.json({ id: sessionId });
       if (resource === 'sessions' && method === 'PATCH') return new Response(null, { status: 204 });
       if (resource === 'messages' && method === 'GET' &&
@@ -168,7 +177,8 @@ test('previous chat context is sent to Omni Flash along the selected branch only
     }), env);
     assert.equal(response.status, 200);
     await response.text();
-    assert.deepEqual(sentMessages, [
+    assert.equal(sentMessages[0].role, 'system');
+    assert.deepEqual(sentMessages.slice(-3), [
       { role: 'user', content: 'Pertanyaan pertama' },
       { role: 'assistant', content: 'Jawaban utama' },
       { role: 'user', content: 'Lanjutkan' },

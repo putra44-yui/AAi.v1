@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, persistAAiMemory, type AAiContext } from './aai-context';
 type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -155,6 +156,8 @@ interface DoneEvent {
   persona_used: string;
   model_used: string;
   session_title?: string;
+  final_text?: string;
+  replace_stream_text?: boolean;
 }
 
 interface ErrorEvent {
@@ -278,28 +281,17 @@ function parseRequestBody(input: string): ParseRequestResult {
   };
 }
 
-function buildProviderMessages(message: string, personaName: string, history: ProviderMessage[]): ProviderMessage[] {
-  const messages: ProviderMessage[] = [];
-
-  if (personaName !== DEFAULT_PERSONA) {
-    messages.push({
-      role: 'system',
-      content: `Respond while staying consistent with the persona "${personaName}".`,
-    });
-  }
-
-  messages.push(...history);
-  messages.push({ role: 'user', content: message });
-  return messages;
+function buildProviderMessages(message: string, context: AAiContext, history: ProviderMessage[]): ProviderMessage[] {
+  return [...context.systemMessages, ...history, { role: 'user', content: message }];
 }
 
 function buildProviderPayload(
-  message: string, personaName: string, model: string, traceId: string, history: ProviderMessage[],
+  message: string, context: AAiContext, model: string, traceId: string, history: ProviderMessage[],
 ): ProviderRequestBody {
   return {
     model,
     stream: true,
-    messages: buildProviderMessages(message, personaName, history),
+    messages: buildProviderMessages(message, context, history),
     temperature: 0.7,
     user: traceId,
   };
@@ -783,7 +775,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       ? DEFAULT_FREE_MODEL
       : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
-    const providerPayload = buildProviderPayload(message, personaName, modelName, traceId, history);
+    // A session's history is not a replacement for AAi's permanent identity and memories.
+    const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
+    const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
     const titleState: { promise: Promise<string | null> | null } = { promise: null };
     const encoder = new TextEncoder();
     const upstreamAbortController = new AbortController();
@@ -796,6 +790,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
         const replyParts: string[] = [];
+        const displayFilter = createAAiMemoryStreamFilter();
 
         const enqueueEvent = (event: StreamEvent): void => {
           if (streamClosed || streamCanceled) {
@@ -889,7 +884,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               titleState.promise = generateSessionTitle(message, env, apiKey, modelName, traceId);
             }
             replyParts.push(token);
-            enqueueEvent({ token });
+            const visible = displayFilter.push(token);
+            if (visible) enqueueEvent({ token: visible });
           };
 
           while (true) {
@@ -918,17 +914,32 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             emitStreamError('Provider tidak mengirim token jawaban.');
             return;
           }
+          const trailing = displayFilter.finish();
+          if (trailing) enqueueEvent({ token: trailing });
+
+          const rawReply = replyParts.join('');
+          const parsedReply = extractAAiMemoryTags(rawReply);
+          // Internal tags never enter the stored assistant chat history.
+          const cleanReply = parsedReply.cleanText;
 
           // Do not report "done" until the assistant answer is durable.
           const { data: saved, error: saveError } = await supabase.from('messages')
             .insert({
               session_id: sessionId,
               role: 'assistant',
-              content: replyParts.join(''),
+              content: cleanReply,
               parent_id: userMessageId,
             })
             .select('id').single();
           if (saveError) throw saveError;
+
+          // Memory persistence must not turn a successfully saved answer into a failed chat.
+          try {
+            await persistAAiMemory(supabase as unknown as SupabaseClient, context.personId,
+              requestBody.value.userId!, message, saved.id, rawReply);
+          } catch (memoryError) {
+            console.error('[AAi memory save]', normalizeErrorMessage(memoryError));
+          }
 
           const { error: touchError } = await supabase.from('sessions')
             .update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
@@ -957,9 +968,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             session_id: sessionId,
             message_id: saved.id,
             user_message_id: userMessageId,
-            persona_used: personaName,
+            persona_used: context.personaUsed,
             model_used: resolvedModelUsed,
             session_title: sessionTitle,
+            ...(cleanReply !== rawReply ? { final_text: cleanReply, replace_stream_text: true } : {}),
           });
           closeStream();
         } catch (error) {

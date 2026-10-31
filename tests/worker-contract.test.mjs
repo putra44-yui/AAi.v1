@@ -24,11 +24,11 @@ test('essential API routes still have Worker handlers', () => {
   assert.match(worker, /Konfigurasi Supabase belum tersedia/);
 });
 
-test('OSS free is explicitly opt-in, not an automatic fallback', () => {
+test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
-  assert.match(server, /DEFAULT_TEST_MODEL = 'openai\/gpt-oss-20b:free'/);
-  assert.match(server, /modelPreference === 'oss-test'/);
+  assert.match(server, /DEFAULT_FREE_MODEL = 'openrouter\/free'/);
+  assert.match(server, /modelPreference === 'free-auto'/);
   assert.match(client, /model_preference: currentModelPreference/);
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
 });
@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v9/);
+  assert.match(sw, /aai-shell-v18/);
   assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
 
