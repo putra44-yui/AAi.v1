@@ -43,3 +43,11 @@ test('PWA precache references real files and prefers network for updated app cod
   assert.match(sw, /aai-shell-v9/);
   assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
+
+test('login alias does not redirect back to Cloudflare canonical login URL', () => {
+  const worker = read('src/worker.ts');
+  const wrangler = JSON.parse(read('wrangler.jsonc'));
+  assert.ok(wrangler.assets.run_worker_first.includes('/login'));
+  assert.doesNotMatch(worker, /Response\.redirect/);
+  assert.match(worker, /return env\.ASSETS\.fetch\(request\)/);
+});

@@ -125,10 +125,6 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (path === '/login' || path === '/login/') {
-      return Response.redirect(new URL('/login.html', request.url), 302);
-    }
-
     if (path === '/api/status' && request.method === 'GET') {
       return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
         headers: { 'cache-control': 'no-store' },
