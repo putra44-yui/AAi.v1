@@ -30,8 +30,23 @@ function words(text: string): Set<string> {
   return new Set((text.toLowerCase().normalize('NFKC').match(/[\p{L}\p{N}]{3,}/gu) ?? [])
     .filter(word => !STOP_WORDS.has(word)));
 }
+export function readableAAiMemoryValue(value: string | null): string {
+  const raw = String(value ?? '').trim();
+  if (raw.startsWith('{')) {
+    try {
+      const data: unknown = JSON.parse(raw);
+      if (data && typeof data === 'object' && 'value' in data
+          && typeof (data as { value?: unknown }).value === 'string') {
+        return (data as { value: string }).value;
+      }
+    } catch {
+      // Legacy rows are sometimes plain text that resembles JSON.
+    }
+  }
+  return raw;
+}
 function similarity(memory: Memory, messageWords: Set<string>): number {
-  const terms = words((memory.key ?? '').replace(/_/g, ' ') + ' ' + (memory.value ?? ''));
+  const terms = words((memory.key ?? '').replace(/_/g, ' ') + ' ' + readableAAiMemoryValue(memory.value));
   if (terms.size === 0 || messageWords.size === 0) return 0;
   let common = 0;
   for (const word of messageWords) if (terms.has(word)) common += 1;
@@ -59,7 +74,7 @@ export function resolveAAiPersona(requested: string, text: string, personName = 
 }
 function summarizeMemory(memory: Memory): string {
   const label = (memory.key ?? '').replace(/_/g, ' ').slice(0, 70);
-  return '- ' + label + ' (' + (memory.memory_type ?? 'fakta') + '): ' + String(memory.value ?? '').slice(0, 350);
+  return '- ' + label + ' (' + (memory.memory_type ?? 'fakta') + '): ' + readableAAiMemoryValue(memory.value).slice(0, 350);
 }
 
 export async function loadAAiContext(
