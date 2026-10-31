@@ -1037,6 +1037,8 @@ function saveActivityTrace(messageId, durationMs, steps, preface = '') {
 
 const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   memory: 'fa-brain',
+  assess: 'fa-lightbulb',
+  strategy: 'fa-compass',
   tavily: 'fa-search',
   exa: 'fa-globe',
   found: 'fa-book-open',

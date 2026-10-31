@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v23/);
+  assert.match(sw, /aai-shell-v24/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -144,4 +144,18 @@ test('AAi keeps the preface inside the collapsible activity, not outside the ans
   assert.ok(client.includes('<p class="aai-preface" id="preface_${streamId}" hidden></p>'));
   assert.ok(!client.includes('return intro + `<details'));
   assert.ok(!client.includes('>Sebentar, aku cek dulu, ya. ✨</p>'));
+});
+
+test('AAi asks its selected LLM for tentative knowledge before web tool evidence', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  assert.ok(server.includes('async function generateAAiKnowledgeProbe('));
+  assert.ok(server.includes('max_tokens: 200'));
+  assert.ok(server.includes('message: probe.initial'));
+  assert.ok(server.includes("step: 'assess'"));
+  assert.ok(server.includes("step: 'strategy'"));
+  assert.ok(server.includes('if (webDecision.search && webSearchAllowed)'));
+  assert.ok(!server.includes('const preface = webDecision.search'));
+  assert.ok(client.includes("assess: 'fa-lightbulb'"));
+  assert.ok(client.includes("strategy: 'fa-compass'"));
 });

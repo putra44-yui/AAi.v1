@@ -157,7 +157,7 @@ interface PrefaceEvent {
 
 interface ProgressEvent {
   phase: 'progress';
-  step: 'memory' | 'tavily' | 'exa' | 'found' | 'unavailable' | 'compose';
+  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'unavailable' | 'compose';
   message: string;
   source_count?: number;
 }
@@ -511,6 +511,78 @@ function cleanGeneratedTitle(rawTitle: string): string | null {
   return words.slice(0, 5).join(' ').slice(0, 90);
 }
 
+interface AAiKnowledgeProbe {
+  initial: string;
+  next: string;
+}
+
+// A small, deliberately public first pass from model knowledge, before tool evidence.
+// This is not a chain-of-thought trace. It may be incomplete or uncertain.
+async function generateAAiKnowledgeProbe(
+  message: string, env: RuntimeEnv, apiKey: string, model: string,
+  traceId: string, parentSignal: AbortSignal,
+): Promise<AAiKnowledgeProbe | null> {
+  if (parentSignal.aborted) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 9000);
+  const abortFromParent = (): void => controller.abort();
+  parentSignal.addEventListener('abort', abortFromParent, { once: true });
+  try {
+    const response = await fetch(readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': readEnv('OPENROUTER_HTTP_REFERER', env) || DEFAULT_REFERER,
+        'X-Title': readEnv('OPENROUTER_X_TITLE', env) || DEFAULT_TITLE,
+        'X-Trace-Id': traceId,
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0.45,
+        max_tokens: 200,
+        messages: [
+          {
+            role: 'system',
+            content: 'Kamu AAi. Ini tahap PERTAMA SEBELUM pencarian web. Jawab HANYA JSON dengan dua string: "initial" dan "next". '
+              + '"initial" = 1-2 kalimat yang bisa kamu sampaikan dari pengetahuan model SENDIRI tentang pertanyaan pengguna; berbahasa Indonesia hangat dan alami, tidak kaku, dan jujur soal ketidakpastian. '
+              + 'JANGAN mengarang tanggal, angka, kutipan, ingatan pribadi, fakta terbaru, hasil pencarian, atau mengaku sudah memakai tool. Kalau belum tahu detailnya, katakan sewajarnya. '
+              + '"next" = satu kalimat pendek yang menjelaskan niat mengecek sumber web, dengan bahasamu sendiri. '
+              + 'Jangan tulis penalaran tersembunyi, logika internal, daftar langkah, Markdown fence, atau teks lain selain JSON.',
+          },
+          { role: 'user', content: message.slice(0, 1000) },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }> };
+    const text = payload?.choices?.[0]?.message?.content;
+    if (typeof text !== 'string') return null;
+    const candidate = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    let parsed: unknown;
+    try { parsed = JSON.parse(candidate); }
+    catch {
+      const jsonPart = candidate.match(/\{[\s\S]*\}/);
+      if (!jsonPart) return null;
+      try { parsed = JSON.parse(jsonPart[0]); } catch { return null; }
+    }
+    if (!parsed || typeof parsed !== 'object') return null;
+    const item = parsed as Record<string, unknown>;
+    const safe = (value: unknown): string => typeof value === 'string'
+      ? value.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 330)
+      : '';
+    const initial = safe(item.initial);
+    const next = safe(item.next);
+    return initial ? { initial, next } : null;
+  } catch { return null; }
+  finally {
+    clearTimeout(timeoutId);
+    parentSignal.removeEventListener('abort', abortFromParent);
+  }
+}
+
 async function generateSessionTitle(
   message: string, env: RuntimeEnv, apiKey: string, model: string, traceId: string,
 ): Promise<string | null> {
@@ -852,14 +924,6 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
-          const preface = webDecision.search
-            ? webSearchAllowed
-              ? 'Oke, aku cari sumber web yang bisa kita cek dulu, ya. 🔎'
-              : 'Aku bantu dari informasi yang ada dulu, ya. Pencarian web sedang dibatasi.'
-            : context.memoryCount > 0
-              ? 'Sebentar, aku ingat konteks obrolan kita dulu, ya. ✨'
-              : 'Oke, aku susun jawabannya dulu, ya. ✨';
-          enqueueEvent({ phase: 'preface', message: preface });
           if (context.memoryCount > 0) {
             enqueueEvent({
               phase: 'progress', step: 'memory',
@@ -875,6 +939,17 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             });
           }
           if (webDecision.search && webSearchAllowed) {
+            enqueueEvent({
+              phase: 'progress', step: 'assess',
+              message: 'Mencoba menjawab dulu dari pengetahuan model...',
+            });
+            const probe = await generateAAiKnowledgeProbe(
+              message, env, apiKey, modelName, traceId, upstreamAbortController.signal,
+            );
+            if (probe) {
+              enqueueEvent({ phase: 'preface', message: probe.initial });
+              if (probe.next) enqueueEvent({ phase: 'progress', step: 'strategy', message: probe.next });
+            }
             const webOutcome = await collectWebSources(webDecision, env, (step, count) => {
               const messages: Record<string, string> = {
                 tavily: 'Mencari referensi web melalui Tavily...',
