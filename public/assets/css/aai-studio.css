@@ -820,3 +820,99 @@ body.aai-login-page .login-btn:hover { background:linear-gradient(105deg,#8465dd
  .aai-pwa-notice {top:64px;font-size:10px;border-radius:12px;line-height:1.5;}
  .aai-update-notice {bottom:100px;right:12px;left:12px;gap:9px;justify-content:space-between;}
 }
+
+/* AAi chat polish: assistant answers live directly on the canvas. */
+body:not(.aai-login-page) .msg-row.assistant > .bubble {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 4px 0 !important;
+}
+body:not(.aai-login-page) .msg-row.assistant > .msg-actions {
+  align-self: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  margin-top: 3px;
+  padding: 2px 0;
+}
+body:not(.aai-login-page) .msg-row.assistant > .msg-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 7px 9px;
+}
+
+/* On user messages, preserve the timestamp and reveal actions on long-press. */
+body:not(.aai-login-page) .msg-row.user .bubble:not(.is-editing) {
+  -webkit-touch-callout: none;
+}
+body:not(.aai-login-page) .msg-row.user .bubble:focus-visible {
+  outline: 3px solid #c9a2ef;
+  outline-offset: 3px;
+}
+body:not(.aai-login-page) .user-message-meta {
+  justify-content: flex-end;
+  margin-top: 4px;
+  min-height: 14px;
+  padding-right: 3px;
+}
+body:not(.aai-login-page) .user-message-time {
+  font-size: 11px;
+  opacity: .72;
+}
+.aai-user-message-menu {
+  position: fixed;
+  z-index: 10050;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px;
+  max-width: calc(100vw - 20px);
+  background: rgba(255,255,255,.98);
+  color: #443866;
+  border: 1px solid #e9ddf9;
+  border-radius: 16px;
+  box-shadow: 0 15px 36px rgba(57,36,104,.18), 0 3px 9px rgba(57,36,104,.08);
+  backdrop-filter: blur(14px);
+}
+.aai-user-message-menu[hidden] { display: none !important; }
+.aai-user-message-menu button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-width: 82px;
+  min-height: 40px;
+  padding: 9px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 11px;
+  color: #4f427e;
+  cursor: pointer;
+  font: 600 13px/1.2 'Plus Jakarta Sans', sans-serif;
+}
+.aai-user-message-menu button:hover,
+.aai-user-message-menu button:focus-visible {
+  color: #5f43a1;
+  background: #f1eafb;
+  outline: none;
+}
+.aai-user-message-menu button i { font-size: 13px; }
+.aai-user-copy-feedback {
+  position: fixed;
+  z-index: 10060;
+  left: 50%;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  padding: 10px 17px;
+  color: #fff;
+  background: #51438e;
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(40,31,80,.22);
+  font: 600 12px/1.3 'Plus Jakarta Sans', sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+}

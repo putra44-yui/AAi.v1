@@ -2616,6 +2616,7 @@ function renderMessageTree() {
     logDebug('Branch kosong, render state sesi kosong', '#e67e22');
     return;
   }
+  closeUserMessageMenu();
   area.innerHTML = '';
   suppressAutoScroll = true;
   const renderChunkSize = isMobileViewport() ? 8 : 18;
@@ -2737,12 +2738,10 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     html = `
     <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
       <div class="user-bubble-wrap">
-        <div class="bubble">${formatContent(content)}</div>
+        <div class="bubble" tabindex="0" role="button" aria-haspopup="menu" aria-label="Opsi pesan: tekan lama, klik kanan, atau Enter" title="Tekan lama untuk Edit atau Salin">${formatContent(content)}</div>
         ${filesHtml}
-        <div class="user-actions">
-          <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
-          <button title="Edit" onclick="editUserMsg(this)"><i class="fas fa-pen"></i></button>
-          <button title="Copy" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
+        <div class="user-actions user-message-meta">
+          <span class="user-message-time">${time}</span>
         </div>
       </div>
     </div>`;
@@ -2757,16 +2756,169 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
 // ══════════════════════════════════════════
 // COPY
 // ══════════════════════════════════════════
-function copyUserMsg(btn) {
-  navigator.clipboard.writeText(btn.closest('.user').querySelector('.bubble').innerText);
-  const i = btn.querySelector('i'); i.className = 'fas fa-check';
-  setTimeout(() => i.className = 'far fa-copy', 2000);
+async function copyUserMsg(target) {
+  const row = target.closest('.msg-row.user');
+  if (!row) return false;
+  const raw = decodeURIComponent(row.dataset.raw || row.querySelector('.bubble')?.innerText || '');
+  await navigator.clipboard.writeText(raw);
+  const icon = target.matches('button') ? target.querySelector('i') : null;
+  if (icon) {
+    icon.className = 'fas fa-check';
+    setTimeout(() => { icon.className = 'far fa-copy'; }, 2000);
+  }
+  return true;
 }
 function copyFullAI(btn) {
   navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
   const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
   setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
 }
+
+
+/* User messages: long-press on touch, right-click on desktop, Enter via keyboard. */
+let userMessageMenu = null;
+let activeUserMessageRow = null;
+let userMessagePressTimer = null;
+let userMessagePress = null;
+
+function closeUserMessageMenu() {
+  if (userMessageMenu) userMessageMenu.hidden = true;
+  activeUserMessageRow = null;
+}
+
+function showUserCopyFeedback(success) {
+  const feedback = document.createElement('div');
+  feedback.className = 'aai-user-copy-feedback';
+  feedback.setAttribute('role', 'status');
+  feedback.textContent = success ? '✓ Pesan disalin' : 'Gagal menyalin pesan';
+  document.body.appendChild(feedback);
+  setTimeout(() => feedback.remove(), 1800);
+}
+
+function ensureUserMessageMenu() {
+  if (userMessageMenu) return userMessageMenu;
+  const menu = document.createElement('div');
+  menu.className = 'aai-user-message-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Opsi pesan pengguna');
+  menu.hidden = true;
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.setAttribute('role', 'menuitem');
+  editButton.dataset.action = 'edit';
+  editButton.innerHTML = '<i class="fas fa-pen" aria-hidden="true"></i><span>Edit</span>';
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.setAttribute('role', 'menuitem');
+  copyButton.dataset.action = 'copy';
+  copyButton.innerHTML = '<i class="far fa-copy" aria-hidden="true"></i><span>Salin</span>';
+
+  menu.append(editButton, copyButton);
+  document.body.appendChild(menu);
+
+  menu.addEventListener('click', event => {
+    const actionButton = event.target.closest('button[data-action]');
+    if (!actionButton) return;
+    const row = activeUserMessageRow;
+    closeUserMessageMenu();
+    if (!row || !row.isConnected) return;
+    const bubble = row.querySelector('.bubble');
+    if (!bubble) return;
+    if (actionButton.dataset.action === 'edit') {
+      void editUserMsg(bubble);
+    } else if (actionButton.dataset.action === 'copy') {
+      void copyUserMsg(bubble).then(showUserCopyFeedback).catch(() => showUserCopyFeedback(false));
+    }
+  });
+  userMessageMenu = menu;
+  return menu;
+}
+
+function openUserMessageMenu(row, pointX) {
+  if (!row || row.classList.contains('editing')) return;
+  const bubble = row.querySelector('.bubble');
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  const menu = ensureUserMessageMenu();
+  activeUserMessageRow = row;
+  menu.hidden = false;
+
+  const bubbleBounds = bubble.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth;
+  const menuHeight = menu.offsetHeight;
+  const inset = 10;
+  const centerX = Number.isFinite(pointX) ? pointX : bubbleBounds.left + bubbleBounds.width / 2;
+  const left = Math.min(Math.max(centerX - menuWidth / 2, inset), Math.max(inset, innerWidth - menuWidth - inset));
+  let top = bubbleBounds.top - menuHeight - 9;
+  if (top < inset) top = bubbleBounds.bottom + 9;
+  top = Math.min(Math.max(top, inset), Math.max(inset, innerHeight - menuHeight - inset));
+
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(top) + 'px';
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function cancelUserMessagePress() {
+  if (userMessagePressTimer !== null) clearTimeout(userMessagePressTimer);
+  userMessagePressTimer = null;
+  userMessagePress = null;
+}
+
+function getUserMessageBubble(target) {
+  return target instanceof Element ? target.closest('.msg-row.user .bubble') : null;
+}
+
+document.addEventListener('pointerdown', event => {
+  if (userMessageMenu && !userMessageMenu.contains(event.target)) closeUserMessageMenu();
+  cancelUserMessagePress();
+  if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  if (event.target.closest('a, button, input, textarea, select')) return;
+  userMessagePress = { pointerId: event.pointerId, bubble, x: event.clientX, y: event.clientY };
+  userMessagePressTimer = setTimeout(() => {
+    const press = userMessagePress;
+    cancelUserMessagePress();
+    if (press?.bubble.isConnected) openUserMessageMenu(press.bubble.closest('.msg-row.user'), press.x);
+  }, 540);
+});
+
+document.addEventListener('pointermove', event => {
+  if (!userMessagePress || userMessagePress.pointerId !== event.pointerId) return;
+  if (Math.hypot(event.clientX - userMessagePress.x, event.clientY - userMessagePress.y) > 12) {
+    cancelUserMessagePress();
+  }
+}, { passive: true });
+
+document.addEventListener('pointerup', cancelUserMessagePress);
+document.addEventListener('pointercancel', cancelUserMessagePress);
+
+document.addEventListener('contextmenu', event => {
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  event.preventDefault();
+  cancelUserMessagePress();
+  openUserMessageMenu(bubble.closest('.msg-row.user'), event.clientX);
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    const bubble = activeUserMessageRow?.querySelector('.bubble');
+    closeUserMessageMenu();
+    bubble?.focus({ preventScroll: true });
+    return;
+  }
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || event.target !== bubble || bubble.classList.contains('is-editing')) return;
+  if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    event.preventDefault();
+    openUserMessageMenu(bubble.closest('.msg-row.user'));
+  }
+});
+
+document.addEventListener('scroll', () => { if (activeUserMessageRow) closeUserMessageMenu(); }, true);
+window.addEventListener('resize', () => { if (activeUserMessageRow) closeUserMessageMenu(); });
 
 // ══════════════════════════════════════════
 // MARKED RENDERER — dengan hljs + Excel
