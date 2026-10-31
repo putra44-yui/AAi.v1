@@ -638,3 +638,6 @@ body.aai-login-page .orb {opacity:.14;}
 @media (prefers-reduced-motion:reduce) {
   *,*::before,*::after {animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important;}
 }
+/* Model selection remains visible inside the existing persona menu. */
+.settings-menu { max-height: min(65vh, 520px); overflow-y: auto; }
+.model-test-note { color: #9a93bd; font-size: 10px; line-height: 1.5; margin: 9px 13px 12px; max-width: 240px; }

@@ -16,6 +16,7 @@ let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
+let currentModelPreference = 'main'; // mode uji sementara, kembali ke utama setelah refresh
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
@@ -716,7 +717,9 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = currentPersona || 'Auto';
+  modeLabel.textContent = currentModelPreference === 'oss-test'
+    ? `🧪 OSS · ${currentPersona || 'Auto'}`
+    : (currentPersona || 'Auto');
 }
 
 function updateCompactStatus(forceValue = null) {
@@ -1932,7 +1935,7 @@ async function sendMessage(text, files = []) {
   setSendBtn('stop');
   abortController = new AbortController();
 
-  // Beri ruang lebih panjang agar primary model dan fallback sempat selesai.
+  // Beri waktu untuk respons streaming, termasuk saat model uji sedang sibuk.
   const timeoutId = setTimeout(() => abortController.abort(), 240000);
 
   try {
@@ -1945,6 +1948,7 @@ async function sendMessage(text, files = []) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
         files: files
       })
@@ -2300,6 +2304,7 @@ async function sendMessageBranched(text, parentId = null) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentId
       })
@@ -2923,7 +2928,24 @@ function renderSettingsMenu() {
     </button>`;
   });
 
+  html += '<div class="settings-header">Model AI · pilih manual</div>';
+  const models = [
+    { val: 'main', label: '⚡ Qwen · utama' },
+    { val: 'oss-test', label: '🧪 GPT-OSS 20B · gratis (uji)' }
+  ];
+  models.forEach(m => {
+    html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
+      <span>${m.label}</span><i class="fas fa-check check"></i>
+    </button>`;
+  });
+  html += '<p class="model-test-note">Model OSS hanya untuk uji manual. Saat halaman dimuat ulang, kembali ke Qwen.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
+}
+function selectModelUI(val) {
+  if (val !== 'main' && val !== 'oss-test') return;
+  currentModelPreference = val;
+  updateModeLabel();
+  renderSettingsMenu();
 }
 function selectPersonaUI(val) {
   currentPersona = val;

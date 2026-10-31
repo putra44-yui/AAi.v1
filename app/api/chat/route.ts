@@ -8,7 +8,7 @@ export const maxDuration = 300;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'qwen/qwen3.6-plus';
-const DEFAULT_FALLBACK_MODEL = 'openai/gpt-oss-20b:free';
+const DEFAULT_TEST_MODEL = 'openai/gpt-oss-20b:free';
 const DEFAULT_PERSONA = 'Auto';
 const DEFAULT_REFERER = 'https://aai.family';
 const DEFAULT_TITLE = 'AAi Keluarga';
@@ -94,6 +94,7 @@ interface ParsedChatRequest {
   userId: string | null;
   userMessageId: string | null;
   personaName: string;
+  modelPreference: 'main' | 'oss-test';
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -127,7 +128,6 @@ interface ProviderFetchSuccess {
 interface ProviderFetchFailure {
   ok: false;
   message: string;
-  status?: number;
 }
 
 type ProviderFetchResult = ProviderFetchSuccess | ProviderFetchFailure;
@@ -148,7 +148,6 @@ interface DoneEvent {
   user_message_id: string;
   persona_used: string;
   model_used: string;
-  fallback_used?: boolean;
 }
 
 interface ErrorEvent {
@@ -248,6 +247,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   const userId = readTrimmedString(parsedValue.user_id);
   const userMessageId = readTrimmedString(parsedValue.user_message_id);
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
+  const modelPreference = readTrimmedString(parsedValue.model_preference) === 'oss-test' ? 'oss-test' : 'main';
 
   return {
     ok: true,
@@ -258,6 +258,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       userId,
       userMessageId,
       personaName,
+      modelPreference,
     },
   };
 }
@@ -443,7 +444,6 @@ async function fetchProviderStream(options: ProviderFetchOptions): Promise<Provi
       return {
         ok: false,
         message: providerMessage || `Provider mengembalikan status ${response.status}.`,
-        status: response.status,
       };
     } catch (error) {
       const isAbortError = error instanceof Error && error.name === 'AbortError';
@@ -542,8 +542,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     const sessionId = requestBody.value.sessionId || randomUUID();
     const userMessageId = requestBody.value.userMessageId || randomUUID();
     const personaName = requestBody.value.personaName;
-    const modelName = readEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MODEL;
-    const fallbackModelName = readEnv('OPENROUTER_FALLBACK_MODEL') || DEFAULT_FALLBACK_MODEL;
+    // Model gratis hanya dipakai atas pilihan eksplisit dari antarmuka untuk uji coba.
+    const modelName = requestBody.value.modelPreference === 'oss-test'
+      ? DEFAULT_TEST_MODEL
+      : (readEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL') || DEFAULT_PROVIDER_URL;
     const providerPayload = buildProviderPayload(requestBody.value.message, personaName, modelName, traceId);
     const encoder = new TextEncoder();
@@ -555,7 +557,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       async start(controller) {
         let streamClosed = false;
         let resolvedModelUsed = modelName;
-        let fallbackUsed = false;
         let emittedTokenCount = 0;
 
         const enqueueEvent = (event: StreamEvent): void => {
@@ -587,34 +588,13 @@ export async function POST(request: NextRequest): Promise<Response> {
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId });
 
-          let fetchResult = await fetchProviderStream({
+          const fetchResult = await fetchProviderStream({
             apiKey,
             providerUrl,
             payload: providerPayload,
             traceId,
             abortSignal: upstreamAbortController.signal,
           });
-
-          // Ganti model hanya jika request awal gagal sebelum stream token dimulai.
-          // Error autentikasi/permintaan (400, 401, 403, dll.) tidak ditutupi fallback.
-          if (
-            !fetchResult.ok &&
-            !upstreamAbortController.signal.aborted &&
-            fallbackModelName !== modelName &&
-            (fetchResult.status === undefined || [408, 409, 425, 429, 500, 502, 503, 504].includes(fetchResult.status))
-          ) {
-            fetchResult = await fetchProviderStream({
-              apiKey,
-              providerUrl,
-              payload: { ...providerPayload, model: fallbackModelName },
-              traceId,
-              abortSignal: upstreamAbortController.signal,
-            });
-            if (fetchResult.ok) {
-              resolvedModelUsed = fallbackModelName;
-              fallbackUsed = true;
-            }
-          }
 
           if (!fetchResult.ok) {
             if (!streamCanceled) {
@@ -702,7 +682,6 @@ export async function POST(request: NextRequest): Promise<Response> {
             user_message_id: userMessageId,
             persona_used: personaName,
             model_used: resolvedModelUsed,
-            fallback_used: fallbackUsed,
           });
           closeStream();
         } catch (error) {
