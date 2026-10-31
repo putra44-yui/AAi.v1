@@ -958,3 +958,88 @@ body:not(.aai-login-page) .msg-row.user .bubble p {
     letter-spacing: 0 !important;
   }
 }
+
+/* Session-local calendar markers: one date label when the day changes. */
+body:not(.aai-login-page) .chat-date-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 920px);
+  margin: 13px auto 7px;
+  flex: 0 0 auto;
+  color: #827391;
+  font: 700 12px/1.4 'Plus Jakarta Sans', sans-serif;
+  text-align: center;
+}
+body:not(.aai-login-page) .chat-date-divider::before,
+body:not(.aai-login-page) .chat-date-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1 1 0;
+  background: linear-gradient(90deg, transparent, #dac9eb);
+}
+body:not(.aai-login-page) .chat-date-divider::after {
+  background: linear-gradient(90deg, #dac9eb, transparent);
+}
+body:not(.aai-login-page) .chat-date-divider time {
+  display: inline-block;
+  padding: 7px 13px;
+  border: 1px solid rgba(206, 186, 229, .75);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .64);
+  white-space: nowrap;
+}
+
+/* Long user messages open on demand, without truncating the actual message data. */
+body:not(.aai-login-page) .user-message-content.is-collapsed {
+  max-height: var(--user-message-preview-height, 10em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 74%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 74%, transparent 100%);
+}
+body:not(.aai-login-page) .user-message-content.is-expanded {
+  max-height: none;
+  overflow: visible;
+}
+body:not(.aai-login-page) .user-message-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 32px;
+  margin-top: 3px;
+  padding: 7px 0 0;
+  background: transparent;
+  color: #ffffff;
+  border: 0;
+  font: 700 13px/1.35 'Plus Jakarta Sans', sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+body:not(.aai-login-page) .user-message-expand[hidden] { display: none !important; }
+body:not(.aai-login-page) .user-message-expand:hover,
+body:not(.aai-login-page) .user-message-expand:focus-visible {
+  color: #e6f5ff;
+  outline-offset: 3px;
+}
+body:not(.aai-login-page) .user-message-expand i { font-size: 11px; }
+
+@media (max-width: 720px) {
+  /* Real reading margins at phone widths, while keeping the input and rail intact. */
+  body:not(.aai-login-page) .chat-area {
+    padding-left: clamp(17px, 4.8vw, 23px) !important;
+    padding-right: clamp(17px, 4.8vw, 23px) !important;
+  }
+  /* Narrow, dark user bubbles read better left-aligned than with stretched spaces. */
+  body:not(.aai-login-page) .msg-row.user .bubble .user-message-content p,
+  body:not(.aai-login-page) .msg-row.user .bubble .user-message-content li {
+    text-align: left !important;
+  }
+  body:not(.aai-login-page) .chat-date-divider {
+    gap: 9px;
+    margin-top: 12px;
+    margin-bottom: 7px;
+    font-size: 11px;
+  }
+  body:not(.aai-login-page) .chat-date-divider time { padding: 6px 10px; }
+}

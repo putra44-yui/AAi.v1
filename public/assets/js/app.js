@@ -1002,7 +1002,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
     : '';
 
   return `
-    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
+    <div class="msg-row assistant" id="${streamId}" data-chat-date="${getChatMessageDate().key}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
       ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
@@ -2218,10 +2218,11 @@ async function saveEdit(btn, msgId) {
   const newText = bubble.querySelector('textarea').value.trim();
   if (!newText) return;
 
-  bubble.innerHTML = formatContent(newText);
+  bubble.innerHTML = buildUserMessageBodyHTML(newText);
   bubble.classList.remove('is-editing');
   row.classList.remove('editing');
   row.setAttribute('data-raw', encodeURIComponent(newText));
+  refreshUserMessageCollapse(row);
 
   try {
     const res = await fetch(`/api/chat`, {
@@ -2657,14 +2658,85 @@ function renderMessageTree() {
   requestAnimationFrame(() => renderChunk(0));
 }
 
+
+// Date headers are visual separators inside the active conversation, never new sessions.
+function getChatMessageDate(timestamp = null) {
+  const parsed = timestamp ? new Date(timestamp) : new Date();
+  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date();
+  const key = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  return {
+    key,
+    label: date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+    time: date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+  };
+}
+
+function ensureChatDateDivider(area, dateMeta) {
+  let previous = area.lastElementChild;
+  while (previous && !previous.classList.contains('msg-row')) {
+    previous = previous.previousElementSibling;
+  }
+  if (previous?.dataset.chatDate === dateMeta.key) return;
+  area.insertAdjacentHTML('beforeend',
+    '<div class="chat-date-divider" role="separator" aria-label="' + dateMeta.label +
+    '" data-chat-date="' + dateMeta.key + '"><time datetime="' + dateMeta.key +
+    '">' + dateMeta.label + '</time></div>');
+}
+
+// Summarize only the visible presentation; the original message is never truncated.
+function buildUserMessageBodyHTML(content) {
+  return '<div class="user-message-content">' + formatContent(content) + '</div>' +
+    '<button type="button" class="user-message-expand" aria-expanded="false" hidden onclick="toggleUserMessageExpansion(this)">' +
+    '<span>Tampilkan lebih banyak</span><i class="fas fa-chevron-down" aria-hidden="true"></i></button>';
+}
+
+function refreshUserMessageCollapse(row) {
+  if (!row || row.classList.contains('editing')) return;
+  const content = row.querySelector('.user-message-content');
+  const toggle = row.querySelector('.user-message-expand');
+  if (!content || !toggle) return;
+  const expanded = content.classList.contains('is-expanded');
+  content.classList.remove('is-collapsed');
+  const lineHeight = parseFloat(getComputedStyle(content).lineHeight) ||
+    parseFloat(getComputedStyle(content).fontSize) * 1.66;
+  const previewHeight = Math.round(lineHeight * 6);
+  content.style.setProperty('--user-message-preview-height', previewHeight + 'px');
+  const overflowing = content.scrollHeight > previewHeight + 3;
+  toggle.hidden = !overflowing;
+  if (!overflowing) {
+    content.classList.remove('is-expanded');
+    toggle.setAttribute('aria-expanded', 'false');
+  } else if (!expanded) {
+    content.classList.add('is-collapsed');
+  }
+}
+
+function toggleUserMessageExpansion(button) {
+  const content = button.closest('.bubble')?.querySelector('.user-message-content');
+  if (!content) return;
+  const expand = !content.classList.contains('is-expanded');
+  content.classList.toggle('is-expanded', expand);
+  content.classList.toggle('is-collapsed', !expand);
+  button.setAttribute('aria-expanded', String(expand));
+  button.querySelector('span').textContent = expand ? 'Tampilkan lebih sedikit' : 'Tampilkan lebih banyak';
+  button.querySelector('i').className = expand ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+}
+
+let userMessageCollapseFrame = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(userMessageCollapseFrame);
+  userMessageCollapseFrame = requestAnimationFrame(() => {
+    document.querySelectorAll('#chatArea > .msg-row.user').forEach(refreshUserMessageCollapse);
+  });
+});
+
 // ══════════════════════════════════════════
 // APPEND MESSAGE
 // ══════════════════════════════════════════
 function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null, extra = null) {
   const area = document.getElementById('chatArea');
-  const time = timestamp
-    ? new Date(timestamp).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })
-    : new Date().toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+  const chatDate = getChatMessageDate(timestamp);
+  const time = chatDate.time;
 
   let html = '';
 
@@ -2698,7 +2770,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
     html = `
-    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
+    <div class="msg-row assistant" data-chat-date="${chatDate.key}" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
       ${buildAssistantHeaderHTML(versionHtml, modelName, modelLabel)}
       ${previewBlock}
       <div class="bubble">${formatContent(content)}</div>
@@ -2736,9 +2808,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     }
 
     html = `
-    <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
+    <div class="msg-row user" data-chat-date="${chatDate.key}" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
       <div class="user-bubble-wrap">
-        <div class="bubble" tabindex="0" role="button" aria-haspopup="menu" aria-label="Opsi pesan: tekan lama, klik kanan, atau Enter" title="Tekan lama untuk Edit atau Salin">${formatContent(content)}</div>
+        <div class="bubble" tabindex="0" role="group" aria-haspopup="menu" aria-label="Pesan pengguna. Tekan lama, klik kanan, atau Enter untuk opsi pesan" title="Tekan lama untuk Edit atau Salin">${buildUserMessageBodyHTML(content)}</div>
         ${filesHtml}
         <div class="user-actions user-message-meta">
           <span class="user-message-time">${time}</span>
@@ -2747,7 +2819,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     </div>`;
   }
 
+  ensureChatDateDivider(area, chatDate);
   area.insertAdjacentHTML('beforeend', html);
+  if (role === 'user') refreshUserMessageCollapse(area.lastElementChild);
   if (!suppressAutoScroll) {
     scrollBottom();
   }
