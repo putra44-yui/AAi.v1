@@ -1011,6 +1011,41 @@ function applyAssistantModelMeta(row, modelName = '', modelLabel = '') {
   row.setAttribute('data-model-label', String(modelLabel || '').trim());
 }
 
+const AAI_ACTIVITY_STORE_KEY = 'aai_activity_trails_v1';
+
+function getStoredActivityTraces() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AAI_ACTIVITY_STORE_KEY) || '{}');
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch { return {}; }
+}
+
+function formatActivityDuration(ms) {
+  const seconds = Math.max(1, Math.round(Number(ms || 0) / 1000));
+  return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+}
+
+function saveActivityTrace(messageId, durationMs, steps) {
+  if (!messageId || !Array.isArray(steps) || !steps.length) return;
+  try {
+    const traces = getStoredActivityTraces();
+    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(0, 14), savedAt: Date.now() };
+    const latest = Object.entries(traces).sort((left, right) => (right[1]?.savedAt || 0) - (left[1]?.savedAt || 0)).slice(0, 80);
+    localStorage.setItem(AAI_ACTIVITY_STORE_KEY, JSON.stringify(Object.fromEntries(latest)));
+  } catch { /* Storage may be disabled; live activity still works. */ }
+}
+
+function buildStoredActivityPanelHTML(messageId) {
+  if (!messageId) return '';
+  const trace = getStoredActivityTraces()[messageId];
+  if (!trace || !Array.isArray(trace.steps) || !trace.steps.length) return '';
+  const label = 'Memproses selama ' + formatActivityDuration(trace.durationMs);
+  return `<details class="aai-activity is-complete aai-saved-activity">
+    <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    <ul class="aai-activity-list">${trace.steps.map(step => '<li>' + escHtml(String(step).slice(0, 220)) + '</li>').join('')}</ul>
+  </details>`;
+}
+
 function buildStreamBubbleHTML(streamId, timeStr) {
   const previewPanelHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-preview" id="preview_${streamId}" style="display:none;">
@@ -1024,9 +1059,9 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const teaserHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
     : '';
-  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" hidden>
-    <summary><i class="fas fa-sparkles" aria-hidden="true"></i><span class="aai-activity-title">AAi sedang memeriksa konteks...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
-    <ol class="aai-activity-list" id="activity_list_${streamId}"></ol>
+  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" hidden>
+    <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    <ul class="aai-activity-list" id="activity_list_${streamId}"></ul>
   </details>`;
 
   return `
@@ -1537,6 +1572,14 @@ async function processStream(response, streamId, onDone) {
   const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
   let activityHasMemory = false;
   let activitySourceCount = 0;
+  const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
+  const activityTimeline = [];
+  let activityTimer = null;
+  const updateActivityClock = (completed = false) => {
+    if (!activityTitleEl) return;
+    const duration = formatActivityDuration(Date.now() - activityStartedAt);
+    activityTitleEl.textContent = completed ? 'Memproses selama ' + duration : 'Memproses... ' + duration;
+  };
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
   let fullText  = '';
@@ -1798,7 +1841,9 @@ async function processStream(response, streamId, onDone) {
         const item = document.createElement('li');
         item.textContent = parsed.message.slice(0, 220);
         activityListEl.appendChild(item);
-        if (activityTitleEl) activityTitleEl.textContent = parsed.message.slice(0, 120);
+        if (activityTimeline.length < 14) activityTimeline.push(item.textContent);
+        if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
+        updateActivityClock();
         if (parsed.step === 'memory') activityHasMemory = true;
         if (parsed.step === 'found') activitySourceCount = Number(parsed.source_count) || 0;
         scrollBottom();
@@ -1882,14 +1927,12 @@ async function processStream(response, streamId, onDone) {
       }
 
       gotDone = true;
+      if (activityTimer) clearInterval(activityTimer);
       if (activityEl && !activityEl.hidden) {
         activityEl.open = false;
         activityEl.classList.add('is-complete');
-        if (activityTitleEl) {
-          activityTitleEl.textContent = activitySourceCount
-            ? 'Pencarian web: ' + activitySourceCount + ' sumber ditemukan'
-            : activityHasMemory ? 'AAi memakai ingatan yang relevan' : 'Jejak kerja AAi';
-        }
+        updateActivityClock(true);
+        saveActivityTrace(parsed.message_id, Date.now() - activityStartedAt, activityTimeline);
       }
       flushStreamingRender(true);
       stopPreviewTicker('', true);
@@ -1943,6 +1986,7 @@ async function processStream(response, streamId, onDone) {
     streamError = e;
   }
 
+  if (activityTimer) clearInterval(activityTimer);
   if (streamError) {
     stopPreviewTicker('', true);
     throw streamError;
@@ -2871,6 +2915,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     <div class="msg-row assistant" data-chat-date="${chatDate.key}" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
       ${buildAssistantHeaderHTML(versionHtml, modelName, modelLabel)}
       ${previewBlock}
+      ${buildStoredActivityPanelHTML(messageId)}
       <div class="bubble">${formatContent(content)}</div>
       ${sourcesHtml}
       <div class="msg-actions">
@@ -3211,7 +3256,38 @@ function formatContent(text) {
   const safeHtml = DOMPurify.sanitize(html, {
     ADD_ATTR: ['data-action', 'target', 'rel', 'style']
   });
-  return makeReadableMarkdownTables(safeHtml);
+  return makeReadableMarkdownTables(compactExternalLinks(safeHtml));
+}
+
+// Keep URLs in href but display concise, human-readable source names.
+function compactExternalLinks(sanitizedHtml) {
+  if (!sanitizedHtml.includes('<a ')) return sanitizedHtml;
+  const fragment = document.createElement('template');
+  fragment.innerHTML = sanitizedHtml;
+  fragment.content.querySelectorAll('a[href]').forEach(link => {
+    let url;
+    try { url = new URL(link.getAttribute('href'), location.href); } catch { return; }
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin === location.origin) return;
+    const hostname = url.hostname.replace(/^www\./i, '');
+    const visible = (link.textContent || '').trim();
+    const looksLikeUrl = /^(?:https?:\/\/|www\.)/i.test(visible);
+    const isNumericCitation = /^(?:\[?\d{1,3}\]?|sumber\s*\d{1,3})$/i.test(visible);
+    if (looksLikeUrl || isNumericCitation || !visible) {
+      let conciseName = hostname;
+      if (/(^|\.)nodejs\.org$/i.test(hostname)) conciseName = 'Node.js';
+      else if (/(^|\.)github\.com$/i.test(hostname)) conciseName = 'GitHub';
+      else if (/(^|\.)wikipedia\.org$/i.test(hostname)) conciseName = 'Wikipedia';
+      else if (/(^|\.)risingstack\.com$/i.test(hostname)) conciseName = 'RisingStack';
+      else if (/(^|\.)supabase\.com$/i.test(hostname)) conciseName = 'Supabase';
+      else if (/(^|\.)openai\.com$/i.test(hostname)) conciseName = 'OpenAI';
+      link.textContent = conciseName;
+    }
+    link.classList.add('aai-source-link');
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.setAttribute('aria-label', (link.textContent || hostname).trim() + ' — buka situs eksternal');
+  });
+  return fragment.innerHTML;
 }
 
 // Wide Markdown tables are readable cards; no horizontal five-column squinting.

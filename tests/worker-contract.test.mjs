@@ -40,8 +40,8 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v20/);
-  assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
+  assert.match(sw, /aai-shell-v21/);
+  assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
 
 test('login alias does not redirect back to Cloudflare canonical login URL', () => {
@@ -77,7 +77,7 @@ test('legacy memory and file endpoints receive runtime Supabase bindings', () =>
 test('wide Markdown responses are labeled cards and do not shrink to five tiny columns', () => {
   const renderer = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.match(renderer, /makeReadableMarkdownTables\(safeHtml\)/);
+  assert.match(renderer, /makeReadableMarkdownTables\(compactExternalLinks\(safeHtml\)\)/);
   assert.match(renderer, /headings\.length < 4/);
   assert.match(renderer, /cell\.setAttribute\('data-label'/);
   assert.match(css, /table\.aai-table-cards tbody/);
@@ -105,4 +105,16 @@ test('Web search is server-side and progress is tied to actual results', () => {
   assert.doesNotMatch(client, /TAVILY_API_KEY|EXA_API_KEY/);
   assert.match(client, /parsed\.phase === 'progress'/);
   assert.doesNotMatch(client, /Persona AI/);
+});
+
+test('AAi displays measured collapsible activity and readable named source links', () => {
+  const client = read('public/assets/js/app.js');
+  const css = read('public/assets/css/aai-studio.css');
+  assert.match(client, /Memproses selama /);
+  assert.match(client, /saveActivityTrace\(parsed\.message_id/);
+  assert.match(client, /buildStoredActivityPanelHTML\(messageId\)/);
+  assert.match(client, /function compactExternalLinks/);
+  assert.match(client, /link\.classList\.add\('aai-source-link'\)/);
+  assert.match(css, /\.aai-source-link::after/);
+  assert.match(css, /content: '↗'/);
 });

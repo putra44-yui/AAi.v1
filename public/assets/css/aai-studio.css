@@ -1348,3 +1348,84 @@ body:not(.aai-login-page) .aai-activity.is-complete { background: rgba(246, 244,
   body:not(.aai-login-page) .aai-activity summary { font-size: 13.5px; padding: 11px 12px; }
   body:not(.aai-login-page) .aai-activity-list { font-size: 13.5px; }
 }
+
+
+/* Activity disclosure: measured, auditable tool milestones, not private reasoning. */
+body:not(.aai-login-page) .aai-activity,
+body:not(.aai-login-page) .aai-activity.is-complete {
+  width: 100%;
+  margin: 5px 0 11px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+  color: #85809a;
+}
+body:not(.aai-login-page) .aai-activity summary {
+  padding: 3px 0 5px;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #85809a;
+  align-items: center;
+}
+body:not(.aai-login-page) .aai-activity summary:hover { color: #68549a; }
+body:not(.aai-login-page) .aai-activity summary .fa-chevron-down {
+  font-size: 10px;
+  color: #9286b5;
+}
+body:not(.aai-login-page) .aai-activity-list {
+  margin: 10px 0 8px 5px;
+  padding: 0 0 0 16px;
+  border-left: 2px solid rgba(147, 127, 187, .18);
+  list-style: none;
+  color: #69657b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+body:not(.aai-login-page) .aai-activity-list li {
+  position: relative;
+  margin: 0 0 11px;
+  padding-left: 3px;
+}
+body:not(.aai-login-page) .aai-activity-list li::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: .62em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b1a4d3;
+}
+body:not(.aai-login-page) .aai-activity-list li:last-child { margin-bottom: 0; }
+body:not(.aai-login-page) .bubble a.aai-source-link {
+  display: inline;
+  color: #6b4db0;
+  text-decoration: none;
+  font-weight: 650;
+  border-bottom: 1px solid rgba(107, 77, 176, .26);
+  overflow-wrap: anywhere;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link::after {
+  content: '↗';
+  display: inline-block;
+  margin-left: 4px;
+  font-size: .82em;
+  font-weight: 500;
+  vertical-align: .08em;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link:hover {
+  color: #4c3291;
+  border-bottom-color: currentColor;
+}
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-activity summary {
+    padding: 5px 0 7px;
+    font-size: 13.5px;
+  }
+  body:not(.aai-login-page) .aai-activity-list {
+    font-size: 13.5px;
+    line-height: 1.7;
+  }
+}
