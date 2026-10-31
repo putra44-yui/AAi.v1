@@ -17,6 +17,7 @@ type LegacyRequest = {
   body: unknown;
   url: string;
   x_trace_id?: string;
+  runtimeEnv?: { SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string };
 };
 type LegacyResponse = {
   status(code: number): LegacyResponse;
@@ -75,7 +76,7 @@ async function parseBody(request: Request): Promise<unknown> {
   return (await request.text()) || {};
 }
 
-async function runLegacy(request: Request, route: { key: string; id?: string }): Promise<Response> {
+async function runLegacy(request: Request, route: { key: string; id?: string }, env: WorkerBindings): Promise<Response> {
   const url = new URL(request.url);
   const query: Record<string, QueryValue> = {};
   for (const [key, value] of url.searchParams.entries()) appendQuery(query, key, value);
@@ -92,6 +93,7 @@ async function runLegacy(request: Request, route: { key: string; id?: string }):
     body: await parseBody(request),
     url: request.url,
     x_trace_id: incomingTrace || undefined,
+    runtimeEnv: { SUPABASE_URL: String(env.SUPABASE_URL), SUPABASE_SERVICE_ROLE_KEY: String(env.SUPABASE_SERVICE_ROLE_KEY) },
   };
 
   let statusCode = 200;
@@ -147,7 +149,7 @@ export default {
       if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
         return jsonError(503, 'Konfigurasi Supabase belum tersedia di Cloudflare Worker.');
       }
-      return runLegacy(request, route);
+      return runLegacy(request, route, env);
     }
 
     return env.ASSETS.fetch(request);

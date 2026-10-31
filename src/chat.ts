@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, persistAAiMemory, type AAiContext } from './aai-context';
+import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context';
+import { persistAAiMemory } from './aai-memory-governance';
 type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -936,7 +937,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           // Memory persistence must not turn a successfully saved answer into a failed chat.
           try {
             await persistAAiMemory(supabase as unknown as SupabaseClient, context.personId,
-              requestBody.value.userId!, message, saved.id, rawReply);
+              requestBody.value.userId!, message, userMessageId, rawReply, sessionId);
           } catch (memoryError) {
             console.error('[AAi memory save]', normalizeErrorMessage(memoryError));
           }

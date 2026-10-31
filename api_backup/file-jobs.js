@@ -3,16 +3,18 @@ export const maxDuration = 300;
 import { createClient } from '@supabase/supabase-js';
 import * as chatFiles from './_lib/chat-files.js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+function runtimeClient(req) {
+  const env = req.runtimeEnv || (typeof process !== 'undefined' ? process.env : {});
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
 
 function selectJobQuery() {
   return 'id, message_id, session_id, user_id, status, source_text, pending_text, processed_text, error_text, file_count, attempt_count, started_at, completed_at, created_at, updated_at';
 }
 
-async function fetchJob(jobId) {
+async function fetchJob(supabase, jobId) {
   const { data, error } = await supabase
     .from('file_generation_jobs')
     .select(selectJobQuery())
@@ -43,7 +45,7 @@ function buildJobPayload(job = {}) {
   };
 }
 
-async function markJobFailed(job = {}, errorMessage = '') {
+async function markJobFailed(supabase, job = {}, errorMessage = '') {
   const failureContent = chatFiles.buildFailedFileReply(job.pending_text, errorMessage);
   const completedAt = new Date().toISOString();
 
@@ -69,6 +71,7 @@ async function markJobFailed(job = {}, errorMessage = '') {
 }
 
 export default async function handler(req, res) {
+  const supabase = runtimeClient(req);
   if (req.method === 'GET') {
     const { job_id, session_id, active_only = 'true' } = req.query;
 
@@ -78,7 +81,7 @@ export default async function handler(req, res) {
 
     try {
       if (job_id) {
-        const job = await fetchJob(job_id);
+        const job = await fetchJob(supabase, job_id);
         return res.status(200).json({ success: true, job: buildJobPayload(job) });
       }
 
@@ -115,7 +118,7 @@ export default async function handler(req, res) {
   let currentJob = null;
 
   try {
-    currentJob = await fetchJob(job_id);
+    currentJob = await fetchJob(supabase, job_id);
     if (currentJob.status === 'ready' || currentJob.status === 'failed') {
       return res.status(200).json({ success: true, job: buildJobPayload(currentJob) });
     }
@@ -142,7 +145,7 @@ export default async function handler(req, res) {
 
     if (claimError) throw claimError;
     if (!claimedJob) {
-      const latestJob = await fetchJob(job_id);
+      const latestJob = await fetchJob(supabase, job_id);
       return res.status(latestJob.status === 'processing' ? 202 : 200).json({
         success: true,
         job: buildJobPayload(latestJob)
@@ -191,7 +194,7 @@ export default async function handler(req, res) {
 
     if (currentJob?.id) {
       try {
-        const failedJob = await markJobFailed(currentJob, error.message);
+        const failedJob = await markJobFailed(supabase, currentJob, error.message);
         return res.status(500).json({ success: false, job: buildJobPayload(failedJob), error: error.message });
       } catch (markError) {
         console.error('[FileJobs] Failed to persist failed state:', markError.message);

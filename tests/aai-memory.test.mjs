@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   resolveAAiPersona, selectRelevantAAiMemories, extractAAiMemoryTags, createAAiMemoryStreamFilter, readableAAiMemoryValue,
 } from '../src/aai-context.ts';
@@ -42,3 +43,19 @@ test('legacy JSON memories expose the factual value, not metadata', () => {
   const selected = selectRelevantAAiMemories([{id:'a',key:'gaya_berdebat',value:raw,priority_score:0.1}], 'Suka menguji argumen?', 3);
   assert.equal(selected.length, 1);
 });
+
+test('AAi governance preserves old evidence semantics and blocks unconfirmed conflicts', () => {
+  const fs = requireSource('src/aai-memory-governance.ts');
+  assert.match(fs, /person_memory_evidence/);
+  assert.match(fs, /legacy_audit_log/);
+  assert.match(fs, /unique_context_hash/);
+  assert.match(fs, /memory_conflict/);
+  assert.match(fs, /explicit_user_request/);
+  assert.match(fs, /saveMemoryWithLockGuard/);
+  assert.match(fs, /status: 'dropped'/);
+  assert.doesNotMatch(fs, /process\.env/);
+});
+
+function requireSource(path) {
+  return readFileSync(new URL('../' + path, import.meta.url), 'utf8');
+}

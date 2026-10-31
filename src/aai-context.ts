@@ -59,9 +59,9 @@ export function selectRelevantAAiMemories(memories: Memory[], message: string, l
     const relevance = similarity(memory, query);
     const important = IDENTITY_KEYS.has(memory.key ?? '') || /gaya_bahasa|panggilan_user|gaya_jawab/.test(memory.key ?? '');
     const priority = Math.max(0, Math.min(1, Number(memory.priority_score) || 0));
-    const score = relevance * 2.4 + priority * 0.3 + (important ? 0.25 : 0);
+    const score = relevance * 2.4 + priority * 0.3 + (important ? 0.45 : 0);
     return { memory, relevance, score };
-  }).filter(({relevance}) => wantsOverview || relevance > 0 || query.size === 0)
+  }).filter(({memory,relevance}) => wantsOverview || relevance > 0 || query.size === 0 || /^(nama_panggilan|gaya_bahasa|gaya_jawab|panggilan_user|gaya_komunikasi)$/.test(memory.key ?? ''))
     .sort((a,b) => b.score - a.score).slice(0, limit).map(({memory}) => memory);
 }
 export function resolveAAiPersona(requested: string, text: string, personName = ''): string {
@@ -222,58 +222,4 @@ function supportedByUser(message: string, candidate: MemoryCandidate): boolean {
   let matches = 0;
   for (const token of valueWords) if (messageWords.has(token)) matches++;
   return matches >= 1 || IDENTITY_KEYS.has(candidate.key) && /ingat|catat|namaku|nama saya|aku/i.test(message);
-}
-export async function persistAAiMemory(
-  supabase: SupabaseClient, personId: string | null, userId: string, userMessage: string,
-  assistantMessageId: string, rawText: string,
-): Promise<{ written: number; forgotten: number }> {
-  if (!personId) return { written: 0, forgotten: 0 };
-  const tags = extractAAiMemoryTags(rawText);
-  let written = 0, forgotten = 0;
-  const forgetRequested = /\b(lupakan|hapus memori|jangan ingat|forget)\b/i.test(userMessage);
-  if (forgetRequested) {
-    for (const key of tags.forgetKeys.slice(0, 3)) {
-      const { error } = await supabase.from('person_memory').update({
-        status: 'dropped', deleted_at: new Date().toISOString(), deleted_by: userId,
-        deletion_reason: 'Permintaan eksplisit pengguna',
-      }).eq('person_id', personId).eq('key', key).eq('status', 'active');
-      if (error) throw error;
-      forgotten++;
-    }
-  }
-  for (const candidate of tags.candidates) {
-    if (!supportedByUser(userMessage, candidate)) continue;
-    const { data: existing, error: readError } = await supabase.from('person_memory')
-      .select('id, value, observation_count, memory_scope')
-      .eq('person_id', personId).eq('key', candidate.key).eq('status', 'active')
-      .order('updated_at', {ascending: false}).limit(1).maybeSingle();
-    if (readError) throw readError;
-    if (existing) {
-      if (String(existing.value || '').trim().toLowerCase() === candidate.value.toLowerCase()) continue;
-      const correction = /\b(koreksi|sekarang|bukan|ubah|ralat|dulunya|sebelumnya)\b/i.test(userMessage);
-      if (existing.memory_scope === 'stable' && !correction) continue;
-      const { error } = await supabase.from('person_memory').update({
-        value: candidate.value, memory_type: candidate.memoryType, category: candidate.category,
-        observation_count: Math.max(1, Number(existing.observation_count) || 1) + 1,
-        updated_at: new Date().toISOString(), source_message_id: assistantMessageId,
-      }).eq('id', existing.id).eq('person_id', personId).eq('status', 'active');
-      if (error) throw error;
-    } else {
-      // Archived/dropped memories remain archived; do not silently resurrect them.
-      const { data: historical, error: archiveError } = await supabase.from('person_memory')
-        .select('id').eq('person_id', personId).eq('key', candidate.key)
-        .neq('status', 'active').limit(1);
-      if (archiveError) throw archiveError;
-      if (historical?.length) continue;
-      const { error } = await supabase.from('person_memory').insert({
-        person_id: personId, key: candidate.key, value: candidate.value,
-        memory_type: candidate.memoryType, category: candidate.category,
-        source_message_id: assistantMessageId, status: 'active',
-        confidence: 0.7, observation_count: 1, priority_score: 0.5, memory_scope: 'dynamic',
-      });
-      if (error) throw error;
-    }
-    written++;
-  }
-  return { written, forgotten };
 }

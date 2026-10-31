@@ -58,3 +58,18 @@ test('restored session title prefers a real title over provisional loading text'
   assert.match(client, /\.find\(value => !isProvisionalSessionTitle\(value\)\) \|\| buildSessionTitleFromMessages\(data\.messages\)/);
   assert.doesNotMatch(client, /title: session\?\.title \|\| titleHint \|\| buildSessionTitleFromMessages/);
 });
+
+test('legacy memory and file endpoints receive runtime Supabase bindings', () => {
+  const worker = read('src/worker.ts');
+  assert.match(worker, /runtimeEnv: \{ SUPABASE_URL:/);
+  assert.match(worker, /runLegacy\(request, route, env\)/);
+  for (const name of [
+    'api_backup/planning-memory.js', 'api_backup/planning-memory/[id].js',
+    'api_backup/friends/detect-and-suggest.js',
+    'api_backup/friends/confirm-and-save.js', 'api_backup/file-jobs.js',
+  ]) {
+    const handler = read(name);
+    assert.match(handler, /const supabase = runtimeClient\(req\);/);
+    assert.doesNotMatch(handler, /const supabase = createClient\(\s*process\.env/);
+  }
+});

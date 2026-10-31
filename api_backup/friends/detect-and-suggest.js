@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+function runtimeClient(req) {
+  const env = req.runtimeEnv || (typeof process !== 'undefined' ? process.env : {});
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+}
 
 /**
  * Detects friend introduction in a message and suggests saving them.
@@ -14,6 +16,7 @@ const supabase = createClient(
  * Response: { suggested_friend: { name, context } | null, should_suggest: boolean, reason?: string }
  */
 export default async function handler(req, res) {
+  const supabase = runtimeClient(req);
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
