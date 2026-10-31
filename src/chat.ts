@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { decideWebSearch, collectWebSources, webContextMessage } from './aai-web.ts';
+import { decideWebSearch, hasWebSearchOptOut, collectWebSources, webContextMessage } from './aai-web.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 type RuntimeEnv = Record<string, unknown>;
@@ -867,7 +867,15 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
+    const webSearchOptedOut = hasWebSearchOptOut(message);
     const webDecision = decideWebSearch(message);
+    if (webSearchOptedOut) {
+      // Challenge factual opinions if needed, but never override explicit tool limits.
+      providerPayload.messages.splice(context.systemMessages.length, 0, {
+        role: 'system',
+        content: '[BATASAN PENGGUNA] Pengguna meminta tanpa pencarian web. Jawab hanya dari pengetahuan dan konteks yang tersedia. Jangan mengaku memakai Tavily, Exa, atau memverifikasi sumber terkini. Bila belum yakin, katakan terus terang dan tawarkan pengecekan hanya setelah pengguna mengizinkan.',
+      });
+    }
     let webSearchAllowed = true;
     if (webDecision.search) {
       // Limit paid provider calls per incoming IP. Without a limiter binding, fail closed.
@@ -932,6 +940,12 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             });
           }
 
+          if (webSearchOptedOut) {
+            enqueueEvent({
+              phase: 'progress', step: 'assess',
+              message: 'Tanpa pencarian web, sesuai permintaanmu.',
+            });
+          }
           if (webDecision.search && !webSearchAllowed) {
             enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Batas pencarian web sedang tercapai. Aku tidak akan berpura-pura sudah mencari.' });
             providerPayload.messages.splice(context.systemMessages.length, 0, {

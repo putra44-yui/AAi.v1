@@ -7,14 +7,31 @@ export type WebSearchOutcome = { sources: WebSource[]; provider: 'tavily' | 'exa
 const PROVIDER_TIMEOUT_MS = 8500;
 const BLOCKED_SECRETS = /(?:sk-[a-z0-9_-]{8,}|tvly-[a-z0-9_-]{8,}|bearer\s+[a-z0-9_.-]{8,}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:password|kata sandi|token rahasia|api key milikku|api key saya|\.env(?:\.local)?)[\s:=])/i;
 const PRIVATE_TOPIC = /(?:istri(?:ku| saya)?|suami(?:ku| saya)?|anak(?:ku| saya)?|memori(?:ku| saya)?|profil pribadiku|keluargaku|ayahku|ibuku)/i;
-const DO_NOT_SEARCH = /(?:jangan|tidak usah|ga usah|gak usah|tak perlu|tanpa)\s+(?:cari|search|browse|browsing|internet|web)|(?:offline saja|tanpa internet)/i;
+// A negative instruction wins over auto-freshness and any search verb detected
+// inside it. "Jangan mencari web" contains "cari web" but is NOT a search request.
+const NO_WEB_RESTRICTIONS = [
+  /\b(?:jangan|tidak\s+(?:usah|perlu)|ga(?:k)?\s+(?:usah|perlu)|nggak\s+(?:usah|perlu)|tak\s+(?:usah|perlu)|do\s+not|don't|dont)\s+(?:[^\s,.!?]+\s+){0,3}(?:mencari|cari(?:kan)?|melakukan\s+pencarian|menelusuri|telusuri|search(?:ing)?|browse|browsing|googling|cek|periksa|mengakses|akses|gunakan|menggunakan|pakai|memakai|buka|membuka|panggil|memanggil)\b(?:[\w\s-]{0,45})?\b(?:web|internet|online|google|situs|tavily|exa|mesin\s+pencari|search\s+engine|sumber|referensi|tools?(?:\s+pencarian)?)\b/i,
+  /\b(?:jangan|tidak\s+(?:usah|perlu)|ga(?:k)?\s+(?:usah|perlu)|nggak\s+(?:usah|perlu)|tak\s+(?:usah|perlu)|do\s+not|don't|dont)\s+(?:browse|browsing|googling|search(?:ing)?|web\s+search|pencarian\s+(?:web|online))\b/i,
+  /\b(?:jangan|tidak\s+(?:usah|perlu)|ga(?:k)?\s+(?:usah|perlu)|nggak\s+(?:usah|perlu)|tak\s+(?:usah|perlu))\s+(?:web|internet|online|google|tavily|exa)\b/i,
+  /\b(?:tanpa|no|without)\s+(?:akses\s+|pencarian\s+)?(?:web|internet|online|browsing|search|google|tavily|exa)\b/i,
+  /\boffline\s+saja\b/i,
+  /\b(?:dari|berdasarkan|pakai|gunakan)\s+(?:pengetahuan|bobot|ingatan)(?:mu|model)?\s+(?:saja|aja|only)\b/i,
+  /\b(?:hanya|cukup|only)\s+(?:pakai|gunakan|dari|berdasarkan)\s+(?:pengetahuan|bobot|ingatan)(?:mu|model)?\b/i,
+];
+
+export function hasWebSearchOptOut(message: string): boolean {
+  const normalized = String(message || '').replace(/\s+/g, ' ').trim();
+  return NO_WEB_RESTRICTIONS.some(pattern => pattern.test(normalized));
+}
 const EXPLICIT_SEARCH = /(?:cari(?:kan)?\s+(?:di\s+)?(?:web|internet|google|online|sumber|referensi|berita|informasi|aturan)|(?:search|browse|googling|telusuri)\s+(?:di\s+)?(?:web|internet|online|tentang)|(?:cek|periksa|verifikasi|carikan)\s+(?:sumber resmi|berita terbaru|di web|di internet)|(?:tolong|coba)\s+(?:cari|telusuri)\s+(?:sumber|referensi|berita))/i;
 const FRESH_QUERY = /(?:terbaru|terkini|hari ini|kemarin|sekarang|saat ini|minggu ini|bulan ini|tahun ini|update terbaru|rilis terbaru|masih berlaku|sudah berubah|jadwal|harga|tarif|kurs|cuaca|berita|peraturan|undang-undang|pkpu|putusan mk|siapa (?:presiden|menteri|gubernur|kepala)|pengumuman terbaru)/i;
 const INFO_REQUEST = /(?:\b(?:apa|siapa|berapa|kapan|dimana|bagaimana|apakah|cek|tolong|cari|jelaskan|daftar|bandingkan|verifikasi)\b|\?)/i;
 
 export function decideWebSearch(message: string): WebSearchDecision {
-  const normalized = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 350);
-  if (!normalized || DO_NOT_SEARCH.test(normalized) || BLOCKED_SECRETS.test(normalized)) {
+  const normalizedFull = String(message || '').replace(/\s+/g, ' ').trim();
+  const normalized = normalizedFull.slice(0, 350);
+  // Inspect the full request: the prohibition may follow a long description.
+  if (!normalized || hasWebSearchOptOut(normalizedFull) || BLOCKED_SECRETS.test(normalizedFull)) {
     return { search: false, query: '', explicit: false };
   }
   const explicit = EXPLICIT_SEARCH.test(normalized);
