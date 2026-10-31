@@ -3,14 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AAi</title>
-<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
-<meta name="theme-color" content="#2a7a9e" />
+<title>AAi — Ruang Ide & Percakapan</title>
+<meta name="description" content="AAi — ruang ngobrol, belajar, dan berkarya bersama Ayaka & Ayato AI." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="AAi — Ayaka & Ayato AI" />
+<meta property="og:description" content="Teman ngobrol untuk ide, karya, dan hal-hal yang ingin kamu pahami." />
+<meta property="og:url" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
+<meta property="og:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-crystal.png?v=studio-20261031" />
+<meta property="og:image:alt" content="Kristal biru-ungu dengan tulisan AAi" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="AAi — Ayaka & Ayato AI" />
+<meta name="twitter:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-crystal.png?v=studio-20261031" />
+<link rel="canonical" href="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
+<link rel="icon" type="image/png" sizes="512x512" href="/aai-crystal.png">
+<meta name="theme-color" content="#171b2d" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/aai-crystal.png" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
 <!-- Highlight.js: syntax highlighting untuk code box -->
@@ -1305,7 +1316,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>
-<link rel="stylesheet" href="/assets/css/aai-crystal.css" />
+<link rel="stylesheet" href="/assets/css/aai-studio.css" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
@@ -1370,46 +1381,50 @@ body.desktop-sidebar-hidden #topbarTitle {
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-header">
-    <a class="logo" href="/">
-      <div class="logo-icon">
-        <img src="/aai-mascot.jpg" alt="Karakter AAi" style="width:100%;height:100%;object-fit:contain;border-radius:16px;">
-      </div>
+    <a class="logo" href="/" aria-label="AAi — Beranda">
+      <div class="logo-icon"><img src="/aai-crystal.png" alt="Kristal AAi" /></div>
       <div class="logo-text-stack">
         <span class="logo-name">AAi</span>
         <span class="logo-subtitle">Ayaka &amp; Ayato AI</span>
       </div>
     </a>
-    <button class="new-chat-btn" onclick="newChat()">
-      <span style="font-size:18px;">&#10022;</span> Obrolan Baru
-    </button>
+    <button class="new-chat-btn" type="button" onclick="newChat()"><i class="fas fa-plus"></i><span>Obrolan baru</span></button>
   </div>
-  <span class="sidebar-section-label">Riwayat percakapan</span>
-  <div id="sessionList"></div>
+  <div class="sidebar-library">
+    <div class="sidebar-section-row">
+      <span class="sidebar-section-label">Percakapan</span>
+      <span class="sidebar-section-hint">RIWAYAT</span>
+    </div>
+    <div id="sessionList" aria-label="Daftar percakapan"></div>
+  </div>
   <div class="user-card">
     <div class="user-info">
       <div class="user-avatar-mini"><i class="fas fa-user"></i></div>
-      <div style="display:flex;flex-direction:column;">
+      <div style="display:flex;flex-direction:column;min-width:0;">
         <span id="cardUsername" style="font-weight:600;font-size:14px;color:var(--text);">Person</span>
         <span id="cardFamilyRole" class="user-role-badge">Anggota Keluarga</span>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+    <button class="logout-btn" onclick="logout()" type="button" title="Keluar" aria-label="Keluar"><i class="fas fa-sign-out-alt"></i></button>
   </div>
 </aside>
 
 <main class="main">
-  <div class="topbar">
+  <header class="topbar">
     <button class="hamburger" type="button" aria-label="Buka menu" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-    <div class="topbar-brandline"><span class="topbar-eyebrow">RUANG OBROLAN</span><span id="topbarTitle">AAi · Ayaka &amp; Ayato</span></div>
+    <div class="topbar-brandline">
+      <span class="topbar-eyebrow">AAi / RUANG OBROLAN</span>
+      <span id="topbarTitle">AAi · Ayaka &amp; Ayato</span>
+    </div>
     <span class="topbar-spacer"></span>
-    <span class="topbar-status"><span class="topbar-status-dot"></span>Ruang cerita kita</span>
-  </div>
+    <span class="topbar-status"><span class="topbar-status-dot"></span>Teman ide harian</span>
+  </header>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
   <div id="filePreview" class="file-preview-container"></div>
 
   <div class="input-wrap" id="inputWrap">
-    <textarea id="messageInput" rows="1" placeholder="Ceritakan sesuatu kepada AAi..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
+    <textarea id="messageInput" rows="1" placeholder="Tulis pesan untuk AAi..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
     <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
     <div class="input-controls-row">
       <div class="upload-container">

@@ -43,7 +43,7 @@ function getPreferredDisplayName() {
 }
 
 function getWelcomeIllustrationSrc() {
-  return '/aai-mascot.jpg';
+  return '/aai-crystal.png';
 }
 
 function clearStoredSessionOnUserMismatch() {
@@ -975,11 +975,11 @@ function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') 
   const displayLabel = normalizeAssistantModelLabel(modelName, modelLabel);
   return `
     <div style="display:flex;align-items:center;gap:10px;">
-      <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-        <img src="/aai-mascot.jpg" alt="AAi" >
+      <div class="avatar" >
+        <img src="/aai-crystal.png" alt="AAi" >
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
+        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Manrope',sans-serif;">
           AAi ${versionHtml}
         </div>
         <div class="assistant-model-label" style="font-size:11px;line-height:1.1;color:var(--text-muted);opacity:${displayLabel ? '0.78' : '0'};min-height:12px;">
@@ -2450,25 +2450,34 @@ function renderSidebar() {
   const container = document.getElementById('sessionList');
   container.innerHTML = '';
   if (!sessions.length) {
-    container.innerHTML = `<p style="padding:24px;text-align:center;color:var(--text-muted);font-size:14px;">Belum ada obrolan.<br>Mulai yang baru di atas 👆</p>`;
+    container.innerHTML = '<p class="session-empty">Belum ada percakapan.<br>Mulai dengan tombol di atas.</p>';
     return;
   }
   sessions.forEach(s => {
     const item = document.createElement('div');
     item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
+    item.setAttribute('tabindex', '0');
+    item.setAttribute('role', 'button');
+    item.setAttribute('aria-label', 'Buka percakapan: ' + (s.title || 'Obrolan'));
     item.innerHTML = `
-      <div style="flex:1;display:flex;align-items:center;gap:12px;overflow:hidden;">
-        <div style="width:9px;height:9px;background:#5ab4d4;border-radius:50%;flex-shrink:0;"></div>
-        <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
+      <div class="session-leading">
+        <span class="session-mark" aria-hidden="true"><i class="far fa-comment-dots"></i></span>
+        <span class="session-title">${escHtml(s.title || 'Obrolan')}</span>
       </div>
       <div class="session-actions">
-        <button class="action-btn" title="Edit"
+        <button type="button" class="action-btn" aria-label="Ubah judul percakapan" title="Ubah judul"
           data-sid="${s.id}" data-title="${escHtml(s.title || '')}"
-          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
-        <button class="action-btn" title="Hapus"
-          onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
+          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)"><i class="fas fa-pen"></i></button>
+        <button type="button" class="action-btn danger" aria-label="Hapus percakapan" title="Hapus"
+          onclick="event.stopImmediatePropagation();deleteSession('${s.id}')"><i class="far fa-trash-alt"></i></button>
       </div>`;
-    item.onclick = (e) => { if (e.target.tagName !== 'BUTTON') loadSession(s.id); };
+    item.onclick = (e) => { if (!e.target.closest('button')) loadSession(s.id); };
+    item.onkeydown = (e) => {
+      if (e.target === item && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        loadSession(s.id);
+      }
+    };
     container.appendChild(item);
   });
 }
@@ -2529,20 +2538,19 @@ function newChat(options = {}) {
   document.getElementById('chatArea').innerHTML = `
     <section class="aai-welcome" aria-label="Selamat datang di AAi">
       <div class="aai-welcome-copy">
-        <span class="aai-kicker"><i class="fas fa-gem"></i> YOUR LITTLE AI COMPANION</span>
-        <h1>Hai, <span>${escHtml(getPreferredDisplayName())}!</span><br>Siap menjelajah ide? ✨</h1>
-        <p>Dari pertanyaan sederhana sampai ide yang luar biasa, AAi siap menemani setiap ceritamu. Mau mulai dari mana?</p>
-        <div class="aai-prompt-heading">COBA TANYAKAN</div>
+        <span class="aai-kicker"><i class="fas fa-sparkles"></i> AYAKA & AYATO INTELLIGENCE</span>
+        <h1>Halo, <span>${escHtml(getPreferredDisplayName())}.</span><br>Ada ide apa hari ini?</h1>
+        <p>Tempat untuk berpikir jernih, mencari jawaban, dan ngobrol sesukamu. Mulai dari satu pertanyaan saja.</p>
+        <div class="aai-prompt-heading">MULAI DARI SINI</div>
         <div class="aai-prompt-grid">
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku membuat ide kreatif untuk hari ini')"><i class="fas fa-lightbulb"></i> Cari ide kreatif</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Jelaskan sesuatu yang baru dengan cara sederhana')"><i class="fas fa-book-open"></i> Belajar hal baru</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun rencana dan prioritas')"><i class="fas fa-list-check"></i> Susun rencana</button>
-          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Temani aku ngobrol santai yuk')"><i class="fas fa-heart"></i> Ngobrol santai</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku merapikan ide yang sedang kupikirkan')"><i class="far fa-lightbulb"></i> Rapikan ide</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Ajari aku topik baru dengan penjelasan sederhana')"><i class="fas fa-book-open"></i> Belajar sesuatu</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun langkah kerja yang jelas')"><i class="fas fa-list-check"></i> Susun langkah</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Yuk ngobrol santai sebentar')"><i class="far fa-comment-dots"></i> Ngobrol santai</button>
         </div>
       </div>
       <div class="aai-welcome-art">
-        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot kristal AAi" />
-        <span class="aai-art-caption">developed by Teyzura</span>
+        <img src="${getWelcomeIllustrationSrc()}" alt="Kristal AAi dengan identitas AAi di dalamnya" />
       </div>
     </section>`;
   document.getElementById('topbarTitle').textContent = 'AAi · Ayaka & Ayato';
@@ -2603,10 +2611,10 @@ function switchVersion(id) {
 function renderEmptySessionState() {
   const area = document.getElementById('chatArea');
   area.innerHTML = `
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:40px;color:var(--text-muted);">
-      <div style="font-size:40px;line-height:1;">💬</div>
-      <h3 style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--text);">Sesi ini masih kosong</h3>
-      <p style="max-width:320px;font-size:15px;line-height:1.6;">Kirim pesan pertama untuk mulai percakapan di sesi ini.</p>
+    <div class="empty-session">
+      <div class="empty-session-icon"><i class="far fa-comments"></i></div>
+      <h3>Mulai percakapanmu</h3>
+      <p>Sesi ini belum berisi pesan. Tulis sesuatu di bawah untuk memulai.</p>
     </div>`;
 }
 

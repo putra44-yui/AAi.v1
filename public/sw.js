@@ -1,14 +1,12 @@
-const CACHE_NAME = 'aai-shell-v9';
+const CACHE_NAME = 'aai-shell-v10';
 const PRECACHE_URLS = [
   '/index.html',
   '/login.html',
   '/assets/js/app.js',
-  '/assets/css/aai-crystal.css',
-  '/aai-mascot.jpg',
+  '/assets/css/aai-studio.css',
+  '/aai-crystal.png',
   '/manifest.webmanifest',
-  '/ayaka.webp',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/ayaka.webp'
 ];
 
 function isDocumentRequest(request, url) {

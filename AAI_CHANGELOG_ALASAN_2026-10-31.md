@@ -78,3 +78,26 @@ Sumber tarif (OpenRouter, diperiksa 31 Oktober 2026):
 - https://openrouter.ai/qwen/qwen3.8-omni-flash
 - https://openrouter.ai/qwen/qwen3.6-plus
 - https://openrouter.ai/qwen/qwen3.5-flash-02-23
+
+
+## Rombak total identitas dan antarmuka — AAi Studio (31 Oktober 2026)
+
+**Pemicu dari pengguna:** desain lama masih terasa melekat meskipun sudah dipoles; ruang daftar sesi terlalu renggang; PNG maskot belum transparan; teks **AAi** di dalam kristal sempat hilang ketika latar dibuang; gambar lama masih muncul pada preview tautan WhatsApp. Pengguna meminta desain **dibangun ulang**, bukan sekadar diberi sedikit koreksi.
+
+### Keputusan dan alasan
+
+| Gejala | Diagnosis desain | Keputusan | Alasan | Risiko/validasi |
+| --- | --- | --- | --- | --- |
+| Navigasi lama terasa seperti kartu pastel besar | Hierarki visual lemah dan sidebar boros ruang | Sistem visual baru **AAi Studio**: sidebar tinta gelap, kanvas kerja terang, tipografi Manrope/DM Sans, radius konsisten | Percakapan menjadi fokus; identitas terasa matang tanpa kehilangan kehangatan | Periksa kontras, overflow, dan viewport HP |
+| Jarak sesi terlalu jauh | Margin/padding dan ikon besar | Baris 43 px, ikon pesan kecil, label terpotong rapi, aksi muncul saat fokus/hover | Lebih banyak sesi terlihat tanpa scroll dan kontrol lebih jelas | Periksa panjang judul, keyboard, aksi edit/hapus dan mobile |
+| Layar awal masih meniru desain terdahulu | Foto menutupi bidang besar dan kartu dekoratif | Susunan editorial baru; kristal PNG transparan sebagai karya utama, prompt ringkas | Identitas AAi utuh tanpa latar gambar atau kredit di dalam area gambar | Pastikan gambar bukan latar datar, alpha benar, tulisan AAi jelas |
+| Login tidak konsisten dengan chat | Komposisi/ornamen lama | Komposisi dua panel dengan hero tinta gelap dan form putih | Identitas produk konsisten sebelum/sesudah login | Periksa mobile dan redirect |
+| WhatsApp masih menggunakan gambar lama | Metadata tautan mungkin tidak memuat gambar baru atau cache OG | `og:image`, Twitter image, favicon, manifest diarahkan ke `/aai-crystal.png` dengan query versi pada metadata | Satu aset identitas untuk beberapa permukaan; query membantu cache-busting pada image URL | Cache halaman WhatsApp mungkin tidak langsung hilang; verifikasi dengan tautan baru |
+| UI baru berisiko merusak backend | JS asli mengandalkan ID elemen tertentu | Pertahankan ID, API, alur Supabase, struktur sesi dan message tree; hanya perbarui markup presentasi serta beberapa label | Pemisahan migrasi visual dari migrasi fungsional membuat bug lebih mudah ditelusuri | Perlu uji login, sesi, chat, refresh, mobile, PWA |
+
+### Batas pengujian dan pelabelan dataset
+
+- **Sebelum deploy:** validasi sintaks JavaScript serta keberadaan ID/hook UI, perubahan HTML, cache dan aset. Jangan menyebut ini sebagai pengujian end-to-end.
+- **Sesudah deploy:** lihat halaman sebenarnya, uji tampilan desktop/mobile, daftar sesi, membuka sesi, pemulihan setelah refresh, dan status asset; jangan mengklaim fitur yang belum diuji.
+- **Keamanan:** autentikasi AAi masih berbasis username; perombakan tampilan tidak memperbaiki kelemahan akses tersebut.
+- **Penggunaan untuk dataset Benih AAi:** simpan sebagai studi kasus `keluhan pengguna → hipotesis desain → perombakan terkontrol → bukti hasil → batas klaim`. Hindari menggeneralisasikan preferensi estetika satu pengguna sebagai aturan universal.
