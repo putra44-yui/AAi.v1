@@ -2411,11 +2411,17 @@ async function loadSession(id, options = {}) {
     if (thisLoad !== sessionLoadSerial || currentSessionId !== normalizedId) return false;
     if (Array.isArray(data.messages) && (!data.status || data.status === 'active')) {
       currentMessages = data.messages;
+      // loadSessions() may have finished while this request was in flight.
+      // Never let an optimistic 'Memuat sesi...' title override the DB title
+      // or the actual first user message after a reload.
+      const latestSession = sessions.find(item => item.id === normalizedId) || session || null;
+      const actualTitle = [latestSession?.title, session?.title, titleHint]
+        .find(value => !isProvisionalSessionTitle(value)) || buildSessionTitleFromMessages(data.messages);
       const syncedSession = upsertSessionSnapshot({
-        ...(session || {}),
+        ...(latestSession || {}),
         id: normalizedId,
-        title: session?.title || titleHint || buildSessionTitleFromMessages(data.messages),
-        compact_checkpoint_at: session?.compact_checkpoint_at || null,
+        title: actualTitle,
+        compact_checkpoint_at: latestSession?.compact_checkpoint_at || null,
         updated_at: new Date().toISOString()
       }, { makeFirst: allowMissingSidebar && !existingSession });
       if (syncedSession) {

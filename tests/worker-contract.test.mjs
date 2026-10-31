@@ -51,3 +51,10 @@ test('login alias does not redirect back to Cloudflare canonical login URL', () 
   assert.doesNotMatch(worker, /Response\.redirect/);
   assert.match(worker, /return env\.ASSETS\.fetch\(request\)/);
 });
+
+test('restored session title prefers a real title over provisional loading text', () => {
+  const client = read('public/assets/js/app.js');
+  assert.match(client, /const latestSession = sessions\.find\(item => item\.id === normalizedId\)/);
+  assert.match(client, /\.find\(value => !isProvisionalSessionTitle\(value\)\) \|\| buildSessionTitleFromMessages\(data\.messages\)/);
+  assert.doesNotMatch(client, /title: session\?\.title \|\| titleHint \|\| buildSessionTitleFromMessages/);
+});
