@@ -584,7 +584,10 @@ async function prepareSession(
     let parentId = input.parentId;
     if (!parentId && !input.branchRoot) {
       parentId = recent?.[0]?.id ?? null;
-    } else {
+    }
+    // Editing the first user message deliberately creates a second root version.
+    // A null root has no parent to validate; other parent IDs must belong to this session.
+    if (parentId) {
       const { data: parent, error } = await supabase.from('messages')
         .select('id').eq('id', parentId).eq('session_id', sessionId).maybeSingle();
       if (error) throw error;

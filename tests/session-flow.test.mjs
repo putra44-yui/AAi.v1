@@ -187,3 +187,55 @@ test('previous chat context is sent to Omni Flash along the selected branch only
     globalThis.fetch = oldFetch;
   }
 });
+
+test('editing the first user message creates a valid alternate root branch', async () => {
+  const originalFetch = globalThis.fetch;
+  const inserted = [];
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      const method = init.method || 'GET';
+      if (url.hostname === 'openrouter.ai') {
+        return new Response('data: {"choices":[{"delta":{"content":"Pertanyaan awal direvisi."}}]}\n\ndata: [DONE]\n\n', {
+          status: 200, headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      const resource = url.pathname.split('/').at(-1);
+      if (resource === 'sessions' && method === 'GET') return Response.json({ id: sessionId });
+      if (resource === 'sessions' && method === 'PATCH') return new Response(null, { status: 204 });
+      if (resource === 'messages' && method === 'GET') {
+        return Response.json([
+          { id: assistantMessageId, role: 'assistant', content: 'Jawaban awal', parent_id: userMessageId },
+          { id: userMessageId, role: 'user', content: 'Pertanyaan awal', parent_id: null },
+        ]);
+      }
+      if (resource === 'messages' && method === 'POST') {
+        const body = JSON.parse(init.body);
+        inserted.push(body);
+        return Response.json({ id: body.role === 'user'
+          ? '55555555-5555-4555-8555-555555555555'
+          : '66666666-6666-4666-8666-666666666666' }, { status: 201 });
+      }
+      if (resource === 'users' && method === 'GET') {
+        return Response.json({ id: userId, username: 'teguh', person_id: null });
+      }
+      if (resource === 'persons' && method === 'GET') return Response.json([]);
+      if (resource === 'ai_personas' && method === 'GET') return Response.json([]);
+      throw new Error('Unexpected fixture: ' + method + ' ' + url);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: userId, session_id: sessionId, message: 'Pertanyaan awal direvisi',
+        parent_id: null, branch_root: true,
+      }),
+    }), env);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /"done":true/);
+    assert.equal(inserted[0].role, 'user');
+    assert.equal(inserted[0].parent_id, null);
+    assert.equal(inserted[1].role, 'assistant');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -1227,3 +1227,82 @@ body:not(.aai-login-page) .composer-menu-note {
   color: #a698bc;
   font: 500 10px/1.5 'Plus Jakarta Sans', sans-serif;
 }
+
+/* Multi-column model responses become readable, labeled cards. */
+body:not(.aai-login-page) .msg-row.assistant .bubble table.aai-table-cards {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 18px 0;
+  border: 0;
+  border-collapse: separate;
+  font-size: 1em;
+  line-height: 1.65;
+  overflow: visible;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards thead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr));
+  gap: 14px;
+  width: 100%;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody tr {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  padding: 13px 17px;
+  border: 1px solid #e6ddf4;
+  border-radius: 19px;
+  background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(249,246,255,.97));
+  box-shadow: 0 6px 19px rgba(79,60,128,.055);
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody td {
+  display: block;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  font-size: 1em;
+  line-height: 1.65;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody td + td {
+  border-top: 1px solid #eee7f7;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody td::before {
+  content: attr(data-label);
+  display: block;
+  margin-bottom: 4px;
+  color: #6b5ba9;
+  font: 800 12px/1.4 'Plus Jakarta Sans', 'DM Sans', sans-serif;
+  letter-spacing: .01em;
+}
+body:not(.aai-login-page) .bubble table.aai-table-cards tbody td:first-child {
+  padding-top: 2px;
+  color: #7261af;
+  font-weight: 800;
+}
+@media (max-width:720px) {
+  body:not(.aai-login-page) .bubble table.aai-table-cards tbody { gap: 13px; }
+  body:not(.aai-login-page) .bubble table.aai-table-cards tbody tr {
+    padding: 12px 15px;
+    border-radius: 17px;
+  }
+  body:not(.aai-login-page) .bubble table.aai-table-cards tbody td {
+    font-size: clamp(16px, 4.3vw, 17px);
+    line-height: 1.65;
+  }
+}

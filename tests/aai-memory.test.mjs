@@ -59,3 +59,12 @@ test('AAi governance preserves old evidence semantics and blocks unconfirmed con
 function requireSource(path) {
   return readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 }
+
+test('self-assessment requests retrieve work patterns without unrelated family stories', () => {
+  const rows = [
+    {id:'work',key:'ritme_eksekusi',value:'Sering memikirkan arsitektur dan eksekusi',priority_score:.12},
+    {id:'private',key:'beban_rumah_tangga',value:'Masalah dalam rumah',priority_score:.9},
+  ];
+  const result = selectRelevantAAiMemories(rows, 'Apa kelemahanku sebagai pembuat aplikasi?', 10);
+  assert.deepEqual(result.map(row => row.key), ['ritme_eksekusi']);
+});

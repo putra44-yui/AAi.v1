@@ -3176,9 +3176,31 @@ function formatContent(text) {
     return `<div class="streaming-plain">${escHtml(fallbackText).replace(/\n/g, '<br>')}</div>`;
   }
 
-  return DOMPurify.sanitize(html, {
+  const safeHtml = DOMPurify.sanitize(html, {
     ADD_ATTR: ['data-action', 'target', 'rel', 'style']
   });
+  return makeReadableMarkdownTables(safeHtml);
+}
+
+// Wide Markdown tables are readable cards; no horizontal five-column squinting.
+function makeReadableMarkdownTables(sanitizedHtml) {
+  if (!sanitizedHtml.includes('<table')) return sanitizedHtml;
+  const fragment = document.createElement('template');
+  fragment.innerHTML = sanitizedHtml;
+  fragment.content.querySelectorAll('table').forEach(table => {
+    const headings = Array.from(table.querySelectorAll('thead th')).map(th =>
+      (th.textContent || '').trim().slice(0, 90)
+    );
+    if (headings.length < 4) return;
+    table.classList.add('aai-table-cards');
+    table.querySelectorAll('tbody tr').forEach(row => {
+      Array.from(row.children).forEach((cell, index) => {
+        if (!cell.matches('td, th')) return;
+        cell.setAttribute('data-label', headings[index] || 'Detail');
+      });
+    });
+  });
+  return fragment.innerHTML;
 }
 
 function escHtml(str) {

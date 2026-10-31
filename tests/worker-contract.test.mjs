@@ -12,8 +12,8 @@ test('Cloudflare replaces the Next build and keeps static files', () => {
   assert.equal(wrangler.main, 'src/worker.ts');
   assert.equal(wrangler.assets.directory, './public');
   assert.ok(wrangler.assets.run_worker_first.includes('/api/*'));
-  assert.match(read('public/index.html'), /aai-crystal\.css/);
-  assert.match(read('public/login.html'), /aai-mascot\.jpg/);
+  assert.match(read('public/index.html'), /aai-studio\.css/);
+  assert.match(read('public/login.html'), /aai-mascot-studio\.png/);
 });
 
 test('essential API routes still have Worker handlers', () => {
@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v18/);
+  assert.match(sw, /aai-shell-v19/);
   assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -72,4 +72,20 @@ test('legacy memory and file endpoints receive runtime Supabase bindings', () =>
     assert.match(handler, /const supabase = runtimeClient\(req\);/);
     assert.doesNotMatch(handler, /const supabase = createClient\(\s*process\.env/);
   }
+});
+
+test('wide Markdown responses are labeled cards and do not shrink to five tiny columns', () => {
+  const renderer = read('public/assets/js/app.js');
+  const css = read('public/assets/css/aai-studio.css');
+  assert.match(renderer, /makeReadableMarkdownTables\(safeHtml\)/);
+  assert.match(renderer, /headings\.length < 4/);
+  assert.match(renderer, /cell\.setAttribute\('data-label'/);
+  assert.match(css, /table\.aai-table-cards tbody/);
+  assert.match(css, /content: attr\(data-label\)/);
+});
+
+test('root edits skip nonexistent parent validation', () => {
+  const source = read('src/chat.ts');
+  assert.match(source, /if \(parentId\) \{\s*const \{ data: parent, error \}/);
+  assert.doesNotMatch(source, /else \{\s*const \{ data: parent, error \}/);
 });
