@@ -1,6 +1,8 @@
-const CACHE_NAME = 'aai-shell-v7';
+const CACHE_NAME = 'aai-shell-v8';
 const PRECACHE_URLS = [
   '/assets/js/app.js',
+  '/assets/css/aai-crystal.css',
+  '/aai-mascot.jpg',
   '/manifest.webmanifest',
   '/ayaka.gif',
   '/ayaka1.gif',

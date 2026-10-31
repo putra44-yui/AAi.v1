@@ -1,14 +1,13 @@
 {
   "name": "aai",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "AAi static web + Cloudflare Worker API",
+  "main": "src/worker.ts",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "postinstall": "node scripts/fix-xlsx-tsconfig.cjs",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "npx wrangler dev",
+    "build": "npx wrangler deploy --dry-run",
+    "deploy": "npx wrangler deploy",
+    "test": "node --test tests/*.test.mjs",
     "cap:sync": "npx cap sync android",
     "cap:open": "npx cap open android"
   },
@@ -21,19 +20,10 @@
     "@capacitor/core": "^8.3.0",
     "@supabase/supabase-js": "^2.101.0",
     "@types/node": "^25.5.2",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
     "docx": "^9.6.1",
     "mammoth": "^1.12.0",
-    "next": "^16.2.2",
-    "openai": "^6.33.0",
     "pdf-parse": "^2.4.5",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
     "typescript": "^6.0.2",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "sharp": "^0.34.5"
   }
 }

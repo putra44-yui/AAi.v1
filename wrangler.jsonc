@@ -1,0 +1,15 @@
+{
+  "name": "aai-v0",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-31",
+  "keep_vars": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*",
+      "/login",
+      "/login/"
+    ]
+  }
+}

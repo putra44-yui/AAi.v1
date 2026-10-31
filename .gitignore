@@ -31,3 +31,7 @@ local.properties
 android/local.properties
 *.keystore
 *.jks
+
+# Cloudflare local build and secrets
+.wrangler/
+.dev.vars*

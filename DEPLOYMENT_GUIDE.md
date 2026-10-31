@@ -1,235 +1,48 @@
-# Friend Memory System - Deployment Guide
+# Deployment AAi — Cloudflare Workers (tanpa Next.js)
 
-## Prerequisites
-- Supabase PostgreSQL database set up
-- Vercel deployment configured
-- Environment variables configured (.env)
+AAi menggunakan **HTML/CSS/JavaScript statis** dari `public/` dan **Worker API native** dari `src/worker.ts`. Next.js tidak dipakai dalam build/deploy. Kode Next lama masih disimpan sementara untuk referensi dan rollback, tetapi tidak dijalankan.
 
-## Deployment Steps
+## Pengaturan Cloudflare Builds
 
-### Step 1: Database Migration
-Run the schema migration in your Supabase SQL editor:
+- Repository: `putra44-yui/AAi.v1`
+- Branch untuk uji: `design/aai-crystal-refresh` (Draft PR #1, jangan mengira `main` sudah berisi perubahan)
+- Worker name: `aai-v0` (sesuaikan `wrangler.jsonc` jika nama Worker Cloudflare berbeda)
+- Build command: `npm run build` (melakukan Wrangler dry-run; tidak deploy)
+- Deploy command: `npx wrangler deploy`
+- Root directory: root repositori
 
-1. Go to Supabase Dashboard → SQL Editor
-2. Create new query
-3. Copy and paste the migration from `db_message_previews.sql` (lines 239-276)
-4. Execute the query
+Config di `wrangler.jsonc` mengatur Workers Static Assets dari `./public`, API routing `/api/*`, dan alias `/login`. Tidak membutuhkan Vite/React/Next untuk tampilan saat ini.
 
-**What this does:**
-- Adds `friend_status`, `introduced_at`, `confidence`, `introduction_context` columns to `relationships` table
-- Adds `source_person_id` column to `person_memory` table
-- Creates indexes for efficient queries
-- Creates trigger for auto-updating introduced_at timestamp
+## Variabel dan secret — wajib sebelum tes fungsi
 
-### Step 2: API Files
-The following files are already in place and will be automatically deployed to Vercel:
+Tambahkan pada **Cloudflare → Workers & Pages → aai-v0 → Settings → Variables and Secrets**:
 
-- `/api/friends/detect-and-suggest.js` - Friend detection API
-- `/api/friends/confirm-and-save.js` - Friend save API
+| Nama | Jenis | Perlu |
+| --- | --- | --- |
+| `SUPABASE_URL` | Variable atau Secret | Login, sessions, messages, file jobs |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret** | Endpoint Supabase server-side |
+| `OPENROUTER_API_KEY` | **Secret** | Chat |
+| `OPENROUTER_MAIN_MODEL` | Variable | Opsional; default `qwen/qwen3.6-plus` |
+| `OPENROUTER_API_URL` | Variable | Opsional |
+| `OPENROUTER_HTTP_REFERER`, `OPENROUTER_X_TITLE` | Variable | Opsional |
 
-**Vercel will automatically:**
-- Detect these files as serverless functions
-- Deploy them to `/api/friends/*` endpoints
-- Apply the maxDuration: 300 from vercel.json
+**Jangan unggah `.env.local`, `.dev.vars`, kunci service role, atau token ke GitHub**. `keep_vars: true` menjaga variables yang disetel via Dashboard saat deploy berikutnya. Jangan letakkan service role di frontend.
 
-### Step 3: Frontend Files Already Updated
-The following files have been modified and are ready:
+Untuk uji lokal, gunakan `.dev.vars` yang diabaikan Git (bukan file yang dikomit).
 
-- `assets/js/app.js` - Added friend suggestion event handler, modal functions
-- `index.html` - Added friend suggestion modal HTML
-- `api/chat.js` - Added friend detection system prompt, context injection, SSE broadcasting
-- `api/_lib/chat-context.js` - Added friend context functions
+## Verifikasi bertahap
 
-### Step 4: Verify Deployment
+1. Build: `npm ci` lalu `npm run build`. Dry-run harus menghasilkan bundle Worker tanpa meminta `SUPABASE_URL` saat build.
+2. Deploy lewat Cloudflare Builds atau `npx wrangler deploy`.
+3. Cek `GET /api/status` → `{"ok":true,"runtime":"cloudflare-worker"}`.
+4. Cek `/login` → `/login.html`, lalu login menggunakan akun uji.
+5. Cek sesi, pesan, chat stream, tombol Stop, pembacaan riwayat, dan mode Qwen/OSS uji manual.
+6. Cek fitur tambahan: planning memory, friends, lampiran, file jobs termasuk XLSX. **Fitur lama yang memakai pustaka Node belum diverifikasi di runtime Workers; jika gagal, kirim log sebelum produksi.**
+7. Periksa tampilan pada desktop dan Android termasuk cache PWA. Cache service worker dinaikkan versinya agar CSS/maskot baru diambil.
 
-After deploying to Vercel:
+## Pembatasan dan rollback
 
-1. Check that API endpoints respond:
-   ```bash
-   curl -X POST https://your-domain.vercel.app/api/friends/detect-and-suggest \
-     -H "Content-Type: application/json" \
-     -d '{"user_message":"aku teman Teguh, namaku Yosi","user_id":"YOUR_USER_ID"}'
-   ```
-
-2. Verify database schema:
-   ```sql
-   -- In Supabase SQL Editor
-   SELECT column_name FROM information_schema.columns 
-   WHERE table_name = 'relationships' AND column_name IN ('friend_status', 'introduced_at');
-   ```
-
-3. Test in UI:
-   - Log in to your app
-   - Introduce yourself as a friend
-   - Verify modal appears
-   - Confirm saving friend
-   - Check database for new person/relationship/memory records
-
-### Step 5: Monitor & Troubleshoot
-
-**Check Vercel logs:**
-- Vercel Dashboard → Deployments → View logs
-- Look for any errors from `/api/friends/*`
-
-**Check Supabase:**
-- Navigate to Database → Tables
-- Verify data in `persons`, `relationships`, `person_memory`
-
-**Check Browser Console:**
-- Press F12 in browser
-- Look for any errors from friend suggestion events
-- Check Network tab for API responses
-
-## Rollback
-
-If issues occur:
-
-1. **Revert database:** Contact Supabase support or use SQL backup
-2. **Revert code:** Deploy previous commit to Vercel
-3. **Test with feature flag:** Temporarily disable friend feature via system prompt
-
-## Feature Toggle (Optional)
-
-To temporarily disable the friend feature without code changes, modify `api/chat.js` line 1745:
-
-```javascript
-// Change:
-ATURAN DETEKSI & MANAJEMEN TEMAN (PENTING):
-
-// To:
-ATURAN DETEKSI & MANAJEMEN TEMAN (DISABLED FOR TESTING):
-- Jika fitur ini di-disable, JANGAN output tag [SUGGEST-FRIEND:...].
-```
-
-## Reasoning Preview Toggle
-
-Reasoning preview sekarang bisa dikontrol lewat environment variable dan default-nya nonaktif untuk mengurangi overhead payload/UI.
-
-- `AAI_REASONING_PREVIEW_ENABLED=true` -> reasoning preview aktif (generate, simpan, kirim SSE, render UI).
-- `AAI_REASONING_PREVIEW_ENABLED=false` atau tidak diset -> reasoning preview nonaktif total.
-
-Saat nonaktif:
-- Endpoint chat tidak generate `reasoning_steps`.
-- SSE tidak mengirim event reasoning preview.
-- Endpoint history tidak melakukan enrichment preview.
-- UI tidak merender panel "AAI sedang berpikir".
-
-Rollback cepat:
-1. Set `AAI_REASONING_PREVIEW_ENABLED=true` di Vercel/Supabase env.
-2. Redeploy.
-
-## OpenRouter Model Routing
-
-Model chat sekarang bisa diatur lewat environment variable tanpa perlu ubah kode backend setiap kali mau ganti model atau menukar urutannya.
-
-Precedence final:
-- `OPENROUTER_MODEL_ORDER`
-- `OPENROUTER_MAIN_MODEL` + `OPENROUTER_FALLBACK_MODEL`
-- default kode: `arcee-ai/trinity-large-preview:free` lalu `openai/gpt-oss-20b:free`
-
-Catatan:
-- `.env.local` tetap menjadi tempat nilai runtime lokal.
-- Contoh konfigurasi disimpan di dokumen ini agar tidak mencampur contoh dengan secret.
-- `OPENROUTER_MODEL_ORDER` menang penuh. Jika variabel ini diisi, pasangan main dan fallback diabaikan.
-
-Contoh 1: ganti primary saja
-
-```env
-OPENROUTER_MAIN_MODEL=google/gemma-3-27b-it:free
-```
-
-Hasil:
-- primary memakai `google/gemma-3-27b-it:free`
-- fallback tetap default `openai/gpt-oss-20b:free`
-
-Contoh 2: ganti fallback saja
-
-```env
-OPENROUTER_FALLBACK_MODEL=qwen/qwen3-coder:free
-```
-
-Hasil:
-- primary tetap default `arcee-ai/trinity-large-preview:free`
-- fallback memakai `qwen/qwen3-coder:free`
-
-Contoh 3: atur seluruh urutan model
-
-```env
-OPENROUTER_MODEL_ORDER=google/gemma-3-27b-it:free,openai/gpt-oss-20b:free,qwen/qwen3-coder:free
-```
-
-Hasil:
-- sistem mencoba model sesuai urutan persis dari kiri ke kanan
-- `OPENROUTER_MAIN_MODEL` dan `OPENROUTER_FALLBACK_MODEL` tidak dipakai selama `OPENROUTER_MODEL_ORDER` terisi valid
-
-Env lain yang tetap relevan:
-- `OPENROUTER_MAX_RETRIES`
-- `OPENROUTER_ATTEMPT_TIMEOUT_MS`
-- `OPENROUTER_BACKOFF_BASE_MS`
-
-Checklist deploy setelah mengganti model:
-1. Simpan perubahan env di environment deployment yang dipakai.
-2. Redeploy aplikasi.
-3. Uji satu chat normal dan satu kondisi fallback untuk memastikan model aktif dan metadata label sesuai harapan.
-
-## Performance Considerations
-
-- Friend context fetch: ~50-100ms (new database query)
-- Pattern matching: <1ms (regex only)
-- SSE broadcasting: <1ms (event format)
-- Modal display: <10ms (DOM manipulation)
-
-**Total overhead:** ~50-150ms per chat (minimal impact)
-
-## Security Considerations
-
-1. **API Authentication:** Ensure `/api/friends/*` endpoints are called only by authenticated users (currentUser.id check)
-2. **Database Permissions:** Set Supabase RLS policies to restrict friend data by user_id
-3. **Input Validation:** Pattern matching prevents injection (regex bounded)
-4. **Error Handling:** Friend feature failures don't expose sensitive data
-
-## Post-Deployment
-
-1. Announce feature to users (send email/notification)
-2. Monitor error logs for 48 hours
-3. Collect user feedback
-4. Plan enhancements (fuzzy matching, bulk import, etc.)
-
-## Support & Escalation
-
-**Issue: Modal doesn't appear**
-- Check browser console for errors
-- Verify modal HTML element exists (id="friendSuggestionModal")
-- Check that message matches detection patterns
-
-**Issue: Friend not saving**
-- Check API response in Network tab
-- Verify database connection works
-- Check Supabase RLS policies
-
-**Issue: Context not injected**
-- Verify `fetchFriendsWithMemories()` returns data
-- Check that friend relationship was created
-- Look for console errors in API logs
-
-**Issue: Regex not matching**
-- Test pattern in JavaScript console
-- Provide new test case to development team
-- Add new pattern to friendPatterns array
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0 | 2024 | Initial release with friend detection and memory |
-| TBD | TBD | Fuzzy matching, bulk import, advanced features |
-
-## Contacts
-
-- Database issues → Supabase support
-- Deployment issues → Vercel support
-- Feature requests → Development team
-
----
-
-**Ready to Deploy:** All files in place, tested, production-ready.
+- Migrasi ini menghapus ketergantungan build Next; ini **bukan bukti** seluruh endpoint lama kompatibel dengan Workers. Adapter endpoint lama di-load saat dipanggil, agar secret Supabase yang belum disetel tidak menjatuhkan build.
+- Saat environment belum lengkap, endpoint Supabase akan memberi 503 dengan pesan konfigurasi, bukan gagal saat kompilasi.
+- Konfigurasi Capacitor masih menyimpan URL Vercel lama; ubah setelah domain Cloudflare final dan uji PWA. Jangan mengubahnya ke URL yang belum ada.
+- Jangan merge ke `main` atau ganti Worker produksi sebelum checklist selesai. Branch/commit lama tetap bisa menjadi rollback.
