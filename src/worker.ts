@@ -1,4 +1,5 @@
 import { POST as chatPost } from './chat';
+import { handleSessionApi } from './session-api';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
 // Only /api/* and the /login alias run through this Worker.
@@ -28,14 +29,10 @@ type LegacyHandler = (request: LegacyRequest, response: LegacyResponse) => Promi
 type LegacyModule = { default: LegacyHandler };
 
 const legacyModules: Record<string, () => Promise<LegacyModule>> = {
-  '/api/login': () => import('../api_backup/login.js'),
-  '/api/sessions': () => import('../api_backup/sessions.js'),
-  '/api/messages': () => import('../api_backup/messages.js'),
   '/api/file-jobs': () => import('../api_backup/file-jobs.js'),
   '/api/planning-memory': () => import('../api_backup/planning-memory.js'),
   '/api/friends/detect-and-suggest': () => import('../api_backup/friends/detect-and-suggest.js'),
   '/api/friends/confirm-and-save': () => import('../api_backup/friends/confirm-and-save.js'),
-  '/api/sessions/:id': () => import('../api_backup/sessions/[id].js'),
   '/api/planning-memory/:id': () => import('../api_backup/planning-memory/[id].js'),
 };
 
@@ -46,8 +43,6 @@ function jsonError(status: number, error: string): Response {
 function getLegacyRoute(pathname: string): { key: string; id?: string } | null {
   const path = pathname.replace(/\/$/, '') || '/';
   if (legacyModules[path]) return { key: path };
-  const sessionMatch = /^\/api\/sessions\/([^/]+)$/.exec(path);
-  if (sessionMatch) return { key: '/api/sessions/:id', id: decodeURIComponent(sessionMatch[1]) };
   const planningMatch = /^\/api\/planning-memory\/([^/]+)$/.exec(path);
   if (planningMatch) return { key: '/api/planning-memory/:id', id: decodeURIComponent(planningMatch[1]) };
   return null;
@@ -143,6 +138,11 @@ export default {
     if (path === '/api/chat' || path === '/api/chat/') {
       if (request.method !== 'POST') return jsonError(405, 'Method not allowed');
       return chatPost(request, env);
+    }
+
+    if (path === '/api/login' || path === '/api/sessions' || path === '/api/messages' ||
+        /^\/api\/sessions\/[^/]+\/?$/.test(path)) {
+      return handleSessionApi(request, env);
     }
 
     if (path.startsWith('/api/')) {

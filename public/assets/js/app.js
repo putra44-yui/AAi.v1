@@ -15,6 +15,7 @@ if (currentUser.family_role) {
 let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
+let sessionLoadSerial = 0;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
 let currentModelPreference = 'main'; // mode uji sementara, kembali ke utama setelah refresh
 const currentMemoryExperimentMode = 'context-heavy';
@@ -2372,6 +2373,7 @@ async function loadSession(id, options = {}) {
   } = options;
   const normalizedId = String(id || '').trim();
   if (!normalizedId) return false;
+  const thisLoad = ++sessionLoadSerial;
 
   const existingSession = sessions.find(s => s.id === normalizedId) || null;
   persistCurrentSession(normalizedId, {
@@ -2404,6 +2406,9 @@ async function loadSession(id, options = {}) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // A slower response from a previously selected session must not replace
+    // the messages of the session the user has already switched to.
+    if (thisLoad !== sessionLoadSerial || currentSessionId !== normalizedId) return false;
     if (Array.isArray(data.messages) && (!data.status || data.status === 'active')) {
       currentMessages = data.messages;
       const syncedSession = upsertSessionSnapshot({
@@ -2425,6 +2430,7 @@ async function loadSession(id, options = {}) {
     renderSidebar();
     return true;
   } catch (e) {
+    if (thisLoad !== sessionLoadSerial) return false;
     logDebug(`Error load session: ${e.message}`, '#e74c3c');
     if (!suppressErrorState) {
       document.getElementById('chatArea').innerHTML =
@@ -2474,11 +2480,12 @@ async function renameSession(id, oldTitle) {
   if (idx !== -1) { sessions[idx].title = newTitle.trim(); renderSidebar(); }
   if (currentSessionId === id) document.getElementById('topbarTitle').textContent = newTitle.trim();
   try {
-    await fetch(`/api/sessions/${id}`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newTitle.trim() })
+      body: JSON.stringify({ title: newTitle.trim(), user_id: currentUser.id })
     });
-  } catch { loadSessions(); }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch { await loadSessions(); }
 }
 
 let sessionToDelete = null;
@@ -2488,8 +2495,10 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
   if (!sessionToDelete) return;
   const id = sessionToDelete; closeDeleteModal();
   try {
-    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    if (res.ok) { if (currentSessionId === id) newChat(); loadSessions(); }
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (currentSessionId === id) newChat();
+    await loadSessions();
   } catch (e) { console.error("Gagal hapus:", e); }
 });
 
@@ -2505,6 +2514,7 @@ function useWelcomePrompt(promptText) {
 function newChat(options = {}) {
   const { preserveStoredSession = false } = options;
   currentSessionId = null;
+  sessionLoadSerial += 1;
   currentSessionMeta = null;
   activeRenderJob += 1;
   if (!preserveStoredSession) clearStoredSessionState();

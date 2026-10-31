@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'qwen/qwen3.6-plus';
+const DEFAULT_MODEL = 'qwen/qwen3.8-omni-flash';
 const DEFAULT_TEST_MODEL = 'openai/gpt-oss-20b:free';
 const DEFAULT_PERSONA = 'Auto';
 const DEFAULT_REFERER = 'https://aai.family';
@@ -23,14 +23,18 @@ interface Database {
         Row: {
           id: string;
           user_id: string;
+          title: string | null;
         };
         Insert: {
           id?: string;
           user_id: string;
+          title?: string;
         };
         Update: {
           id?: string;
           user_id?: string;
+          title?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -89,6 +93,9 @@ interface ParsedChatRequest {
   sessionId: string | null;
   userId: string | null;
   userMessageId: string | null;
+  parentId: string | null;
+  editMessageId: string | null;
+  updateOnly: boolean;
   personaName: string;
   modelPreference: 'main' | 'oss-test';
 }
@@ -96,7 +103,7 @@ interface ParsedChatRequest {
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
 
 interface ProviderMessage {
-  role: 'system' | 'user';
+  role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
@@ -243,6 +250,9 @@ function parseRequestBody(input: string): ParseRequestResult {
   const sessionId = readTrimmedString(parsedValue.session_id);
   const userId = readTrimmedString(parsedValue.user_id);
   const userMessageId = readTrimmedString(parsedValue.user_message_id);
+  const parentId = readTrimmedString(parsedValue.parent_id);
+  const editMessageId = readTrimmedString(parsedValue.edit_message_id);
+  const updateOnly = parsedValue.update_only === true;
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
   const modelPreference = readTrimmedString(parsedValue.model_preference) === 'oss-test' ? 'oss-test' : 'main';
 
@@ -254,13 +264,16 @@ function parseRequestBody(input: string): ParseRequestResult {
       sessionId,
       userId,
       userMessageId,
+      parentId,
+      editMessageId,
+      updateOnly,
       personaName,
       modelPreference,
     },
   };
 }
 
-function buildProviderMessages(message: string, personaName: string): ProviderMessage[] {
+function buildProviderMessages(message: string, personaName: string, history: ProviderMessage[]): ProviderMessage[] {
   const messages: ProviderMessage[] = [];
 
   if (personaName !== DEFAULT_PERSONA) {
@@ -270,15 +283,18 @@ function buildProviderMessages(message: string, personaName: string): ProviderMe
     });
   }
 
+  messages.push(...history);
   messages.push({ role: 'user', content: message });
   return messages;
 }
 
-function buildProviderPayload(message: string, personaName: string, model: string, traceId: string): ProviderRequestBody {
+function buildProviderPayload(
+  message: string, personaName: string, model: string, traceId: string, history: ProviderMessage[],
+): ProviderRequestBody {
   return {
     model,
     stream: true,
-    messages: buildProviderMessages(message, personaName),
+    messages: buildProviderMessages(message, personaName, history),
     temperature: 0.7,
     user: traceId,
   };
@@ -322,7 +338,9 @@ function createSupabaseAdminClient(env: RuntimeEnv): SupabaseClient<Database> | 
     return null;
   }
 
-  return createClient<Database>(supabaseUrl, supabaseServiceRoleKey);
+  return createClient<Database>(supabaseUrl, supabaseServiceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 function isUuidLike(value: string): boolean {
@@ -330,8 +348,8 @@ function isUuidLike(value: string): boolean {
 }
 
 async function handleLoadSession(sessionId: string, userId: string, traceId: string, env: RuntimeEnv): Promise<Response> {
-  if (!isUuidLike(sessionId)) {
-    return createLoadSessionResponse(sessionId, userId, [], traceId);
+  if (!isUuidLike(sessionId) || !isUuidLike(userId)) {
+    return createJsonError(400, 'Identitas sesi tidak valid.', traceId);
   }
 
   const supabase = createSupabaseAdminClient(env);
@@ -351,7 +369,7 @@ async function handleLoadSession(sessionId: string, userId: string, traceId: str
   }
 
   if (sessionRow === null) {
-    return createJsonError(403, 'Akses ditolak', traceId);
+    return createJsonError(404, 'Sesi tidak ditemukan.', traceId);
   }
 
   const { data: messageRows, error: messageError } = await supabase
@@ -373,6 +391,139 @@ async function handleLoadSession(sessionId: string, userId: string, traceId: str
   }));
 
   return createLoadSessionResponse(sessionId, userId, messages, traceId);
+}
+
+type PreparedSession = {
+  supabase: SupabaseClient<Database>;
+  sessionId: string;
+  userMessageId: string;
+  message: string;
+  history: ProviderMessage[];
+};
+type PreparationResult = { ok: true; value: PreparedSession } | { ok: false; response: Response };
+
+function preparationError(status: number, message: string, traceId: string): PreparationResult {
+  return { ok: false, response: createJsonError(status, message, traceId) };
+}
+
+type HistoryRow = {
+  id: string;
+  role: string;
+  content: string;
+  parent_id: string | null;
+};
+
+// Follow the chosen message branch, not unrelated sibling versions. Only a
+// small window is sent to the model to limit disclosure and input-token cost.
+export function buildSessionContext(rows: HistoryRow[], parentId: string | null): ProviderMessage[] {
+  const byId = new Map(rows.map(row => [row.id, row]));
+  const path: ProviderMessage[] = [];
+  const visited = new Set<string>();
+  let id = parentId;
+  while (id && path.length < 16 && !visited.has(id)) {
+    visited.add(id);
+    const row = byId.get(id);
+    if (!row) break;
+    if (row.role === 'user' || row.role === 'assistant') {
+      path.unshift({ role: row.role, content: row.content.slice(0, 2400) });
+    }
+    id = row.parent_id;
+  }
+  return path;
+}
+
+async function checkSessionOwner(
+  supabase: SupabaseClient<Database>, sessionId: string, userId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.from('sessions')
+    .select('id').eq('id', sessionId).eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function updateUserMessage(
+  input: ParsedChatRequest, env: RuntimeEnv, traceId: string,
+): Promise<Response> {
+  if (!input.userId || !isUuidLike(input.userId) ||
+      !input.sessionId || !isUuidLike(input.sessionId) ||
+      !input.editMessageId || !isUuidLike(input.editMessageId)) {
+    return createJsonError(400, 'Identitas sesi atau pesan tidak valid.', traceId);
+  }
+  const supabase = createSupabaseAdminClient(env);
+  if (!supabase) return createJsonError(503, 'Konfigurasi Supabase belum lengkap.', traceId);
+  if (!await checkSessionOwner(supabase, input.sessionId, input.userId)) {
+    return createJsonError(404, 'Sesi tidak ditemukan.', traceId);
+  }
+  const { data, error } = await supabase.from('messages')
+    .update({ content: input.message }).eq('id', input.editMessageId)
+    .eq('session_id', input.sessionId).eq('role', 'user').select('id').maybeSingle();
+  if (error) throw error;
+  if (!data) return createJsonError(404, 'Pesan tidak ditemukan.', traceId);
+  return Response.json({ success: true, message_id: data.id }, {
+    headers: { 'cache-control': 'no-store', 'x-trace-id': traceId },
+  });
+}
+
+async function prepareSession(
+  input: ParsedChatRequest, env: RuntimeEnv, traceId: string,
+): Promise<PreparationResult> {
+  if (!input.userId || !isUuidLike(input.userId)) return preparationError(400, 'user_id tidak valid.', traceId);
+  if (input.sessionId && !isUuidLike(input.sessionId)) return preparationError(400, 'session_id tidak valid.', traceId);
+  if (input.userMessageId && !isUuidLike(input.userMessageId)) return preparationError(400, 'user_message_id tidak valid.', traceId);
+  if (input.parentId && !isUuidLike(input.parentId)) return preparationError(400, 'parent_id tidak valid.', traceId);
+  const supabase = createSupabaseAdminClient(env);
+  if (!supabase) return preparationError(503, 'Konfigurasi Supabase belum lengkap.', traceId);
+
+  let sessionId = input.sessionId;
+  if (sessionId) {
+    if (!await checkSessionOwner(supabase, sessionId, input.userId)) {
+      return preparationError(404, 'Sesi tidak ditemukan.', traceId);
+    }
+  } else {
+    const title = input.message.slice(0, 42).trim() || 'Obrolan baru';
+    const { data, error } = await supabase.from('sessions')
+      .insert({ user_id: input.userId, title }).select('id').single();
+    if (error) throw error;
+    sessionId = data.id;
+  }
+
+  const { data: recent, error: recentError } = await supabase.from('messages')
+    .select('id, role, content, parent_id')
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: false }).limit(80);
+  if (recentError) throw recentError;
+
+  let userMessageId: string;
+  let contextParentId: string | null;
+  let message = input.message;
+  if (input.userMessageId) {
+    const { data, error } = await supabase.from('messages')
+      .select('id, parent_id, content').eq('id', input.userMessageId)
+      .eq('session_id', sessionId).eq('role', 'user').maybeSingle();
+    if (error) throw error;
+    if (!data) return preparationError(404, 'Pesan yang dicoba ulang tidak ditemukan.', traceId);
+    userMessageId = data.id;
+    contextParentId = data.parent_id;
+    message = data.content;
+  } else {
+    let parentId = input.parentId;
+    if (!parentId) {
+      parentId = recent?.[0]?.id ?? null;
+    } else {
+      const { data: parent, error } = await supabase.from('messages')
+        .select('id').eq('id', parentId).eq('session_id', sessionId).maybeSingle();
+      if (error) throw error;
+      if (!parent) return preparationError(400, 'Induk pesan tidak termasuk sesi ini.', traceId);
+    }
+    const { data, error } = await supabase.from('messages')
+      .insert({ session_id: sessionId, role: 'user', content: input.message, parent_id: parentId })
+      .select('id').single();
+    if (error) throw error;
+    userMessageId = data.id;
+    contextParentId = parentId;
+  }
+  const history = buildSessionContext(recent ?? [], contextParentId);
+  return { ok: true, value: { supabase, sessionId, userMessageId, message, history } };
 }
 
 function createStreamHeaders(traceId: string): Headers {
@@ -527,7 +678,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     }
 
     if (requestBody.value.kind === 'load_session') {
-      return handleLoadSession(requestBody.value.sessionId, requestBody.value.userId, traceId, env);
+      return await handleLoadSession(requestBody.value.sessionId, requestBody.value.userId, traceId, env);
+    }
+
+    if (requestBody.value.updateOnly) {
+      return await updateUserMessage(requestBody.value, env, traceId);
     }
 
     const apiKey = readEnv('OPENROUTER_API_KEY', env);
@@ -535,15 +690,18 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       return createJsonError(500, 'OPENROUTER_API_KEY belum dikonfigurasi.', traceId);
     }
 
-    const sessionId = requestBody.value.sessionId || randomUUID();
-    const userMessageId = requestBody.value.userMessageId || randomUUID();
+    // Persist the session and user message before sending the first SSE event.
+    // A session ID must always correspond to a real Supabase row.
+    const prepared = await prepareSession(requestBody.value, env, traceId);
+    if (!prepared.ok) return prepared.response;
+    const { supabase, sessionId, userMessageId, message, history } = prepared.value;
     const personaName = requestBody.value.personaName;
     // Model gratis hanya dipakai atas pilihan eksplisit dari antarmuka untuk uji coba.
     const modelName = requestBody.value.modelPreference === 'oss-test'
       ? DEFAULT_TEST_MODEL
       : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
-    const providerPayload = buildProviderPayload(requestBody.value.message, personaName, modelName, traceId);
+    const providerPayload = buildProviderPayload(message, personaName, modelName, traceId, history);
     const encoder = new TextEncoder();
     const upstreamAbortController = new AbortController();
 
@@ -554,6 +712,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         let streamClosed = false;
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
+        const replyParts: string[] = [];
 
         const enqueueEvent = (event: StreamEvent): void => {
           if (streamClosed || streamCanceled) {
@@ -642,6 +801,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             }
 
             emittedTokenCount += 1;
+            replyParts.push(token);
             enqueueEvent({ token });
           };
 
@@ -672,10 +832,28 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             return;
           }
 
+          // Do not report "done" until the assistant answer is durable.
+          const { data: saved, error: saveError } = await supabase.from('messages')
+            .insert({
+              session_id: sessionId,
+              role: 'assistant',
+              content: replyParts.join(''),
+              parent_id: userMessageId,
+            })
+            .select('id').single();
+          if (saveError) throw saveError;
+
+          const { error: touchError } = await supabase.from('sessions')
+            .update({ updated_at: new Date().toISOString() }).eq('id', sessionId);
+          if (touchError) {
+            // The answer is already stored; timestamp failure must not produce
+            // a duplicate assistant reply when the client retries.
+            console.warn('[AAi session timestamp]', touchError.message);
+          }
           enqueueEvent({
             done: true,
             session_id: sessionId,
-            message_id: randomUUID(),
+            message_id: saved.id,
             user_message_id: userMessageId,
             persona_used: personaName,
             model_used: resolvedModelUsed,
