@@ -916,3 +916,12 @@ body:not(.aai-login-page) .user-message-time {
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* Keep AAi response tools tucked directly under the final line or codebox. */
+body:not(.aai-login-page) .msg-row.assistant > .bubble {
+  padding-bottom: 0 !important;
+}
+body:not(.aai-login-page) .msg-row.assistant > .msg-actions {
+  margin-top: -2px !important;
+  padding-top: 0 !important;
+}
