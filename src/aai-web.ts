@@ -26,7 +26,7 @@ export function decideWebSearch(message: string): WebSearchDecision {
     .replace(/^aai[,!]?\s*/i, '')
     .replace(/^(?:tolong|coba)\s+/i, '')
     .replace(/^(?:cari(?:kan)?(?:\s+di\s+(?:web|internet|google|online))?\s+(?:sumber\s+resmi|referensi|berita|informasi)?\s*[:—-]?\s*)/i, '')
-    .replace(/\s*(?:sertakan|berikan|cantumkan)\s+(?:tautan|link|sumber)(?:nya)?[.!]?$/i, '')
+    .replace(/\s*(?:sertakan|berikan|cantumkan)\s+(?:(?:tautan|link)(?:\s+sumber(?:nya)?)?|sumber(?:nya)?)[.!]?$/i, '')
     .trim() || normalized;
   return { search: explicit || auto, query: cleanedQuery.slice(0, 300), explicit };
 }
@@ -45,7 +45,7 @@ function cleanSource(value: unknown): WebSource | null {
     if (!['http:', 'https:'].includes(parsed.protocol) || /^(localhost|127\.|10\.|192\.168\.|169\.254\.)/i.test(parsed.hostname)) return null;
   } catch { return null; }
   const title = typeof v.title === 'string' ? v.title.trim().slice(0, 180) : '';
-  const snippetText = typeof v.content === 'string' ? v.content : typeof v.text === 'string' ? v.text : '';
+  const snippetText = typeof v.content === 'string' ? v.content : typeof v.text === 'string' ? v.text : typeof v.snippet === 'string' ? v.snippet : '';
   const highlights = Array.isArray(v.highlights) ? v.highlights.filter(x => typeof x === 'string').join(' ') : '';
   const snippet = (highlights || snippetText).replace(/\s+/g, ' ').trim().slice(0, 700);
   if (!title && !snippet) return null;

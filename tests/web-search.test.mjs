@@ -23,6 +23,7 @@ test('External sources are validated, shortened and deduplicated', () => {
   ]);
   assert.equal(sources.length, 2);
   assert.equal(sources[1].snippet, 'Bagian penting');
+  assert.equal(normalizeWebSources([{url:'https://docs.example.org',title:'Rujukan',snippet:'Cuplikan gabungan'}])[0].snippet, 'Cuplikan gabungan');
 });
 
 test('Tavily is first; Exa runs only if initial results are insufficient', async () => {
