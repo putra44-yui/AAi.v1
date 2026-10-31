@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../src/aai-web.ts', import.meta.url), 'utf8
 const transpiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission } = await import(
+const { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission, isAllowedPublicWebQuery } = await import(
   'data:text/javascript;base64,' + Buffer.from(transpiled).toString('base64')
 );
 
@@ -60,13 +60,23 @@ test('ordinary conversations, sensitive data, and family matters stay off the we
   }
 });
 
-test('server honors no-web constraints beyond the keyword router', () => {
+test('server honors no-web constraints before exposing native tools', () => {
   const server = readFileSync(new URL('../src/chat.ts', import.meta.url), 'utf8');
   assert.match(server, /const webSearchOptedOut = hasWebSearchOptOut\(message\)/);
   assert.match(server, /if \(webSearchOptedOut\) \{/);
   assert.match(server, /Tanpa pencarian web, sesuai permintaanmu/);
-  assert.match(server, /Jangan mengaku memakai Tavily, Exa/);
-  assert.match(server, /if \(webDecision.search && webSearchAllowed\)/);
+  assert.match(server, /if \(webPermissionGranted && !webSearchOptedOut && hasSearchProvider\)/);
+  assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
+});
+
+test('model-generated web queries are validated before leaving AAi', () => {
+  assert.equal(isAllowedPublicWebQuery('Kapan Node.js versi 24 dirilis?', 'Node.js v24 release official'), true);
+  assert.equal(isAllowedPublicWebQuery('Jangan cari web. Jelaskan saja.', 'Node.js release'), false);
+  assert.equal(isAllowedPublicWebQuery('Bagaimana kabar istriku?', 'cari saran keluarga'), false);
+  assert.equal(isAllowedPublicWebQuery('Tolong cek ini sk-example123456789', 'Node.js release'), false);
+  assert.equal(isAllowedPublicWebQuery('Cari sumber publik', 'api key milikku: sk-example123456789'), false);
+  assert.equal(isAllowedPublicWebQuery('Cari sumber resmi', '  '), false);
+  assert.equal(isAllowedPublicWebQuery('Cari sumber resmi', 'nomor rekening 123456789012'), false);
 });
 
 test('an explicit web permission gate is fail-closed before any provider call', () => {

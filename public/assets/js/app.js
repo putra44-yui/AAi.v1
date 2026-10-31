@@ -1907,6 +1907,34 @@ async function processStream(response, streamId, onDone) {
       return;
     }
 
+    // A streamed first-pass answer can turn into a real tool request.
+    // Move its public opening into the compact process panel, then start a
+    // clean final reply after the tool result arrives.
+    if (parsed.phase === 'tool_switch') {
+      clearStreamingRenderSchedule();
+      fullText = '';
+      firstToken = true;
+      streamingNode = null;
+      streamingCommittedLength = 0;
+      if (bubbleEl) {
+        bubbleEl.classList.add('stream-cursor');
+        bubbleEl.innerHTML = '<div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">'
+          + '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+      }
+      if (activityEl) {
+        activityEl.hidden = false;
+        activityEl.open = true;
+        if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
+        updateActivityClock();
+      }
+      if (prefaceEl && typeof parsed.message === 'string' && parsed.message.trim()) {
+        prefaceEl.textContent = parsed.message.slice(0, 240);
+        prefaceEl.hidden = false;
+      }
+      scrollBottom();
+      return;
+    }
+
     if (parsed.phase === 'progress') {
       if (activityEl && activityListEl && typeof parsed.message === 'string') {
         activityEl.hidden = false;

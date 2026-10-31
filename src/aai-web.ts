@@ -29,6 +29,20 @@ export function hasWebSearchOptOut(message: string): boolean {
   const normalized = String(message || '').replace(/\s+/g, ' ').trim();
   return NO_WEB_RESTRICTIONS.some(pattern => pattern.test(normalized));
 }
+
+// The model may choose a search query, but only public, non-sensitive text is eligible.
+// Check BOTH the user's message and the generated query to avoid exporting private context.
+export function isAllowedPublicWebQuery(userMessage: string, query: string): boolean {
+  const clean = String(query || '').replace(/\s+/g, ' ').trim();
+  if (clean.length < 3 || clean.length > 240) return false;
+  return !hasWebSearchOptOut(userMessage)
+    && !BLOCKED_SECRETS.test(userMessage)
+    && !BLOCKED_SECRETS.test(clean)
+    && !PRIVATE_TOPIC.test(userMessage)
+    && !PRIVATE_TOPIC.test(clean)
+    && !/\b\d{8,}\b/.test(clean)
+    && !/[\r\n]/.test(clean);
+}
 const EXPLICIT_SEARCH = /(?:cari(?:kan)?\s+(?:di\s+)?(?:web|internet|google|online|sumber|referensi|berita|informasi|aturan)|(?:search|browse|googling|telusuri)\s+(?:di\s+)?(?:web|internet|online|tentang)|(?:cek|periksa|verifikasi|carikan)\s+(?:sumber resmi|berita terbaru|di web|di internet)|(?:tolong|coba)\s+(?:cari|telusuri)\s+(?:sumber|referensi|berita))/i;
 const FRESH_QUERY = /(?:terbaru|terkini|hari ini|kemarin|sekarang|saat ini|minggu ini|bulan ini|tahun ini|update terbaru|rilis terbaru|masih berlaku|sudah berubah|jadwal|harga|tarif|kurs|cuaca|berita|peraturan|undang-undang|pkpu|putusan mk|siapa (?:presiden|menteri|gubernur|kepala)|pengumuman terbaru)/i;
 const INFO_REQUEST = /(?:\b(?:apa|siapa|berapa|kapan|dimana|bagaimana|apakah|cek|tolong|cari|jelaskan|daftar|bandingkan|verifikasi)\b|\?)/i;

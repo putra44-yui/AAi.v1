@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v26/);
+  assert.match(sw, /aai-shell-v27/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -91,22 +91,26 @@ test('root edits skip nonexistent parent validation', () => {
 });
 
 
-test('Web search is server-side and progress is tied to actual results', () => {
+test('Native web search stays server-side and progress reflects real tool results', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   const web = read('src/aai-web.ts');
-  assert.match(server, /collectWebSources\(webDecision/);
-  assert.match(server, /phase: 'progress'/);
+  const tools = read('src/aai-tools.ts');
+  assert.match(server, /collectWebSources\(decision/);
+  assert.match(server, /addNativeToolDeltas\(/);
+  assert.match(server, /tool_choice: requestedWebDecision\.explicit \? 'required' : 'auto'/);
+  assert.match(server, /role: 'tool'/);
+  assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
+  assert.match(tools, /name: 'search_web'/);
   assert.match(web, /env, 'TAVILY_API_KEY'/);
   assert.match(web, /env, 'EXA_API_KEY'/);
   const wrangler = JSON.parse(read('wrangler.jsonc'));
   assert.equal(wrangler.ratelimits[0].name, 'AAI_WEB_SEARCH_LIMITER');
-  assert.match(server, /webSearchAllowed/);
+  assert.match(server, /withinQuota/);
   assert.doesNotMatch(client, /TAVILY_API_KEY|EXA_API_KEY/);
   assert.match(client, /parsed\.phase === 'progress'/);
   assert.doesNotMatch(client, /Persona AI/);
 });
-
 test('AAi displays measured collapsible activity and readable named source links', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
@@ -119,21 +123,21 @@ test('AAi displays measured collapsible activity and readable named source links
   assert.match(css, /content: '↗'/);
 });
 
-test('AAi streams an honest preface, icon steps, and an automatically saved summary', () => {
+test('AAi promotes model-generated opening text into the compact tool activity', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.ok(server.includes("phase: 'preface'"), 'Server must send a preface before tool work');
-  assert.ok(server.includes("phase: 'progress'"), 'Server must stream real milestones');
-  assert.ok(server.includes('Merangkum sumber dan menyusun jawaban'));
-  assert.ok(client.includes("parsed.phase === 'preface'"));
+  assert.ok(server.includes("phase: 'tool_switch'"));
+  assert.ok(server.includes("phase: 'progress'"));
+  assert.ok(server.includes('Menyusun jawaban dari hasil yang tersedia'));
+  assert.ok(client.includes("parsed.phase === 'tool_switch'"));
+  assert.ok(client.includes('clearStreamingRenderSchedule()'));
   assert.ok(client.includes('renderActivityStepHTML'));
   assert.ok(client.includes('prefaceEl?.textContent'));
   assert.ok(client.includes('buildStoredActivityPanelHTML(messageId)'));
   assert.ok(css.includes('.aai-activity-step-icon'));
   assert.ok(css.includes('.aai-preface'));
 });
-
 test('AAi keeps the preface inside the collapsible activity, not outside the answer', () => {
   const client = read('public/assets/js/app.js');
   assert.ok(client.includes('return `<details class="aai-activity is-complete aai-saved-activity">'));
@@ -146,20 +150,19 @@ test('AAi keeps the preface inside the collapsible activity, not outside the ans
   assert.ok(!client.includes('>Sebentar, aku cek dulu, ya. ✨</p>'));
 });
 
-test('AAi asks its selected LLM for tentative knowledge before web tool evidence', () => {
+test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
-  assert.ok(server.includes('async function generateAAiKnowledgeProbe('));
-  assert.ok(server.includes('max_tokens: 200'));
-  assert.ok(server.includes('message: probe.initial'));
-  assert.ok(server.includes("step: 'assess'"));
-  assert.ok(server.includes("step: 'strategy'"));
-  assert.ok(server.includes('if (webDecision.search && webSearchAllowed)'));
-  assert.ok(!server.includes('const preface = webDecision.search'));
+  assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
+  assert.ok(server.includes("tool_choice: requestedWebDecision.explicit ? 'required' : 'auto'"));
+  assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
+  assert.ok(server.includes('shouldRequestFinalAnswer = false'));
+  assert.ok(server.includes("providerPayload.tool_choice = 'none'"));
+  assert.ok(server.includes("phase: 'tool_switch'"));
+  assert.ok(!server.includes('generateAAiKnowledgeProbe'));
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
   assert.ok(client.includes("strategy: 'fa-compass'"));
 });
-
 test('AAi streams sanitized Markdown without reprocessing settled blocks', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
@@ -178,19 +181,27 @@ test('AAi streams sanitized Markdown without reprocessing settled blocks', () =>
   assert.equal(boundary('```js\nconst x = 1;\n```\n\nTeks'), 24);
 });
 
-test('web tool permission is explicit, off by default, and checked on the server', () => {
+test('web tool permission is explicit, off by default, and enforced before tool exposure', () => {
   const client = read('public/assets/js/app.js');
   const html = read('public/index.html');
   const server = read('src/chat.ts');
   const policy = read('src/aai-web.ts');
   assert.match(client, /aai_web_tool_permission/);
   assert.match(client, /let currentWebPermission = localStorage\.getItem\('aai_web_tool_permission'\) === 'allow' \? 'allow' : 'deny'/);
-  assert.equal((client.match(/web_permission: currentWebPermission/g) || []).length, 3, 'Send/edit/regenerate all carry the permission');
+  assert.equal((client.match(/web_permission: currentWebPermission/g) || []).length, 3);
   assert.match(html, /role="menuitemcheckbox" aria-checked="false"/);
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /applyWebToolPermission\(requestedWebDecision, requestBody\.value\.webPermission\)/);
-  assert.match(server, /if \(webDecision\.search && webSearchAllowed\)/);
-  assert.match(policy, /permission === 'allow' \? decision : \{ search: false/);
+  assert.match(server, /if \(webPermissionGranted && !webSearchOptedOut && hasSearchProvider\)/);
+  assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
+  assert.match(policy, /export function isAllowedPublicWebQuery/);
+});
+
+test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
+  const prompt = read('src/aai-context.ts');
+  assert.match(prompt, /Jangan memperlakukan percakapan seperti kuis/);
+  assert.match(prompt, /untuk ajakan diskusi/);
+  assert.match(prompt, /Jangan membatasi panjang jawaban secara kaku/);
+  assert.doesNotMatch(prompt, /jawaban langsung ke inti, jelas, dan tidak berputar-putar/);
 });
