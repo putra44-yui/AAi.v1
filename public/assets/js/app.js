@@ -782,8 +782,9 @@ function setSendBtn(mode) {
 
   if (mode === 'stop') {
     buttons.forEach(btn => {
-      btn.innerHTML = '⏹';
-      btn.title = 'Hentikan';
+      btn.innerHTML = '<i class="fas fa-stop" aria-hidden="true"></i>';
+      btn.title = 'Hentikan respons';
+      btn.setAttribute('aria-label', 'Hentikan respons');
       btn.classList.add('stop-mode');
       btn.onclick = () => {
         if (abortController) abortController.abort();
@@ -792,8 +793,9 @@ function setSendBtn(mode) {
     updateMobileSendVisibility(true);
   } else {
     buttons.forEach(btn => {
-      btn.innerHTML = '▶';
-      btn.title = 'Kirim';
+      btn.innerHTML = '<i class="fas fa-arrow-up" aria-hidden="true"></i>';
+      btn.title = 'Kirim pesan';
+      btn.setAttribute('aria-label', 'Kirim pesan');
       btn.classList.remove('stop-mode');
       btn.onclick = handleSend;
     });
@@ -3404,7 +3406,7 @@ async function handleSend() {
     document.getElementById('filePreview').classList.remove('fading-out');
   } finally {
     sendBtn.disabled = false;
-    sendBtn.innerHTML = originalHTML;
+    if (!sendBtn.classList.contains('stop-mode')) sendBtn.innerHTML = originalHTML;
   }
 }
 
@@ -3483,11 +3485,66 @@ async function sendCompactCheckpoint() {
   sendMessage('[COMPACT_CHECKPOINT_REQUEST]');
 }
 
+function closeComposerMenu({ restoreFocus = false } = {}) {
+  const menu = document.getElementById('composerActionMenu');
+  const button = document.getElementById('composerPlusBtn');
+  if (!menu || !button) return;
+  menu.hidden = true;
+  button.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) button.focus({ preventScroll: true });
+}
+
+function toggleComposerMenu() {
+  const menu = document.getElementById('composerActionMenu');
+  const button = document.getElementById('composerPlusBtn');
+  if (!menu || !button) return;
+  const willOpen = menu.hidden;
+  if (!willOpen) {
+    closeComposerMenu({ restoreFocus: true });
+    return;
+  }
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function runComposerAction(action) {
+  closeComposerMenu();
+  if (action === 'upload') {
+    document.getElementById('fileInput')?.click();
+  } else if (action === 'compact') {
+    void sendCompactCheckpoint();
+  }
+}
+
 function initComposerUI() {
   const messageInput = document.getElementById('messageInput');
   if (messageInput && !messageInput.dataset.aaiBound) {
     messageInput.addEventListener('input', updateMobileSendVisibility);
     messageInput.dataset.aaiBound = 'true';
+  }
+
+  const menu = document.getElementById('composerActionMenu');
+  if (menu && !menu.dataset.aaiMenuBound) {
+    menu.dataset.aaiMenuBound = 'true';
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('.composer-plus-wrap')) closeComposerMenu();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !menu.hidden) {
+        event.preventDefault();
+        closeComposerMenu({ restoreFocus: true });
+      }
+    });
+    menu.addEventListener('keydown', event => {
+      const buttons = Array.from(menu.querySelectorAll('button'));
+      const index = buttons.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const offset = event.key === 'ArrowDown' ? 1 : -1;
+        buttons[(index + offset + buttons.length) % buttons.length]?.focus();
+      }
+    });
   }
 
   updateModeLabel();

@@ -1446,20 +1446,37 @@ body.desktop-sidebar-hidden #topbarTitle {
   <div class="input-area">
     <div id="filePreview" class="file-preview-container"></div>
     <div class="input-wrap" id="inputWrap">
-      <textarea id="messageInput" rows="1" placeholder="Tanya, cerita, atau mulai dari sebuah ide..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
-      <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
-      <div class="input-controls-row">
-        <div class="aai-composer-hint"><i class="fas fa-magic"></i><span>Teman berpikir &amp; berkarya</span></div>
-        <div class="aai-control-spacer"></div>
-        <div class="upload-container">
-          <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" style="display:none;">
-          <button class="upload-btn" onclick="document.getElementById('fileInput').click()" title="Lampirkan File/Gambar" aria-label="Lampirkan file"><i class="fas fa-paperclip"></i></button>
-        </div>
-        <button class="quick-compact-btn" id="compactBtn" onclick="sendCompactCheckpoint()" title="Ringkas konteks + checkpoint">
-          <i class="fas fa-compress-alt"></i><span class="compact-label">Compact</span>
+      <div class="composer-plus-wrap">
+        <button type="button" class="composer-plus-btn" id="composerPlusBtn"
+                onclick="toggleComposerMenu()" title="Lampiran dan Compact"
+                aria-label="Opsi tambahan: lampirkan file atau Compact"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="composerActionMenu">
+          <i class="fas fa-plus" aria-hidden="true"></i>
         </button>
-        <button class="send-btn" id="sendBtn" onclick="handleSend()" title="Kirim pesan" aria-label="Kirim pesan"><i class="fas fa-arrow-up"></i></button>
+        <div class="composer-action-menu" id="composerActionMenu" role="menu"
+             aria-label="Opsi tambahan" hidden>
+          <button type="button" role="menuitem" class="composer-menu-action"
+                  onclick="runComposerAction('upload')">
+            <span class="composer-action-icon"><i class="fas fa-paperclip" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Lampirkan file</strong><small>Foto, PDF, atau dokumen</small></span>
+          </button>
+          <button type="button" role="menuitem" class="composer-menu-action"
+                  id="compactBtn" onclick="runComposerAction('compact')">
+            <span class="composer-action-icon"><i class="fas fa-compress-alt" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Compact</strong><small>Ringkas konteks percakapan</small></span>
+          </button>
+          <p class="composer-menu-note">AAi bisa keliru — periksa kembali informasi penting.</p>
+        </div>
       </div>
+      <textarea id="messageInput" rows="1" aria-label="Pesan untuk AAi"
+                placeholder="Tanya, cerita, atau mulai dari sebuah ide..."
+                onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
+      <input type="file" id="fileInput" multiple
+             accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" hidden>
+      <button type="button" class="send-btn" id="sendBtn" onclick="handleSend()"
+              title="Kirim pesan" aria-label="Kirim pesan">
+        <i class="fas fa-arrow-up" aria-hidden="true"></i>
+      </button>
     </div>
     <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
     <p class="composer-note">AAi bisa keliru — periksa kembali informasi penting.</p>
