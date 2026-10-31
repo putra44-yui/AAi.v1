@@ -1480,3 +1480,14 @@ body:not(.aai-login-page) .aai-activity-step-text {
   body:not(.aai-login-page) .aai-activity-list li.aai-activity-step { gap: 9px; }
   body:not(.aai-login-page) .aai-activity-step-icon { width: 28px; flex-basis: 28px; height: 28px; }
 }
+
+/* The conversational preface is part of the collapsible activity, never a second answer. */
+body:not(.aai-login-page) .aai-activity .aai-preface {
+  margin: 8px 0 13px;
+  padding: 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  font-weight: 460;
+  color: #77708d;
+  letter-spacing: 0;
+}

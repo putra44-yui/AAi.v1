@@ -1060,8 +1060,9 @@ function buildStoredActivityPanelHTML(messageId) {
   const intro = typeof trace.preface === 'string' && trace.preface.trim()
     ? '<p class="aai-preface">' + escHtml(trace.preface) + '</p>'
     : '';
-  return intro + `<details class="aai-activity is-complete aai-saved-activity">
+  return `<details class="aai-activity is-complete aai-saved-activity">
     <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    ${intro}
     <ul class="aai-activity-list">${trace.steps.map(renderActivityStepHTML).join('')}</ul>
   </details>`;
 }
@@ -1081,6 +1082,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
     : '';
   const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" hidden>
     <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    <p class="aai-preface" id="preface_${streamId}" hidden></p>
     <ul class="aai-activity-list" id="activity_list_${streamId}"></ul>
   </details>`;
 
@@ -1089,7 +1091,6 @@ function buildStreamBubbleHTML(streamId, timeStr) {
       ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
-      <p class="aai-preface" id="preface_${streamId}">Sebentar, aku cek dulu, ya. ✨</p>
       ${activityHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">

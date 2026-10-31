@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v22/);
+  assert.match(sw, /aai-shell-v23/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -132,4 +132,16 @@ test('AAi streams an honest preface, icon steps, and an automatically saved summ
   assert.ok(client.includes('buildStoredActivityPanelHTML(messageId)'));
   assert.ok(css.includes('.aai-activity-step-icon'));
   assert.ok(css.includes('.aai-preface'));
+});
+
+test('AAi keeps the preface inside the collapsible activity, not outside the answer', () => {
+  const client = read('public/assets/js/app.js');
+  assert.ok(client.includes('return `<details class="aai-activity is-complete aai-saved-activity">'));
+  const storedPanel = client.indexOf('return `<details class="aai-activity is-complete aai-saved-activity">');
+  const introInside = client.indexOf('${intro}', storedPanel);
+  const listInside = client.indexOf('<ul class="aai-activity-list">', introInside);
+  assert.ok(storedPanel >= 0 && introInside > storedPanel && listInside > introInside);
+  assert.ok(client.includes('<p class="aai-preface" id="preface_${streamId}" hidden></p>'));
+  assert.ok(!client.includes('return intro + `<details'));
+  assert.ok(!client.includes('>Sebentar, aku cek dulu, ya. ✨</p>'));
 });
