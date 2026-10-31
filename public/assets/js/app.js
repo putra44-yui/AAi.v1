@@ -24,6 +24,7 @@ let activeVersionMap = {};
 let currentUtterance = null;
 let isSpeaking       = false;
 let abortController  = null;
+let chatMutationRunning = false;
 let selectedFiles    = [];
 let msgboxState = null;
 let pendingFriendSuggestion = null;
@@ -64,6 +65,29 @@ function buildSessionFallbackTitle(rawTitle = '') {
   return normalized.length > 42 ? `${normalized.slice(0, 39).trim()}...` : normalized;
 }
 
+function buildTopicSessionTitle(rawMessage = '') {
+  const stopwords = new Set([
+    'aku', 'saya', 'kamu', 'kau', 'dia', 'kami', 'kita', 'mereka', 'yang', 'dan',
+    'atau', 'dari', 'untuk', 'dengan', 'pada', 'dalam', 'jadi', 'bukan', 'tidak',
+    'gak', 'nggak', 'enggak', 'ada', 'ini', 'itu', 'tadi', 'sekarang', 'sudah',
+    'belum', 'bisa', 'mau', 'ingin', 'perlu', 'kalau', 'karena', 'tapi', 'namun',
+    'apakah', 'bagaimana', 'kenapa', 'mengapa', 'apa', 'sih', 'dong', 'deh',
+    'ya', 'nih', 'lah', 'loh', 'dulu', 'baru', 'lagi', 'saja', 'aja',
+    'tolong', 'coba', 'buat', 'bikin', 'kasih', 'minta', 'bantu',
+    'di', 'ke', 'punya', 'jelaskan', 'menjelaskan', 'dijelaskan',
+    'membahas', 'bersama', 'sedang', 'sebuah',
+    'the', 'a', 'an', 'is', 'are', 'i', 'you', 'we', 'and', 'for', 'with', 'to', 'of', 'in'
+  ]);
+  const words = (String(rawMessage).match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
+    .filter(word => word.length > 1 && !stopwords.has(word.toLowerCase()) &&
+      !/^a?(?:wk){2,}w?k?$/i.test(word) && !/^ak(?:wk){2,}$/i.test(word)).slice(0, 5);
+  if (!words.length) return 'Obrolan Bersama AAi';
+  if (words.length === 1) words.unshift('Tentang');
+  while (words.join(' ').length > 42 && words.length > 2) words.pop();
+  const title = words.join(' ');
+  return buildSessionFallbackTitle(title.charAt(0).toUpperCase() + title.slice(1));
+}
+
 function isProvisionalSessionTitle(rawTitle = '') {
   const normalized = String(rawTitle || '').replace(/\s+/g, ' ').trim();
   return !normalized || normalized === 'Memuat sesi...' || normalized === 'Obrolan baru';
@@ -71,7 +95,7 @@ function isProvisionalSessionTitle(rawTitle = '') {
 
 function buildSessionTitleFromMessages(messages = []) {
   const firstUserMessage = messages.find(message => message.role === 'user' && String(message.content || '').trim());
-  return buildSessionFallbackTitle(firstUserMessage?.content || '');
+  return buildTopicSessionTitle(firstUserMessage?.content || '');
 }
 
 function upsertSessionSnapshot(nextSession, { makeFirst = false } = {}) {
@@ -1224,9 +1248,9 @@ function renderStreamErrorUI(streamId, errorMessage, retryMeta = null) {
   if (sessionId) {
     aiRow.setAttribute('data-retry-session-id', sessionId);
     persistCurrentSession(sessionId, {
-      title: buildSessionFallbackTitle(getLastUserPromptText()),
-      makeFirst: true,
-      refreshSidebar: true
+      title: sessions.find(session => session.id === sessionId)?.title || buildTopicSessionTitle(getLastUserPromptText()),
+      makeFirst: !sessions.some(session => session.id === sessionId),
+      refreshSidebar: !sessions.some(session => session.id === sessionId)
     });
   }
 
@@ -1477,7 +1501,7 @@ async function ensureSessionVisibleInSidebar(sessionId) {
 
   const optimistic = upsertSessionSnapshot({
     id: normalizedId,
-    title: buildSessionFallbackTitle(getLastUserPromptText()),
+    title: buildTopicSessionTitle(getLastUserPromptText()),
     updated_at: new Date().toISOString()
   }, { makeFirst: true });
 
@@ -1520,7 +1544,7 @@ async function processStream(response, streamId, onDone) {
     const knownSession = sessions.find(item => item.id === parsed.session_id) || null;
     const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
     const synced = persistCurrentSession(parsed.session_id, {
-      title: shouldRefreshTitle ? buildSessionFallbackTitle(getLastUserPromptText()) : null,
+      title: parsed.session_title || (shouldRefreshTitle ? buildTopicSessionTitle(getLastUserPromptText()) : null),
       makeFirst: !knownSession,
       refreshSidebar: shouldRefreshTitle || !knownSession
     });
@@ -1747,6 +1771,13 @@ async function processStream(response, streamId, onDone) {
     // Init event hanya untuk sinkronisasi session, skip processing
     if (parsed.phase === 'init') {
       if (parsed.session_id) syncSessionFromStream(parsed);
+      if (parsed.user_message_id) {
+        streamUserMessageId = parsed.user_message_id;
+        const unsavedUserRows = Array.from(document.querySelectorAll('#chatArea .msg-row.user'))
+          .filter(row => !(row.getAttribute('data-id') || '').trim());
+        const pendingUserRow = unsavedUserRows[unsavedUserRows.length - 1];
+        if (pendingUserRow) pendingUserRow.setAttribute('data-id', parsed.user_message_id);
+      }
       return;
     }
 
@@ -1806,6 +1837,9 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.done) {
+      if (!parsed.message_id || !parsed.user_message_id) {
+        throw new Error('Server tidak mengirim ID jawaban yang tersimpan. Coba lagi.');
+      }
       if (parsed.final_text && (!fullText.trim() || parsed.replace_stream_text || parsed.file_job)) {
         fullText = String(parsed.final_text || '').trim();
         firstToken = false;
@@ -1880,21 +1914,15 @@ async function processStream(response, streamId, onDone) {
     throw streamError;
   }
 
-  // FALLBACK: jika stream terputus tanpa event `done` tapi sudah ada teks
-  if (!gotDone && fullText.trim()) {
-    console.warn('[processStream] Stream ended without done event. Fallback triggered.');
-    flushStreamingRender(true);
-    stopPreviewTicker('', true);
-    actionsEl.style.display = 'flex';
-    streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-    streamRow.setAttribute('data-preview', previewData ? encodeURIComponent(JSON.stringify(previewData)) : '');
-    onDone({
-      done: true,
+  // A response is durable only after the server sends the done event with both IDs.
+  // A partial stream must remain retryable, never enter the message tree as a phantom answer.
+  if (!gotDone) {
+    const error = new Error('Koneksi terputus sebelum jawaban tersimpan. Silakan coba lagi.');
+    error.streamMeta = {
       session_id: streamSessionId || currentSessionId || null,
-      message_id: null,
       user_message_id: streamUserMessageId || null
-    }, fullText, previewData);
-    scrollBottom();
+    };
+    throw error;
   }
 
   setTimeout(scheduleStickyCodeHeadersUpdate, 180);
@@ -1904,10 +1932,15 @@ async function processStream(response, streamId, onDone) {
 // KIRIM PESAN BARU
 // ══════════════════════════════════════════
 async function sendMessage(text, files = []) {
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
   const area = document.getElementById('chatArea');
   const isCompactRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(text);
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
 
+  const selectedBranch = buildActiveBranch();
+  const parentMessageId = selectedBranch.length ? selectedBranch[selectedBranch.length - 1].id : null;
+  const requestLoadSerial = sessionLoadSerial;
   appendMessage('user', text, null, { files: files });
   scrollBottom();
 
@@ -1934,6 +1967,7 @@ async function sendMessage(text, files = []) {
         persona_name: currentPersona,
         model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
+        parent_id: parentMessageId,
         files: files
       })
     });
@@ -1949,11 +1983,12 @@ async function sendMessage(text, files = []) {
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
+      if (requestLoadSerial !== sessionLoadSerial) return; // User has opened another session.
       if (resolvedSessionId) {
         const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
         const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
         persistCurrentSession(resolvedSessionId, {
-          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
+          title: parsed.session_title || (shouldRefreshTitle ? buildTopicSessionTitle(text) : null),
           makeFirst: !knownSession,
           refreshSidebar: shouldRefreshTitle || !knownSession
         });
@@ -1962,10 +1997,9 @@ async function sendMessage(text, files = []) {
       const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
       if (userRows.length > 0)
         userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
-      const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
-        parent_id: lastAI?.id || null, created_at: new Date().toISOString()
+        parent_id: parentMessageId, created_at: new Date().toISOString()
       });
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
@@ -1976,6 +2010,15 @@ async function sendMessage(text, files = []) {
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
+      if (parentMessageId) {
+        const hasSibling = currentMessages.some(message =>
+          message.role === 'user' && message.parent_id === parentMessageId &&
+          message.id !== parsed.user_message_id
+        );
+        activeVersionMap[parentMessageId] = parsed.user_message_id;
+        saveActiveVersions();
+        if (hasSibling) renderMessageTree();
+      }
 
       if (isCompactRequest) {
         currentSessionMeta = {
@@ -1992,6 +2035,7 @@ async function sendMessage(text, files = []) {
     clearTimeout(timeoutId);
     renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -1999,81 +2043,74 @@ async function sendMessage(text, files = []) {
 // ══════════════════════════════════════════
 // REGENERATE
 // ══════════════════════════════════════════
-function regenerateAI(btn) {
-  const aiRow   = btn.closest('.msg-row.assistant');
-  const aiMsgId = aiRow.getAttribute('data-id');
-  let rawUser = '', userMsgId = null;
+function getRegenerationTarget(aiRow) {
+  if (!aiRow) return null;
+  const assistantId = aiRow.getAttribute('data-id') || null;
+  const assistant = currentMessages.find(message => message.id === assistantId);
+  const userMessageId = aiRow.getAttribute('data-retry-user-message-id') ||
+    assistant?.parent_id || null;
+  const userMessage = currentMessages.find(message => message.id === userMessageId);
+  const userRow = Array.from(document.querySelectorAll('#chatArea .msg-row.user'))
+    .find(row => row.getAttribute('data-id') === userMessageId);
+  const rawUser = userMessage?.content ||
+    (userRow ? safeDecodeURIComponent(userRow.getAttribute('data-raw') || '') : '');
 
-  let el = aiRow.previousElementSibling;
-  while (el) {
-    if (el.classList.contains('user')) {
-      rawUser   = decodeURIComponent(el.getAttribute('data-raw') || '');
-      userMsgId = el.getAttribute('data-id') || null;
-      break;
-    }
-    el = el.previousElementSibling;
+  // Only an ID tied to the persisted user message is safe for regeneration.
+  if (!userMessageId || !rawUser) return null;
+  return { text: rawUser, userMessageId, assistantId };
+}
+
+function regenerateAI(btn) {
+  const aiRow = btn.closest('.msg-row.assistant');
+  const target = getRegenerationTarget(aiRow);
+  if (!target) {
+    void showAlertMessage('Pesan asli belum tersinkron. Muat ulang sesi dan coba lagi.', 'Tidak Bisa Mengulang');
+    return;
   }
-  if (!userMsgId && aiMsgId) {
-    const aiMsg = currentMessages.find(m => m.id === aiMsgId);
-    userMsgId = aiMsg?.parent_id || null;
-    if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
-  }
-  if (rawUser) executeRegenerate(rawUser, userMsgId, aiMsgId, aiRow);
+  void executeRegenerate(target.text, target.userMessageId, target.assistantId, aiRow);
 }
 
 async function executeRegenerate(text, userMessageId = null, assistantMessageId = null, aiRow = null) {
+  if (!userMessageId || !currentSessionId) {
+    await showAlertMessage('Sesi atau pesan induk belum tersimpan. Muat ulang sesi.', 'Tidak Bisa Mengulang');
+    return;
+  }
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
+
   const area = document.getElementById('chatArea');
   const streamId = 'regen_' + Date.now();
-
-  // Reuse existing assistant row for smooth UX during streaming
-  if (aiRow) {
-    prepareAssistantRowForStreaming(aiRow, streamId);
-  } else if (assistantMessageId) {
-    const rows = area.querySelectorAll('.msg-row.assistant');
-    let found = false;
-    for (let r of rows) {
-      if (r.getAttribute('data-id') === assistantMessageId) {
-        prepareAssistantRowForStreaming(r, streamId);
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      if (userMessageId) {
-        const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
-        if (userRow) {
-          userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
-        } else {
-          area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-        }
-      } else {
-        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-      }
-    }
-  } else {
-    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    if (userMessageId) {
-      const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
-      if (userRow) {
-        userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
-      } else {
-        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-      }
-    } else {
-      area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-    }
-  }
-  scrollBottom();
-
-  setSendBtn('stop');
-  abortController = new AbortController();
+  const requestLoadSerial = sessionLoadSerial;
   const pinnedSessionId = aiRow?.getAttribute('data-retry-session-id') || null;
   const effectiveSessionId = pinnedSessionId || currentSessionId;
   const frozenPersona =
     aiRow?.getAttribute('data-persona') ||
     (assistantMessageId ? currentMessages.find(m => m.id === assistantMessageId)?.persona : null) ||
     currentPersona;
+
+  // Keep the saved response visible while the next version is generated.
+  // Only an unsaved error bubble may be reused.
+  const reuseFailedBubble = Boolean(aiRow && !aiRow.getAttribute('data-id'));
+  if (reuseFailedBubble) {
+    prepareAssistantRowForStreaming(aiRow, streamId);
+  } else {
+    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const html = buildStreamBubbleHTML(streamId, timeStr);
+    const userRow = Array.from(area.querySelectorAll('.msg-row.user'))
+      .find(row => row.getAttribute('data-id') === userMessageId);
+    if (aiRow) aiRow.insertAdjacentHTML('afterend', html);
+    else if (userRow) userRow.insertAdjacentHTML('afterend', html);
+    else area.insertAdjacentHTML('beforeend', html);
+  }
+
+  const streamRow = document.getElementById(streamId);
+  if (streamRow) {
+    streamRow.setAttribute('data-retry-session-id', effectiveSessionId);
+    streamRow.setAttribute('data-retry-user-message-id', userMessageId);
+  }
+  scrollBottom();
+  setSendBtn('stop');
+  abortController = new AbortController();
 
   try {
     const res = await fetch('/api/chat', {
@@ -2085,34 +2122,37 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         session_id: effectiveSessionId,
         user_id: currentUser.id,
         persona_name: frozenPersona,
+        model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
-        consistency_mode: true,
         user_message_id: userMessageId
-        // NO assistant_message_id — creates a new sibling for version navigation
       })
     });
 
     if (!res.ok) {
-      let errMsg = `Server error ${res.status}`;
-      try { const d = await res.json(); errMsg = d.error || errMsg; }
-      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      let errMsg = 'Server error ' + res.status;
+      try { const body = await res.json(); errMsg = body.error || errMsg; } catch {}
       throw new Error(errMsg);
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
-      const resolvedSessionId = parsed.session_id || effectiveSessionId || currentSessionId;
-      if (resolvedSessionId) {
-        const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
-        const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
-        persistCurrentSession(resolvedSessionId, {
-          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
-          makeFirst: !knownSession,
-          refreshSidebar: shouldRefreshTitle || !knownSession
+      if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== effectiveSessionId) return;
+      if (!currentMessages.some(m => m.id === userMessageId)) {
+        const branch = buildActiveBranch();
+        const parent = branch.length ? branch[branch.length - 1].id : null;
+        currentMessages.push({
+          id: userMessageId, role: 'user', content: text,
+          parent_id: parent, created_at: new Date().toISOString()
         });
-        void ensureSessionVisibleInSidebar(resolvedSessionId);
+      }
+      const knownSession = sessions.find(session => session.id === effectiveSessionId) || null;
+      if (parsed.session_title || !knownSession || isProvisionalSessionTitle(knownSession.title)) {
+        persistCurrentSession(effectiveSessionId, {
+          title: parsed.session_title || buildTopicSessionTitle(text),
+          makeFirst: !knownSession,
+          refreshSidebar: true
+        });
       }
 
-      // Push as new sibling message (not update existing)
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: userMessageId, created_at: new Date().toISOString(),
@@ -2122,15 +2162,20 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
-      // Select the new version
-      if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
+      activeVersionMap[userMessageId] = parsed.message_id;
+      saveActiveVersions();
       renderMessageTree();
     });
-
-    } catch (e) {
-    console.error('❌ Regenerate Error:', e);
-    renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
+  } catch (error) {
+    console.error('❌ Regenerate Error:', error);
+    if (requestLoadSerial === sessionLoadSerial) {
+      renderStreamErrorUI(streamId, error.message, {
+        session_id: effectiveSessionId,
+        user_message_id: userMessageId
+      });
+    }
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -2139,34 +2184,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 // TOMBOL "COBA LAGI"
 // ══════════════════════════════════════════
 function retryLastMessage(btn) {
-  const aiRow = btn.closest('.msg-row.assistant');
-  const aiMsgId = aiRow.getAttribute('data-id') || null;
-  const forcedSessionId = aiRow.getAttribute('data-retry-session-id') || null;
-  const fallbackUserMsgId = aiRow.getAttribute('data-retry-user-message-id') || null;
-
-  if (forcedSessionId && currentSessionId !== forcedSessionId) {
-    persistCurrentSession(forcedSessionId, {
-      force: true,
-      title: buildSessionFallbackTitle(getLastUserPromptText()),
-      makeFirst: true,
-      refreshSidebar: true
-    });
-  }
-
-  let el = aiRow.previousElementSibling;
-  while (el) {
-    if (el.classList.contains('user')) {
-      const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
-      const userMsgId = el.getAttribute('data-id') || fallbackUserMsgId || null;
-      if (raw) {
-        // PENTING: Jangan remove aiRow jika aiMsgId null, agar bisa tetap di sesi yang sama
-        // Hanya perbarui eksisting bubble untuk retry
-        executeRegenerate(raw, userMsgId, aiMsgId, aiRow);
-      }
-      return;
-    }
-    el = el.previousElementSibling;
-  }
+  regenerateAI(btn);
 }
 
 // ══════════════════════════════════════════
@@ -2212,69 +2230,47 @@ function cancelEdit(btn) {
 
 async function saveEdit(btn, msgId) {
   const bubble = btn.closest('.bubble');
-  const row    = btn.closest('.msg-row.user');
-  if (!row || !bubble) return;
+  const row = btn.closest('.msg-row.user');
+  if (!row || !bubble || chatMutationRunning) return;
 
-  const newText = bubble.querySelector('textarea').value.trim();
+  const newText = bubble.querySelector('textarea')?.value.trim() || '';
+  const originalMessage = currentMessages.find(message => message.id === msgId && message.role === 'user');
+  if (!originalMessage) {
+    await showAlertMessage('Pesan asli belum ditemukan. Muat ulang sesi lalu coba lagi.', 'Edit Gagal');
+    return;
+  }
   if (!newText) return;
+  if (newText === originalMessage.content.trim()) {
+    cancelEdit(btn);
+    return;
+  }
 
+  // The edit becomes another user-message version, preserving the original
+  // prompt and all its following answers in the history tree.
   bubble.innerHTML = buildUserMessageBodyHTML(newText);
   bubble.classList.remove('is-editing');
   row.classList.remove('editing');
   row.setAttribute('data-raw', encodeURIComponent(newText));
   refreshUserMessageCollapse(row);
 
-  try {
-    const res = await fetch(`/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        edit_message_id: msgId,
-        update_only: true,
-        message: newText,
-        session_id: currentSessionId,
-        user_id: currentUser.id,
-        memory_experiment_mode: currentMemoryExperimentMode,
-        persona_name: currentPersona
-      })
-    });
-    if (!res.ok) throw new Error('Gagal update');
-    const msg = currentMessages.find(m => m.id === msgId);
-    if (msg) msg.content = newText;
-    const refreshedUserRow = row;
-    let refreshedAssistantRow = null;
-    let assistantMsgId = null;
-    if (refreshedUserRow) {
-      let sibling = refreshedUserRow.nextElementSibling;
-      while (sibling) {
-        if (sibling.classList.contains('assistant')) {
-          refreshedAssistantRow = sibling;
-          assistantMsgId = sibling.getAttribute('data-id') || null;
-          break;
-        }
-        if (sibling.classList.contains('user')) break;
-        sibling = sibling.nextElementSibling;
-      }
-    }
-    executeRegenerate(newText, msgId, assistantMsgId, refreshedAssistantRow);
-  } catch (e) {
-    await showAlertMessage(`Gagal menyimpan perubahan: ${e.message}`, 'Edit Gagal');
-    renderMessageTree();
-  }
+  await sendMessageBranched(newText, originalMessage.parent_id, msgId, row);
 }
 
 // ══════════════════════════════════════════
 // KIRIM PESAN DARI EDIT (branched)
 // ══════════════════════════════════════════
-async function sendMessageBranched(text, parentId = null) {
-  const area     = document.getElementById('chatArea');
-  appendMessage('user', text);
-  scrollBottom();
+async function sendMessageBranched(text, parentId = null, editedMessageId = null, editedRow = null) {
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
 
   const streamId = 'branch_' + Date.now();
-  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-  scrollBottom();
+  const area = document.getElementById('chatArea');
+  const editedSessionId = currentSessionId;
+  const requestLoadSerial = sessionLoadSerial;
+  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const streamHtml = buildStreamBubbleHTML(streamId, timeStr);
+  if (editedRow) editedRow.insertAdjacentHTML('afterend', streamHtml);
+  else area.insertAdjacentHTML('beforeend', streamHtml);
 
   setSendBtn('stop');
   abortController = new AbortController();
@@ -2286,23 +2282,24 @@ async function sendMessageBranched(text, parentId = null) {
       signal: abortController.signal,
       body: JSON.stringify({
         message: text,
-        session_id: currentSessionId,
+        session_id: editedSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
         model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
-        parent_id: parentId
+        parent_id: parentId,
+        branch_root: parentId === null
       })
     });
 
     if (!res.ok) {
-      let errMsg = `Server error ${res.status}`;
-      try { const d = await res.json(); errMsg = d.error || errMsg; }
-      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      let errMsg = 'Server error ' + res.status;
+      try { const body = await res.json(); errMsg = body.error || errMsg; } catch {}
       throw new Error(errMsg);
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
+      if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== editedSessionId) return;
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
         parent_id: parentId, created_at: new Date().toISOString()
@@ -2316,13 +2313,50 @@ async function sendMessageBranched(text, parentId = null) {
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
-      if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
+      activeVersionMap[parentId || '__root__'] = parsed.user_message_id;
+      activeVersionMap[parsed.user_message_id] = parsed.message_id;
+      saveActiveVersions();
+      renderMessageTree();
     });
+  } catch (error) {
+    console.error('❌ Branched Message Error:', error);
+    if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== editedSessionId) return;
 
-    } catch (e) {
-    console.error('❌ Branched Message Error:', e);
-    renderStreamErrorUI(streamId, e.message);
+    const pendingId = error.streamMeta?.user_message_id || null;
+    if (pendingId) {
+      // The Worker already saved the edited user version. Keep it available
+      // for retry instead of sending another duplicate user message.
+      if (!currentMessages.some(message => message.id === pendingId)) {
+        currentMessages.push({
+          id: pendingId, role: 'user', content: text,
+          parent_id: parentId, created_at: new Date().toISOString()
+        });
+      }
+      activeVersionMap[parentId || '__root__'] = pendingId;
+      saveActiveVersions();
+      renderMessageTree();
+      const errorRowId = 'edit_retry_' + Date.now();
+      const renderJob = activeRenderJob;
+      const showRetryAfterRender = () => {
+        if (renderJob !== activeRenderJob) return;
+        const editedUserRow = Array.from(area.querySelectorAll('.msg-row.user'))
+          .find(item => item.getAttribute('data-id') === pendingId);
+        if (!editedUserRow) {
+          requestAnimationFrame(showRetryAfterRender);
+          return;
+        }
+        editedUserRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(errorRowId, timeStr));
+        renderStreamErrorUI(errorRowId, error.message, {
+          session_id: editedSessionId, user_message_id: pendingId
+        });
+      };
+      requestAnimationFrame(showRetryAfterRender);
+    } else {
+      renderMessageTree();
+      await showAlertMessage('Edit belum tersimpan: ' + error.message, 'Edit Gagal');
+    }
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -2372,7 +2406,7 @@ async function loadSession(id, options = {}) {
   updateCompactStatus();
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
   currentMessages  = [];
-  activeVersionMap = {};
+  activeVersionMap = restoreActiveVersions(normalizedId);
   document.getElementById('chatArea').innerHTML = `
     <div style="padding:60px;text-align:center;color:var(--text-muted);">
       <i class="fas fa-spinner fa-spin" style="font-size:28px;"></i>
@@ -2549,11 +2583,40 @@ function newChat(options = {}) {
 // ══════════════════════════════════════════
 // MESSAGE TREE
 // ══════════════════════════════════════════
+function activeVersionStorageKey(sessionId) {
+  return 'aai_versions_' + String(currentUser.id) + '_' + String(sessionId || '');
+}
+
+function restoreActiveVersions(sessionId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(activeVersionStorageKey(sessionId)) || '{}');
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveActiveVersions() {
+  if (!currentSessionId) return;
+  try {
+    localStorage.setItem(activeVersionStorageKey(currentSessionId), JSON.stringify(activeVersionMap));
+  } catch (error) {
+    console.warn('[AAi versions] Penyimpanan pilihan versi dilewati:', error);
+  }
+}
+
 function buildActiveBranch() {
   if (!currentMessages.length) return [];
   const allIds = new Set(currentMessages.map(m => m.id));
-  let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
-  if (!current) current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  const roots = currentMessages.filter(m => !m.parent_id || !allIds.has(m.parent_id));
+  const chosenRootId = activeVersionMap.__root__;
+  let current = roots.find(m => m.id === chosenRootId) || null;
+  if (!current) {
+    current = roots.reduce((oldest, m) => {
+      if (!oldest) return m;
+      return new Date(m.created_at) < new Date(oldest.created_at) ? m : oldest;
+    }, null);
+  }
   if (!current) return [];
 
   // Pre-compute descendant counts so we can prefer the deepest live branch
@@ -2591,8 +2654,9 @@ function buildActiveBranch() {
 
 function switchVersion(id) {
   const msg = currentMessages.find(m => m.id === id);
-  if (!msg?.parent_id) return;
-  activeVersionMap[msg.parent_id] = id;
+  if (!msg) return;
+  activeVersionMap[msg.parent_id || '__root__'] = id;
+  saveActiveVersions();
   renderMessageTree(); scrollBottom();
 }
 

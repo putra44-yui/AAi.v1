@@ -94,6 +94,7 @@ interface ParsedChatRequest {
   userId: string | null;
   userMessageId: string | null;
   parentId: string | null;
+  branchRoot: boolean;
   editMessageId: string | null;
   updateOnly: boolean;
   personaName: string;
@@ -139,6 +140,7 @@ type ProviderFetchResult = ProviderFetchSuccess | ProviderFetchFailure;
 interface InitEvent {
   phase: 'init';
   session_id: string;
+  user_message_id: string;
 }
 
 interface TokenEvent {
@@ -152,6 +154,7 @@ interface DoneEvent {
   user_message_id: string;
   persona_used: string;
   model_used: string;
+  session_title?: string;
 }
 
 interface ErrorEvent {
@@ -251,6 +254,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   const userId = readTrimmedString(parsedValue.user_id);
   const userMessageId = readTrimmedString(parsedValue.user_message_id);
   const parentId = readTrimmedString(parsedValue.parent_id);
+  const branchRoot = parsedValue.branch_root === true;
   const editMessageId = readTrimmedString(parsedValue.edit_message_id);
   const updateOnly = parsedValue.update_only === true;
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
@@ -265,6 +269,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       userId,
       userMessageId,
       parentId,
+      branchRoot,
       editMessageId,
       updateOnly,
       personaName,
@@ -399,6 +404,8 @@ type PreparedSession = {
   userMessageId: string;
   message: string;
   history: ProviderMessage[];
+  isNewSession: boolean;
+  provisionalTitle: string;
 };
 type PreparationResult = { ok: true; value: PreparedSession } | { ok: false; response: Response };
 
@@ -464,6 +471,80 @@ async function updateUserMessage(
   });
 }
 
+
+const TITLE_STOPWORDS = new Set([
+  'aku', 'saya', 'kamu', 'kau', 'dia', 'kami', 'kita', 'mereka', 'yang', 'dan', 'atau', 'dari',
+  'untuk', 'dengan', 'pada', 'dalam', 'jadi', 'bukan', 'tidak', 'gak', 'nggak', 'enggak',
+  'ada', 'ini', 'itu', 'tadi', 'sekarang', 'sudah', 'belum', 'bisa', 'mau', 'ingin', 'perlu',
+  'kalau', 'karena', 'tapi', 'namun', 'apakah', 'bagaimana', 'kenapa', 'mengapa', 'apa',
+  'sih', 'dong', 'deh', 'ya', 'nih', 'lah', 'loh', 'dulu', 'baru', 'lagi', 'saja', 'aja',
+  'tolong', 'coba', 'buat', 'bikin', 'kasih', 'minta', 'bantu',
+  'di', 'ke', 'punya', 'jelaskan', 'menjelaskan', 'dijelaskan',
+  'membahas', 'bersama', 'sedang', 'sebuah',
+  'the', 'a', 'an', 'is', 'are', 'i', 'you', 'we', 'and', 'for', 'with', 'to', 'of', 'in',
+]);
+
+function fallbackTopicTitle(message: string): string {
+  const words = (message.match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
+    .filter(word => word.length > 1 && !TITLE_STOPWORDS.has(word.toLowerCase()) &&
+      !/^a?(?:wk){2,}w?k?$/i.test(word) && !/^ak(?:wk){2,}$/i.test(word));
+  const selected = words.slice(0, 5);
+  if (selected.length === 0) return 'Obrolan Bersama AAi';
+  if (selected.length === 1) selected.unshift('Tentang');
+  while (selected.join(' ').length > 42 && selected.length > 2) selected.pop();
+  const title = selected.join(' ');
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
+function cleanGeneratedTitle(rawTitle: string): string | null {
+  const line = rawTitle.split(/\r?\n/)[0]
+    .replace(/^(?:judul(?:\s+sesi)?|title)\s*:\s*/i, '')
+    .replace(/^[\s"'\x60*#]+|[\s"'\x60*#.?!]+$/g, '');
+  const words = line.match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [];
+  if (words.length < 2) return null;
+  return words.slice(0, 5).join(' ').slice(0, 90);
+}
+
+async function generateSessionTitle(
+  message: string, env: RuntimeEnv, apiKey: string, model: string, traceId: string,
+): Promise<string | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': readEnv('OPENROUTER_HTTP_REFERER', env) || DEFAULT_REFERER,
+        'X-Title': readEnv('OPENROUTER_X_TITLE', env) || DEFAULT_TITLE,
+        'X-Trace-Id': traceId,
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0.2,
+        max_tokens: 48,
+        messages: [
+          { role: 'system', content: 'Buat JUDUL sesi percakapan berbahasa Indonesia, tepat 2 sampai 5 kata yang menggambarkan topik utama. Jangan menyalin pembukaan pesan. Balas hanya judul tanpa kutip, emoji, atau penjelasan.' },
+          { role: 'user', content: message.slice(0, 1000) },
+        ],
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== 'object') return null;
+    const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices;
+    const content = choices?.[0]?.message?.content;
+    return typeof content === 'string' ? cleanGeneratedTitle(content) : null;
+  } catch {
+    return null; // Title enrichment never blocks an otherwise successful chat.
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function prepareSession(
   input: ParsedChatRequest, env: RuntimeEnv, traceId: string,
 ): Promise<PreparationResult> {
@@ -475,14 +556,15 @@ async function prepareSession(
   if (!supabase) return preparationError(503, 'Konfigurasi Supabase belum lengkap.', traceId);
 
   let sessionId = input.sessionId;
+  const isNewSession = !sessionId;
+  const provisionalTitle = fallbackTopicTitle(input.message);
   if (sessionId) {
     if (!await checkSessionOwner(supabase, sessionId, input.userId)) {
       return preparationError(404, 'Sesi tidak ditemukan.', traceId);
     }
   } else {
-    const title = input.message.slice(0, 42).trim() || 'Obrolan baru';
     const { data, error } = await supabase.from('sessions')
-      .insert({ user_id: input.userId, title }).select('id').single();
+      .insert({ user_id: input.userId, title: provisionalTitle }).select('id').single();
     if (error) throw error;
     sessionId = data.id;
   }
@@ -507,7 +589,7 @@ async function prepareSession(
     message = data.content;
   } else {
     let parentId = input.parentId;
-    if (!parentId) {
+    if (!parentId && !input.branchRoot) {
       parentId = recent?.[0]?.id ?? null;
     } else {
       const { data: parent, error } = await supabase.from('messages')
@@ -523,7 +605,7 @@ async function prepareSession(
     contextParentId = parentId;
   }
   const history = buildSessionContext(recent ?? [], contextParentId);
-  return { ok: true, value: { supabase, sessionId, userMessageId, message, history } };
+  return { ok: true, value: { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } };
 }
 
 function createStreamHeaders(traceId: string): Headers {
@@ -694,7 +776,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // A session ID must always correspond to a real Supabase row.
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
-    const { supabase, sessionId, userMessageId, message, history } = prepared.value;
+    const { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } = prepared.value;
     const personaName = requestBody.value.personaName;
     // Rute gratis otomatis hanya dipakai setelah dipilih eksplisit di pengaturan.
     const modelName = requestBody.value.modelPreference === 'free-auto'
@@ -702,6 +784,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     const providerPayload = buildProviderPayload(message, personaName, modelName, traceId, history);
+    const titleState: { promise: Promise<string | null> | null } = { promise: null };
     const encoder = new TextEncoder();
     const upstreamAbortController = new AbortController();
 
@@ -741,7 +824,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         };
 
         try {
-          enqueueEvent({ phase: 'init', session_id: sessionId });
+          enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
 
           const fetchResult = await fetchProviderStream({
             apiKey,
@@ -801,6 +884,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             }
 
             emittedTokenCount += 1;
+            if (emittedTokenCount === 1 && isNewSession) {
+              // Launch title generation only after the primary model is responding.
+              titleState.promise = generateSessionTitle(message, env, apiKey, modelName, traceId);
+            }
             replyParts.push(token);
             enqueueEvent({ token });
           };
@@ -850,6 +937,21 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             // a duplicate assistant reply when the client retries.
             console.warn('[AAi session timestamp]', touchError.message);
           }
+          let sessionTitle: string | undefined;
+          if (titleState.promise) {
+            try {
+              const proposedTitle = (await titleState.promise) || provisionalTitle;
+              // Preserve a manual rename made while the response was streaming.
+              const { data: titled, error: titleError } = await supabase.from('sessions')
+                .update({ title: proposedTitle }).eq('id', sessionId)
+                .eq('title', provisionalTitle).select('id').maybeSingle();
+              if (titleError) console.warn('[AAi session title]', titleError.message);
+              else if (titled) sessionTitle = proposedTitle;
+            } catch (error) {
+              // A failed title change must never turn a saved answer into a failed response.
+              console.warn('[AAi session title]', normalizeErrorMessage(error));
+            }
+          }
           enqueueEvent({
             done: true,
             session_id: sessionId,
@@ -857,6 +959,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             user_message_id: userMessageId,
             persona_used: personaName,
             model_used: resolvedModelUsed,
+            session_title: sessionTitle,
           });
           closeStream();
         } catch (error) {
