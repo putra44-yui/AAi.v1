@@ -50,6 +50,20 @@ Jenis: catatan keputusan rekayasa untuk audit dan calon bahan dataset AAi, **buk
 5. Periksa `/login` di browser dan HEAD/GET URL untuk memastikan tidak ada siklus redirect; log status HTTP aktual.
 6. Catat hasil uji runtime sebagai PASS/FAIL, jangan menganggap tes mock sama dengan uji produksi.
 
+## Hasil uji browser produksi (31 Oktober 2026)
+
+| Skenario | Hasil | Bukti dan batas |
+| --- | --- | --- |
+| Buka `/login` sebelum perbaikan | **FAIL** | Chrome menampilkan `ERR_TOO_MANY_REDIRECTS`; HTTP 302 `/login` → `/login.html` dan HTTP 307 kembali ke `/login`. |
+| Buka `/login` setelah commit `a6757d2` | **PASS** | Form login dan ilustrasi AAi tampil dalam Chrome, tanpa loop. |
+| Kirim pesan baru pada akun pemilik | **PASS** | Prompt sintetis berlabel `UJI TEKNIS AAi 2026-10-31`, tidak memuat data pribadi; UI menyebut model Qwen3.8 Omni Flash dan balasan `SIAP`. |
+| Refresh setelah pesan uji (sebelum perbaikan judul) | **PARTIAL** | Isi pesan dan balasan pulih, tetapi sidebar/toolbar terjebak pada `Memuat sesi...`. |
+| Refresh setelah commit `d9e41bd` | **PASS** | Judul di sidebar dan toolbar kembali ke isi pesan uji, pesan pengguna dan balasan `SIAP` tersedia. |
+| Pilih satu sesi lama, lalu kembali ke sesi uji | **PASS** | Sesi lama selesai dimuat, sesi uji kembali dengan pesan/hasil sama; isi sesi lama tidak disalin ke laporan. |
+| Build Cloudflare untuk dua perbaikan | **PASS** | Kedua versi berhasil di-deploy. Sebelum perbaikan browser ini, 10 tes lokal lulus; dua tes kontrak baru belum dieksekusi ulang sebagai suite lengkap pada checkout remote. |
+
+Catatan: satu sesi uji sintetis **disimpan dan tidak dihapus**. Tidak ada percakapan lama yang diubah. Uji ini belum mencakup regenerate, edit/hapus, PWA offline, atau autentikasi pengguna berbeda; jangan menaikkan hasil PASS ini menjadi klaim semua fitur aman. Karena login hanya memakai username, aplikasi tetap tidak cocok untuk data sensitif sebelum autentikasi diperbaiki.
+
 ## Petunjuk kurasi dataset Benih AAi
 
 Dokumen ini memberi contoh pola alasan perubahan `gejala → sebab → solusi → risiko → verifikasi`. Jika dimasukkan ke korpus:
