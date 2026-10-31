@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { extractAAiMemoryTags, readableAAiMemoryValue } from './aai-context';
-import { saveMemoryWithLockGuard } from '../lib/lock-guard';
+import { extractAAiMemoryTags, readableAAiMemoryValue } from './aai-context.ts';
+import { saveMemoryWithLockGuard } from '../lib/lock-guard.ts';
 
 type Candidate = { key: string; value: string; memoryType: string; category: string };
 type ExistingMemory = {

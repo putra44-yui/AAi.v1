@@ -41,7 +41,7 @@ test('PWA precache references real files and prefers network for updated app cod
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
   assert.match(sw, /aai-shell-v20/);
-  assert.match(sw, /url\.pathname\.startsWith\('\/assets\/'\)/);
+  assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
 test('login alias does not redirect back to Cloudflare canonical login URL', () => {
