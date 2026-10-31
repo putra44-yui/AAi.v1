@@ -4,7 +4,7 @@ type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'qwen/qwen3.8-omni-flash';
-const DEFAULT_TEST_MODEL = 'openai/gpt-oss-20b:free';
+const DEFAULT_FREE_MODEL = 'openrouter/free';
 const DEFAULT_PERSONA = 'Auto';
 const DEFAULT_REFERER = 'https://aai.family';
 const DEFAULT_TITLE = 'AAi Keluarga';
@@ -97,7 +97,7 @@ interface ParsedChatRequest {
   editMessageId: string | null;
   updateOnly: boolean;
   personaName: string;
-  modelPreference: 'main' | 'oss-test';
+  modelPreference: 'main' | 'free-auto';
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -254,7 +254,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   const editMessageId = readTrimmedString(parsedValue.edit_message_id);
   const updateOnly = parsedValue.update_only === true;
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
-  const modelPreference = readTrimmedString(parsedValue.model_preference) === 'oss-test' ? 'oss-test' : 'main';
+  const modelPreference = readTrimmedString(parsedValue.model_preference) === 'free-auto' ? 'free-auto' : 'main';
 
   return {
     ok: true,
@@ -696,9 +696,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     if (!prepared.ok) return prepared.response;
     const { supabase, sessionId, userMessageId, message, history } = prepared.value;
     const personaName = requestBody.value.personaName;
-    // Model gratis hanya dipakai atas pilihan eksplisit dari antarmuka untuk uji coba.
-    const modelName = requestBody.value.modelPreference === 'oss-test'
-      ? DEFAULT_TEST_MODEL
+    // Rute gratis otomatis hanya dipakai setelah dipilih eksplisit di pengaturan.
+    const modelName = requestBody.value.modelPreference === 'free-auto'
+      ? DEFAULT_FREE_MODEL
       : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     const providerPayload = buildProviderPayload(message, personaName, modelName, traceId, history);

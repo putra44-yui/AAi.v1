@@ -17,7 +17,7 @@ let currentSessionId = null;
 let currentSessionMeta = null;
 let sessionLoadSerial = 0;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
-let currentModelPreference = localStorage.getItem('aai_model_preference') === 'oss-test' ? 'oss-test' : 'main';
+let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
@@ -718,8 +718,8 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = currentModelPreference === 'oss-test'
-    ? `🧪 OSS · ${currentPersona || 'Auto'}`
+  modeLabel.textContent = currentModelPreference === 'free-auto'
+    ? `🪄 Gratis · ${currentPersona || 'Auto'}`
     : (currentPersona || 'Auto');
 }
 
@@ -2942,18 +2942,18 @@ function renderSettingsMenu() {
   html += '<div class="settings-header">Model AI · pilih manual</div>';
   const models = [
     { val: 'main', label: '⚡ Qwen · utama' },
-    { val: 'oss-test', label: '🧪 GPT-OSS 20B · gratis (uji)' }
+    { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' }
   ];
   models.forEach(m => {
     html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
       <span>${m.label}</span><i class="fas fa-check check"></i>
     </button>`;
   });
-  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Model gratis untuk pengujian dan mungkin tidak selalu tersedia.</p>';
+  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Rute gratis dipilih otomatis oleh OpenRouter; ketersediaan dapat berubah.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
 }
 function selectModelUI(val) {
-  if (val !== 'main' && val !== 'oss-test') return;
+  if (val !== 'main' && val !== 'free-auto') return;
   currentModelPreference = val;
   localStorage.setItem('aai_model_preference', val);
   updateModeLabel();
