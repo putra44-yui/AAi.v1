@@ -127,6 +127,7 @@ test('every reply shows progress on phones, and saved activity can travel with t
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.match(server, /message: 'Menyiapkan jawaban\.\.\.'/);
+  assert.match(server, /const activityStartedAt = requestStartedAt/);
   assert.match(server, /activity_trace: \{/);
   assert.match(server, /\.select\('id, role, content, parent_id, created_at, activity_trace'\)/);
   assert.match(client, /activityTrace: message\.activity_trace \|\| null/);

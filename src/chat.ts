@@ -828,6 +828,7 @@ async function consumeProviderSSE(response: Response, onPayload: (payload: JsonO
 }
 
 export async function POST(request: Request, env: RuntimeEnv): Promise<Response> {
+  const requestStartedAt = Date.now();
   const traceId = getTraceId(request);
   try {
     const requestBody = parseRequestBody(await request.text());
@@ -891,7 +892,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const activityStartedAt = Date.now();
+        // Include pre-stream context loading in the cross-device duration.
+        const activityStartedAt = requestStartedAt;
         const activitySteps: Array<{ step: string; message: string; sources?: Array<{ url: string; title: string }> }> = [];
         let activityPreface = '';
         let streamClosed = false;
