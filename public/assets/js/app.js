@@ -1085,9 +1085,13 @@ function renderActivityStepHTML(entry) {
     + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
 }
 
-function buildStoredActivityPanelHTML(messageId) {
+function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
   if (!messageId) return '';
-  const trace = getStoredActivityTraces()[messageId];
+  // Server-saved steps travel with the session across browsers and phones.
+  // Older conversations can still use their device-local traces.
+  const trace = persistedTrace && typeof persistedTrace === 'object'
+    && Array.isArray(persistedTrace.steps) && persistedTrace.steps.length
+    ? persistedTrace : getStoredActivityTraces()[messageId];
   if (!trace || !Array.isArray(trace.steps) || !trace.steps.length) return '';
   const label = 'Memproses selama ' + formatActivityDuration(trace.durationMs);
   const intro = typeof trace.preface === 'string' && trace.preface.trim()
@@ -2915,7 +2919,8 @@ function renderMessageTree() {
             preview: message.preview || null,
             persona: message.persona || '',
             model: message.model_used || '',
-            modelLabel: message.model_label || ''
+            modelLabel: message.model_label || '',
+            activityTrace: message.activity_trace || null
           }
         : null;
       appendMessage(message.role, message.content, message.created_at, null, message.id, {
@@ -3054,7 +3059,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     <div class="msg-row assistant" data-chat-date="${chatDate.key}" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
       ${buildAssistantHeaderHTML(versionHtml, modelName, modelLabel)}
       ${previewBlock}
-      ${buildStoredActivityPanelHTML(messageId)}
+      ${buildStoredActivityPanelHTML(messageId, extra?.activityTrace)}
       <div class="bubble">${formatContent(content)}</div>
       ${sourcesHtml}
       <div class="msg-actions">

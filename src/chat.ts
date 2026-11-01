@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
-import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, type NativeToolCall } from './aai-tools.ts';
+import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, sanitizeUnverifiedToolOpening, type NativeToolCall } from './aai-tools.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 type RuntimeEnv = Record<string, unknown>;
@@ -52,6 +52,7 @@ interface Database {
           content: string;
           parent_id: string | null;
           created_at: string;
+          activity_trace: JsonValue | null;
         };
         Insert: {
           id?: string;
@@ -60,6 +61,7 @@ interface Database {
           content: string;
           parent_id?: string | null;
           created_at?: string;
+          activity_trace?: JsonValue | null;
         };
         Update: {
           id?: string;
@@ -68,6 +70,7 @@ interface Database {
           content?: string;
           parent_id?: string | null;
           created_at?: string;
+          activity_trace?: JsonValue | null;
         };
         Relationships: [];
       };
@@ -85,6 +88,7 @@ interface LoadedSessionMessage {
   content: string;
   parent_id: string | null;
   created_at: string;
+  activity_trace?: JsonValue | null;
 }
 
 interface ParsedLoadSessionRequest {
@@ -403,7 +407,7 @@ async function handleLoadSession(sessionId: string, userId: string, traceId: str
 
   const { data: messageRows, error: messageError } = await supabase
     .from('messages')
-    .select('id, role, content, parent_id, created_at')
+    .select('id, role, content, parent_id, created_at, activity_trace')
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true });
 
@@ -417,6 +421,7 @@ async function handleLoadSession(sessionId: string, userId: string, traceId: str
     content: messageRow.content,
     parent_id: messageRow.parent_id,
     created_at: messageRow.created_at,
+    activity_trace: messageRow.activity_trace,
   }));
 
   return createLoadSessionResponse(sessionId, userId, messages, traceId);
@@ -886,6 +891,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        const activityStartedAt = Date.now();
+        const activitySteps: Array<{ step: string; message: string; sources?: Array<{ url: string; title: string }> }> = [];
+        let activityPreface = '';
         let streamClosed = false;
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
@@ -895,6 +903,19 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         const enqueueEvent = (event: StreamEvent): void => {
           if (streamClosed || streamCanceled) {
             return;
+          }
+
+          // Keep the same factual process milestones in Supabase so reopening
+          // a conversation on a phone shows what the desktop observed.
+          if ('phase' in event && event.phase === 'progress' && activitySteps.length < 24) {
+            activitySteps.push({
+              step: event.step.slice(0, 32), message: event.message.slice(0, 220),
+              ...(event.sources ? { sources: event.sources.slice(0, 5).map(source => ({
+                url: source.url.slice(0, 600), title: source.title.slice(0, 100),
+              })) } : {}),
+            });
+          } else if ('phase' in event && event.phase === 'tool_switch' && !activityPreface && event.message) {
+            activityPreface = event.message.slice(0, 240);
           }
 
           controller.enqueue(encoder.encode(serializeEvent(event)));
@@ -920,6 +941,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
+          // All replies have a visible, truthful activity trail, including
+          // ordinary chats with no memories or external tools (also on mobile).
+          enqueueEvent({ phase: 'progress', step: 'assess', message: 'Menyiapkan jawaban...' });
           if (context.memoryCount > 0) {
             enqueueEvent({
               phase: 'progress', step: 'memory',
@@ -937,7 +961,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           }
 
           const receiveProviderResponse = async (
-            response: Response, accumulatingCalls?: Map<number, NativeToolCall>,
+            response: Response, accumulatingCalls?: Map<number, NativeToolCall>, bufferUntilToolDecision = false,
           ): Promise<void> => {
             await consumeProviderSSE(response, payload => {
               const model = extractProviderModel(payload);
@@ -950,14 +974,30 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 titleState.promise = generateSessionTitle(message, env, apiKey, modelName, traceId);
               }
               replyParts.push(token);
-              const visible = displayFilter.push(token);
-              if (visible) enqueueEvent({ token: visible });
+              // A tool-enabled response may contain a search query or an unverified
+              // preface. Never flash either as a public answer before seeing tool calls.
+              if (!bufferUntilToolDecision) {
+                const visible = displayFilter.push(token);
+                if (visible) enqueueEvent({ token: visible });
+              }
             });
           };
 
           // Bounded agent loop: the SAME chosen model can ask the actual tool again
           // after inspecting its previous results. No hidden specialist model is invoked.
           let answerReady = false;
+          const failUnexecutedSearch = (status: string): void => {
+            enqueueEvent({ phase: 'progress', step: 'unavailable', message: status });
+            replyParts.length = 0;
+            emittedTokenCount = 0;
+            displayFilter = createAAiMemoryStreamFilter();
+            const reply = 'Aku belum berhasil menjalankan pencarian web, jadi aku belum bisa memastikan informasi terbarunya. Coba ulangi nanti atau pilih model lain di Pengaturan, ya. Aku nggak mau mengarang hasil yang belum kuperiksa.';
+            replyParts.push(reply);
+            emittedTokenCount = 1;
+            const visible = displayFilter.push(reply);
+            if (visible) enqueueEvent({ token: visible });
+            answerReady = true;
+          };
           if (webPermissionGranted && !webSearchOptedOut && hasSearchProvider) {
             const searchedQueries = new Set<string>();
             let toolRounds = 0;
@@ -979,6 +1019,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 traceId, abortSignal: upstreamAbortController.signal, env,
               });
               if (!result.ok) {
+                if (toolRounds === 0 && requestedWebDecision.search) {
+                  failUnexecutedSearch('Model tidak berhasil memanggil alat pencarian. Belum ada pencarian web yang dijalankan.');
+                  break;
+                }
                 enqueueEvent({
                   phase: 'progress', step: 'unavailable',
                   message: toolRounds === 0
@@ -994,17 +1038,27 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               }
 
               const nativeCalls = new Map<number, NativeToolCall>();
-              await receiveProviderResponse(result.response, nativeCalls);
+              await receiveProviderResponse(result.response, nativeCalls, true);
               const calls = completedNativeToolCalls(nativeCalls);
               if (!calls.length) {
-                if (replyParts.join('').trim()) answerReady = true;
-                else enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Model tidak mengirim jawaban; aku mencoba sekali lagi tanpa tools.' });
+                const candidate = replyParts.join('');
+                if (toolRounds === 0 && (toolChoice === 'required'
+                  || (requestedWebDecision.search && looksLikeUnexecutedSearchPayload(candidate)))) {
+                  failUnexecutedSearch('Model mengirim teks tanpa memanggil alat pencarian. Belum ada hasil web yang bisa dilaporkan.');
+                } else if (candidate.trim()) {
+                  // No tool call: this is an ordinary model response, so release
+                  // only now the text that was held during tool-call detection.
+                  const visible = displayFilter.push(candidate);
+                  if (visible) enqueueEvent({ token: visible });
+                  answerReady = true;
+                } else {
+                  enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Model tidak mengirim jawaban; aku mencoba sekali lagi tanpa tools.' });
+                }
                 break;
               }
 
               const interimText = replyParts.join('');
-              const publicOpening = extractAAiMemoryTags(interimText).cleanText
-                .replace(/\s+/g, ' ').trim().slice(0, 240);
+              const publicOpening = sanitizeUnverifiedToolOpening(extractAAiMemoryTags(interimText).cleanText);
               // A model sentence may arrive before it decides to use another tool.
               // Preserve the first public opening and move later ones to progress.
               enqueueEvent({
@@ -1151,6 +1205,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               role: 'assistant',
               content: cleanReply,
               parent_id: userMessageId,
+              activity_trace: {
+                durationMs: Math.max(0, Date.now() - activityStartedAt),
+                steps: activitySteps.slice(-18),
+                preface: activityPreface,
+              },
             })
             .select('id').single();
           if (saveError) throw saveError;

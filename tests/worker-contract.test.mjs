@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v30/);
+  assert.match(sw, /aai-shell-v31/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -116,11 +116,22 @@ test('AAi displays measured collapsible activity and readable named source links
   const css = read('public/assets/css/aai-studio.css');
   assert.match(client, /Memproses selama /);
   assert.match(client, /saveActivityTrace\(parsed\.message_id/);
-  assert.match(client, /buildStoredActivityPanelHTML\(messageId\)/);
+  assert.match(client, /buildStoredActivityPanelHTML\(messageId, extra\?\.activityTrace\)/);
   assert.match(client, /function compactExternalLinks/);
   assert.match(client, /link\.classList\.add\('aai-source-link'\)/);
   assert.match(css, /\.aai-source-link::after/);
   assert.match(css, /content: '↗'/);
+});
+
+test('every reply shows progress on phones, and saved activity can travel with the session', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  assert.match(server, /message: 'Menyiapkan jawaban\.\.\.'/);
+  assert.match(server, /activity_trace: \{/);
+  assert.match(server, /\.select\('id, role, content, parent_id, created_at, activity_trace'\)/);
+  assert.match(client, /activityTrace: message\.activity_trace \|\| null/);
+  assert.match(client, /const trace = persistedTrace/);
+  assert.match(client, /getStoredActivityTraces\(\)\[messageId\]/);
 });
 
 test('AAi shows real search sources with favicons, and model reports without tool icons', () => {
@@ -153,7 +164,7 @@ test('AAi promotes model-generated opening text into the compact tool activity',
   assert.ok(client.includes('clearStreamingRenderSchedule()'));
   assert.ok(client.includes('renderActivityStepHTML'));
   assert.ok(client.includes('prefaceEl?.textContent'));
-  assert.ok(client.includes('buildStoredActivityPanelHTML(messageId)'));
+  assert.ok(client.includes('buildStoredActivityPanelHTML(messageId, extra?.activityTrace)'));
   assert.ok(css.includes('.aai-activity-step-icon'));
   assert.ok(css.includes('.aai-preface'));
 });

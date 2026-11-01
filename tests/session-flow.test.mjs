@@ -239,3 +239,150 @@ test('editing the first user message creates a valid alternate root branch', asy
     globalThis.fetch = originalFetch;
   }
 });
+
+async function mockNewChatDatabase(input, init, inserted) {
+  const url = new URL(String(input));
+  const method = init.method || 'GET';
+  assert.equal(url.hostname, 'fixture.supabase.co');
+  const resource = url.pathname.split('/').at(-1);
+  if (resource === 'users' && method === 'GET') return Response.json({ id: userId, username: 'teguh', person_id: null });
+  if (resource === 'persons' && method === 'GET') return Response.json([]);
+  if (resource === 'ai_personas' && method === 'GET') return Response.json([]);
+  if (resource === 'sessions' && method === 'POST') return Response.json({ id: sessionId }, { status: 201 });
+  if (resource === 'sessions' && method === 'PATCH') return new Response(null, { status: 204 });
+  if (resource === 'messages' && method === 'GET') return Response.json([]);
+  if (resource === 'messages' && method === 'POST') {
+    const body = JSON.parse(init.body);
+    inserted.push(body);
+    return Response.json({ id: body.role === 'user' ? userMessageId : assistantMessageId }, { status: 201 });
+  }
+  throw new Error(`Unexpected mock DB request: ${method} ${url}`);
+}
+
+test('search-required model returning only a keyword never leaks or saves it as an answer', async () => {
+  const previousFetch = globalThis.fetch;
+  const inserted = [];
+  const providerCalls = [];
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'openrouter.ai') {
+        const payload = JSON.parse(init.body);
+        providerCalls.push(payload);
+        return new Response('data: {"choices":[{"delta":{"content":"berita Raffi Ahmad terbaru Juni 2026"}}]}\n\ndata: [DONE]\n\n', {
+          status: 200, headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      return mockNewChatDatabase(input, init, inserted);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita tentang Raffi Ahmad terbaru', user_id: userId, web_permission: 'allow' }),
+    }), { ...env, TAVILY_API_KEY: 'fixture-only' });
+    assert.equal(response.status, 200);
+    const events = await response.text();
+    assert.match(events, /"done":true/);
+    assert.match(events, /belum berhasil menjalankan pencarian web/);
+    assert.doesNotMatch(events, /berita Raffi Ahmad terbaru Juni 2026/);
+    assert.equal(inserted.find(row => row.role === 'assistant').content.includes('belum berhasil menjalankan pencarian web'), true);
+    assert.ok(inserted.find(row => row.role === 'assistant').activity_trace.steps.some(step => step.step === 'unavailable'));
+    assert.equal(providerCalls[0].tool_choice, 'required');
+    assert.equal(providerCalls.filter(call => call.tools).length, 1, 'Do not silently retry a required search without tools');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('a provider that rejects native tools cannot invent a search result in a fallback reply', async () => {
+  const previousFetch = globalThis.fetch;
+  const inserted = [];
+  const providerCalls = [];
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'openrouter.ai') {
+        providerCalls.push(JSON.parse(init.body));
+        return Response.json({ error: 'Tool calling unsupported by selected model' }, { status: 400 });
+      }
+      return mockNewChatDatabase(input, init, inserted);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita terbaru tentang Raffi Ahmad', user_id: userId, web_permission: 'allow' }),
+    }), { ...env, TAVILY_API_KEY: 'fixture-only' });
+    assert.equal(response.status, 200);
+    const events = await response.text();
+    assert.match(events, /"done":true/);
+    assert.match(events, /Belum ada pencarian web yang dijalankan/);
+    assert.equal(inserted.find(row => row.role === 'assistant').content.includes('belum berhasil menjalankan pencarian web'), true);
+    assert.equal(providerCalls.length, 1, 'No second, tool-less model request after failed explicit search');
+    assert.equal(providerCalls[0].tool_choice, 'required');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('model cannot report empty search results before the real tool response', async () => {
+  const previousFetch = globalThis.fetch;
+  const inserted = [];
+  const providerCalls = [];
+  const toolRequest = 'data: {"choices":[{"delta":{"content":"Hasil pencariannya kosong, Bos. Nggak ada berita yang masuk."}}]}\n\n'
+    + 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_web","type":"function","function":{"name":"search_web","arguments":"{\\"query\\":\\"Raffi Ahmad berita terbaru\\"}"}}]}}]}\n\n'
+    + 'data: [DONE]\n\n';
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.hostname === 'openrouter.ai') {
+        const payload = JSON.parse(init.body);
+        providerCalls.push(payload);
+        const body = payload.tools && !payload.messages.some(item => item.role === 'tool')
+          ? toolRequest
+          : 'data: {"choices":[{"delta":{"content":"Aku menemukan satu sumber yang bisa dibaca."}}]}\n\ndata: [DONE]\n\n';
+        return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (url.hostname === 'api.tavily.com') return Response.json({ results: [{
+        url: 'https://berita.example/raffi', title: 'Berita Raffi Ahmad', content: 'Sumber uji.',
+      }] });
+      return mockNewChatDatabase(input, init, inserted);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita tentang Raffi Ahmad terbaru', user_id: userId, web_permission: 'allow' }),
+    }), { ...env, TAVILY_API_KEY: 'fixture-only', AAI_WEB_SEARCH_LIMITER: { limit: async () => ({ success: true }) } });
+    assert.equal(response.status, 200);
+    const events = await response.text();
+    assert.match(events, /"done":true/);
+    assert.doesNotMatch(events, /Hasil pencariannya kosong/);
+    assert.match(events, /https:\/\/berita\.example\/raffi/);
+    assert.match(events, /Aku menemukan satu sumber/);
+    assert.equal(inserted.find(row => row.role === 'assistant').content, 'Aku menemukan satu sumber yang bisa dibaca.');
+    assert.ok(inserted.find(row => row.role === 'assistant').activity_trace.steps.some(step =>
+      step.step === 'sources' && step.sources[0].url === 'https://berita.example/raffi'));
+    assert.equal(providerCalls.filter(call => call.tools).length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('a previously saved process trail is included when the same session opens on another device', async () => {
+  const previousFetch = globalThis.fetch;
+  const storedTrace = { durationMs: 7400, steps: [{ step: 'assess', message: 'Menyiapkan jawaban...' }], preface: '' };
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.hostname, 'fixture.supabase.co');
+      const resource = url.pathname.split('/').at(-1);
+      if (resource === 'sessions') return Response.json({ id: sessionId });
+      if (resource === 'messages') return Response.json([{
+        id: assistantMessageId, role: 'assistant', content: 'Halo!', parent_id: userMessageId,
+        created_at: '2026-11-01T02:00:00Z', activity_trace: storedTrace,
+      }]);
+      throw new Error('Unexpected request: ' + url);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST', body: JSON.stringify({ action: 'load_session', session_id: sessionId, user_id: userId }),
+    }), env);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.messages[0].activity_trace, storedTrace);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

@@ -63,3 +63,23 @@ export function extractSearchWebQuery(call: NativeToolCall): string | null {
     return query.length >= 3 && query.length <= 240 ? query : null;
   } catch { return null; }
 }
+
+/** Model-authored tool prefaces are not evidence that a search has happened. */
+export function sanitizeUnverifiedToolOpening(text: string): string {
+  const opening = text.replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (!opening) return '';
+  // The search provider (not the model) reports whether anything was found.
+  if (/\b(?:hasil\s+(?:pencarian(?:nya)?|penelusuran(?:nya)?|web)|(?:berita|sumber|referensi)\s+(?:yang\s+)?(?:ditemukan|terkumpul|masuk|kosong)|(?:sudah|telah|tadi|barusan)\s+(?:aku\s+)?(?:mencari|cari|mengecek|cek|menemukan|membaca|mengakses)|(?:tidak|nggak|gak|belum)\s+(?:ada|menemukan|ketemu)\s+(?:berita|sumber|hasil))\b/i.test(opening)) return '';
+  return opening;
+}
+
+/** A raw tool/query payload must never become a human-facing answer. */
+export function looksLikeUnexecutedSearchPayload(text: string): boolean {
+  const value = text.trim();
+  if (!value) return false;
+  if (/^(?:\{\s*"(?:query|tool_calls|name)"\s*:|(?:search_web|tool_call|function_call)\s*[:({]|<\|tool_call)/i.test(value)) return true;
+  // A standalone search phrase, especially with "terbaru" or a year, is not a reply.
+  return value.length <= 140 && !/[.!?\n]/.test(value)
+    && /\b(?:berita|pencarian|cari|search|latest|terbaru|update)\b/i.test(value)
+    && /\b(?:terbaru|latest|20\d{2}|hari\s+ini)\b/i.test(value);
+}
