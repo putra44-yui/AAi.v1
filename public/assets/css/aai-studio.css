@@ -1874,3 +1874,56 @@ body:not(.aai-login-page) .aai-inline-source-favicon[hidden] { display: none; }
   }
   body:not(.aai-login-page) .bubble a.aai-source-link { padding-inline: 6px; }
 }
+
+
+/* Inline citations: blend with assistant prose instead of looking like buttons. */
+body:not(.aai-login-page) .bubble a.aai-source-link {
+  display: inline;
+  margin: 0 1px;
+  padding: 0;
+  border: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #6b4db0;
+  font-size: .94em;
+  font-weight: 500;
+  line-height: inherit;
+  vertical-align: baseline;
+  white-space: normal;
+  text-decoration: underline;
+  text-decoration-color: rgba(107, 77, 176, .32);
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link::after {
+  margin-left: 2px;
+  font-size: .76em;
+  opacity: .65;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link:hover {
+  color: #4c3291;
+  background: transparent;
+  border: 0;
+  text-decoration-color: currentColor;
+  box-shadow: none;
+  transform: none;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link:focus-visible {
+  outline: 2px solid rgba(107, 77, 176, .45);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+body:not(.aai-login-page) .aai-inline-source-icon {
+  flex-basis: 12px;
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+  vertical-align: -0.08em;
+  font-size: 11px;
+}
+body:not(.aai-login-page) .aai-inline-source-favicon {
+  width: 12px;
+  height: 12px;
+}
