@@ -1056,8 +1056,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   const decision = { search: true, query, explicit: requestedWebDecision.explicit };
                   const outcome = await collectWebSources(decision, env, (step, count) => {
                     const messages: Record<string, string> = {
-                      tavily: 'Mencari sumber melalui Tavily...',
-                      exa: 'Hasil awal belum cukup; lanjut ke Exa...',
+                      tavily: 'Mencari sumber dari web...',
+                      exa: 'Hasil awal belum cukup; mencari sumber lain...',
                       found: 'Menemukan ' + (count || 0) + ' sumber. Meninjau isinya...',
                       unavailable: 'Belum menemukan sumber yang bisa dipastikan.',
                     };
