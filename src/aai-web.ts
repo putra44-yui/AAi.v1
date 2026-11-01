@@ -111,7 +111,6 @@ function cleanSource(value: unknown): WebSource | null {
     ...(publishedDate ? { publishedDate } : {})
   };
 }
-}
 
 export function normalizeWebSources(input: unknown): WebSource[] {
   if (!Array.isArray(input)) return [];
