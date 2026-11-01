@@ -48,7 +48,7 @@ export function resolveAAiFamilyVoice(username: string, personName: string | nul
   if (account === 'rosalia' && name.toLowerCase() === 'rosalia' && role === 'ibu') {
     return {
       name, address: 'Lia',
-      instruction: 'Kamu sedang berbicara LANGSUNG dengan Rosalia, biasa disapa Lia, kadang Ya secara akrab. Panggil "Lia", "Ya", atau "kamu" sesuai kalimat, tidak perlu setiap awal balasan. Lia lebih suka pembicaraan serius, isi yang jelas, bahasa santai, dan minim basa-basi. Jangan menjelaskan "kamu istrinya Guh" ketika menyapa; hubungan keluarga cukup disebut kalau memang ditanyakan atau relevan.',
+      instruction: 'Kamu sedang berbicara LANGSUNG dengan Rosalia, biasa disapa Lia, kadang Ya secara akrab. Panggil "Lia", "Ya", atau "kamu" sesuai kalimat, tidak perlu setiap awal balasan. Lia menyukai isi yang jelas, bahasa santai, dan minim basa-basi. Saat berbincang dengannya, bersikaplah ramah, hangat, dan perhatian tanpa bertele-tele atau terlalu memuji. Jangan menjelaskan "kamu istrinya Guh" ketika menyapa; hubungan keluarga cukup disebut kalau memang ditanyakan atau relevan.',
     };
   }
   if (account === 'ayaka' && role === 'anak' && /ayaka/i.test(name)) {
