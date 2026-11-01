@@ -98,7 +98,7 @@ test('Native web search stays server-side and progress reflects real tool result
   const tools = read('src/aai-tools.ts');
   assert.match(server, /collectWebSources\(decision/);
   assert.match(server, /addNativeToolDeltas\(/);
-  assert.match(server, /tool_choice: requestedWebDecision\.explicit \? 'required' : 'auto'/);
+  assert.match(server, /tool_choice: toolChoice/);
   assert.match(server, /role: 'tool'/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(tools, /name: 'search_web'/);
@@ -129,7 +129,7 @@ test('AAi promotes model-generated opening text into the compact tool activity',
   const css = read('public/assets/css/aai-studio.css');
   assert.ok(server.includes("phase: 'tool_switch'"));
   assert.ok(server.includes("phase: 'progress'"));
-  assert.ok(server.includes('Menyusun jawaban dari hasil yang tersedia'));
+  assert.ok(server.includes('Merangkum temuan dan menyusun jawaban'));
   assert.ok(client.includes("parsed.phase === 'tool_switch'"));
   assert.ok(client.includes('clearStreamingRenderSchedule()'));
   assert.ok(client.includes('renderActivityStepHTML'));
@@ -154,7 +154,7 @@ test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
-  assert.ok(server.includes("tool_choice: requestedWebDecision.explicit ? 'required' : 'auto'"));
+  assert.ok(server.includes("tool_choice: toolChoice"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
   assert.ok(server.includes('answerReady = true'));
   assert.ok(server.includes("tool_choice: 'none'"));
