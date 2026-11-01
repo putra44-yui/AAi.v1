@@ -1051,9 +1051,15 @@ const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
 function renderActivityStepHTML(entry) {
   const step = entry && typeof entry === 'object' ? entry.step : '';
   const message = entry && typeof entry === 'object' ? entry.message : entry;
+  const safeText = escHtml(String(message || '').slice(0, 220));
+  // Model-authored reports are conversation, not mechanical tool status.
+  // Apply this to saved traces too so past sessions get the same presentation.
+  if (step === 'strategy') {
+    return '<li class="aai-activity-step aai-activity-report"><span class="aai-activity-step-text">' + safeText + '</span></li>';
+  }
   const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
   return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
-    + '<span class="aai-activity-step-text">' + escHtml(String(message || '').slice(0, 220)) + '</span></li>';
+    + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
 }
 
 function buildStoredActivityPanelHTML(messageId) {
