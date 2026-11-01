@@ -1927,3 +1927,45 @@ body:not(.aai-login-page) .aai-inline-source-favicon {
   width: 12px;
   height: 12px;
 }
+
+/* AAi data table: aesthetic, horizontally scrollable, no column loss. */
+body:not(.aai-login-page) .msg-row.assistant .bubble .aai-table-shell {
+  width:100%; max-width:100%; min-width:0; margin:14px 0 18px;
+  overflow:hidden; border:1px solid #e2def0; border-radius:15px;
+  background:#fff; box-shadow:0 5px 20px rgba(49,44,99,.055);
+}
+body:not(.aai-login-page) .bubble .aai-table-scroll {
+  width:100%; max-width:100%; overflow-x:auto; overflow-y:hidden;
+  overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch;
+  scrollbar-width:thin; scrollbar-color:#bcaee1 #f4f1f9;
+}
+body:not(.aai-login-page) .bubble .aai-table-scroll::-webkit-scrollbar {height:6px}
+body:not(.aai-login-page) .bubble .aai-table-scroll::-webkit-scrollbar-thumb {background:#bcaee1;border-radius:999px}
+body:not(.aai-login-page) .bubble .aai-table-scroll:focus-visible {outline:2px solid #8774cd;outline-offset:-2px}
+body:not(.aai-login-page) .msg-row.assistant .bubble table.aai-data-table {
+  display:table; width:max-content; min-width:100%; max-width:none; margin:0;
+  border:0; border-spacing:0; border-collapse:separate; table-layout:auto;
+  color:#34344e; background:#fff; font-size:13px; line-height:1.5; text-align:left;
+}
+body:not(.aai-login-page) .bubble .aai-data-table :is(th,td) {
+  min-width:116px; max-width:320px; padding:11px 14px; border:0;
+  border-right:1px solid #eeebf5; border-bottom:1px solid #eeeaf5;
+  vertical-align:top; text-align:left; white-space:normal; overflow-wrap:break-word;
+}
+body:not(.aai-login-page) .bubble .aai-data-table :is(th,td):last-child {border-right:0}
+body:not(.aai-login-page) .bubble .aai-data-table tbody tr:last-child td {border-bottom:0}
+body:not(.aai-login-page) .bubble .aai-data-table thead th {
+  background:#efecfb; color:#50428a; font-size:12.5px; font-weight:750; white-space:nowrap;
+}
+body:not(.aai-login-page) .bubble .aai-data-table tbody tr:nth-child(even) td {background:#faf9fe}
+body:not(.aai-login-page) .bubble .aai-data-table tbody tr:hover td {background:#f2effc}
+body:not(.aai-login-page) .bubble .aai-data-table :is(th,td) :is(p,ul,ol) {margin:0}
+body:not(.aai-login-page) .bubble .aai-table-hint {
+  padding:5px 12px 7px; border-top:1px solid #efecf6; color:#9689b5;
+  background:#fdfcff; font-size:10.5px; text-align:right;
+}
+@media (min-width:800px) {body:not(.aai-login-page) .bubble .aai-table-hint {display:none}}
+@media (max-width:600px) {
+  body:not(.aai-login-page) .msg-row.assistant .bubble .aai-table-shell {border-radius:12px;margin:12px 0 16px}
+  body:not(.aai-login-page) .bubble .aai-data-table :is(th,td) {min-width:112px;max-width:260px;padding:10px 12px}
+}

@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v32/);
+  assert.match(sw, /aai-shell-v33/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -74,14 +74,22 @@ test('legacy memory and file endpoints receive runtime Supabase bindings', () =>
   }
 });
 
-test('wide Markdown responses are labeled cards and do not shrink to five tiny columns', () => {
+test('Markdown tables preserve columns and scroll horizontally', () => {
   const renderer = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.match(renderer, /makeReadableMarkdownTables\(compactExternalLinks\(safeHtml\)\)/);
-  assert.match(renderer, /headings\.length < 4/);
-  assert.match(renderer, /cell\.setAttribute\('data-label'/);
-  assert.match(css, /table\.aai-table-cards tbody/);
-  assert.match(css, /content: attr\(data-label\)/);
+  assert.match(renderer, /makeReadableMarkdownTables\\(compactExternalLinks\\(safeHtml\\)\\)/);
+  assert.ok(renderer.includes("table.classList.add('aai-data-table')"));
+  assert.ok(renderer.includes("scroll.className = 'aai-table-scroll'"));
+  assert.ok(renderer.includes("scroll.appendChild(table)"));
+  assert.ok(css.includes('overflow-x:auto'));
+  assert.ok(css.includes('width:max-content'));
+  assert.ok(css.includes('nth-child(even)'));
+});
+test('AAi adapts emoji use to relaxed roleplay without altering formal output', () => {
+  const context = read('src/aai-context.ts');
+  assert.ok(context.includes('roleplay, atau saat pengguna memakai emoji'));
+  assert.ok(context.includes('tidak wajib setiap balasan'));
+  assert.ok(context.includes('Jangan menyisipkan emoji pada surat, notula, dokumen resmi'));
 });
 
 test('root edits skip nonexistent parent validation', () => {
@@ -294,6 +302,6 @@ test('inline source citations blend with prose instead of rendering as buttons',
   assert.ok(css.includes("font-size: .94em"));
   assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
-  assert.ok(index.includes("aai-studio.css?v=20261101-inline-citations"));
-  assert.match(sw, /aai-shell-v32/);
+  assert.ok(index.includes("aai-studio.css?v=20261101-tables"));
+  assert.match(sw, /aai-shell-v33/);
 });

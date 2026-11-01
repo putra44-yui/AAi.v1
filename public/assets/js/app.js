@@ -3583,17 +3583,27 @@ function makeReadableMarkdownTables(sanitizedHtml) {
   const fragment = document.createElement('template');
   fragment.innerHTML = sanitizedHtml;
   fragment.content.querySelectorAll('table').forEach(table => {
-    const headings = Array.from(table.querySelectorAll('thead th')).map(th =>
-      (th.textContent || '').trim().slice(0, 90)
-    );
-    if (headings.length < 4) return;
-    table.classList.add('aai-table-cards');
-    table.querySelectorAll('tbody tr').forEach(row => {
-      Array.from(row.children).forEach((cell, index) => {
-        if (!cell.matches('td, th')) return;
-        cell.setAttribute('data-label', headings[index] || 'Detail');
-      });
-    });
+    // Preserve original rows and columns; let wide tables scroll horizontally.
+    table.classList.remove('aai-table-cards');
+    table.classList.add('aai-data-table');
+    const columnCount = Math.max(0, ...Array.from(table.querySelectorAll('tr'), row => row.children.length));
+    const shell = document.createElement('div');
+    shell.className = 'aai-table-shell';
+    const scroll = document.createElement('div');
+    scroll.className = 'aai-table-scroll';
+    scroll.tabIndex = 0;
+    scroll.setAttribute('role', 'region');
+    scroll.setAttribute('aria-label', 'Tabel jawaban. Geser horizontal untuk melihat kolom lainnya.');
+    table.parentNode.insertBefore(shell, table);
+    shell.appendChild(scroll);
+    scroll.appendChild(table);
+    if (columnCount >= 4) {
+      const hint = document.createElement('div');
+      hint.className = 'aai-table-hint';
+      hint.setAttribute('aria-hidden', 'true');
+      hint.textContent = '↔ Geser untuk kolom lainnya';
+      shell.appendChild(hint);
+    }
   });
   return fragment.innerHTML;
 }
