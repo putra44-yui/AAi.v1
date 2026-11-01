@@ -1,5 +1,5 @@
 /* AAi PWA shell: public static assets only; no private chat/API caching. */
-const CACHE_NAME = 'aai-shell-v28';
+const CACHE_NAME = 'aai-shell-v29';
 const PRECACHE_URLS = [
   '/index.html',
   '/login.html',
