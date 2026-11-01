@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v31/);
+  assert.match(sw, /aai-shell-v32/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -284,4 +284,16 @@ test('web tool loop exits at the hard cap and final composition omits tool schem
   assert.match(finalBlock, /temperature: 0\.45/);
   assert.doesNotMatch(finalBlock, /tools:\s*\[SEARCH_WEB_TOOL\]|tool_choice/);
   assert.match(server, /COBA LAGI.*Kirim jawaban teks final sekarang/s);
+});
+
+test('inline source citations blend with prose instead of rendering as buttons', () => {
+  const css = read('public/assets/css/aai-studio.css');
+  const index = read('public/index.html');
+  const sw = read('public/sw.js');
+  assert.match(css, /Inline citations: blend with assistant prose/);
+  assert.match(css, /font-size:\\s*\\.94em/);
+  assert.match(css, /background:\\s*transparent/);
+  assert.match(css, /aai-inline-source-favicon/);
+  assert.match(index, /aai-studio\\.css\\?v=20261101-inline-citations/);
+  assert.match(sw, /aai-shell-v32/);
 });
