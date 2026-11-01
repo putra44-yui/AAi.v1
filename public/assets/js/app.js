@@ -1066,7 +1066,10 @@ function renderActivitySourceHTML(source) {
 function renderActivityStepHTML(entry) {
   const step = entry && typeof entry === 'object' ? entry.step : '';
   const message = entry && typeof entry === 'object' ? entry.message : entry;
-  const safeText = escHtml(String(message || '').slice(0, 220));
+  // Older saved activity traces may still name a backend search provider.
+  const displayMessage = step === 'tavily' ? 'Mencari sumber dari web...'
+    : step === 'exa' ? 'Hasil awal belum cukup; mencari sumber lain...' : message;
+  const safeText = escHtml(String(displayMessage || '').slice(0, 220));
   // Model-authored reports are conversation, not mechanical tool status.
   // Apply this to saved traces too so past sessions get the same presentation.
   if (step === 'strategy') {
