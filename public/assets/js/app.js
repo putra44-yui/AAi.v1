@@ -37,6 +37,11 @@ let stickyCodeHeaderTimer = null;
 let suppressAutoScroll = false;
 let activeRenderJob = 0;
 
+function getAAiDeviceTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; }
+  catch { return null; }
+}
+
 function isMobileViewport() {
   return window.innerWidth <= 768 || navigator.maxTouchPoints > 0;
 }
@@ -2295,6 +2300,7 @@ async function sendMessage(text, files = []) {
         persona_name: currentPersona,
         model_preference: currentModelPreference,
         web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentMessageId,
         files: files
@@ -2453,6 +2459,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         persona_name: frozenPersona,
         model_preference: currentModelPreference,
         web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
         user_message_id: userMessageId
       })
@@ -2617,6 +2624,7 @@ async function sendMessageBranched(text, parentId = null, editedMessageId = null
         persona_name: currentPersona,
         model_preference: currentModelPreference,
         web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentId,
         branch_root: parentId === null

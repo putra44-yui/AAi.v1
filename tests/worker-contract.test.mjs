@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v33/);
+  assert.match(sw, /aai-shell-v34/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -303,5 +303,16 @@ test('inline source citations blend with prose instead of rendering as buttons',
   assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
   assert.ok(index.includes("aai-studio.css?v=20261101-tables"));
-  assert.match(sw, /aai-shell-v33/);
+  assert.match(sw, /aai-shell-v34/);
+});
+
+test('all three chat flows provide timezone to server current clock', () => {
+  const client = read('public/assets/js/app.js');
+  const server = read('src/chat.ts');
+  const clock = read('src/aai-clock.ts');
+  assert.ok(client.includes('function getAAiDeviceTimeZone()'));
+  assert.equal(client.split('time_zone: getAAiDeviceTimeZone()').length - 1, 3);
+  assert.ok(server.includes('normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone))'));
+  assert.ok(server.includes('buildAAiClockContext(requestBody.value.timeZone, history.length === 0)'));
+  assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
 });

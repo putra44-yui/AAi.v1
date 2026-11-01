@@ -4,6 +4,7 @@ import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, collectWe
 import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, sanitizeUnverifiedToolOpening, type NativeToolCall } from './aai-tools.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
+import { buildAAiClockContext, normalizeAAiTimeZone } from './aai-clock.ts';
 type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -110,6 +111,7 @@ interface ParsedChatRequest {
   personaName: string;
   modelPreference: 'main' | 'free-auto';
   webPermission: WebToolPermission;
+  timeZone: string | null;
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -297,6 +299,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   const modelPreference = readTrimmedString(parsedValue.model_preference) === 'free-auto' ? 'free-auto' : 'main';
   // Missing or unrecognized permission always fails closed, including old clients.
   const webPermission: WebToolPermission = parsedValue.web_permission === 'allow' ? 'allow' : 'deny';
+  const timeZone = normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone));
 
   return {
     ok: true,
@@ -313,6 +316,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       personaName,
       modelPreference,
       webPermission,
+      timeZone,
     },
   };
 }
@@ -863,6 +867,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
+    context.systemMessages.push({ role: 'system', content: buildAAiClockContext(requestBody.value.timeZone, history.length === 0) });
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
     const webSearchOptedOut = hasWebSearchOptOut(message);
     const webPermissionGranted = requestBody.value.webPermission === 'allow';
