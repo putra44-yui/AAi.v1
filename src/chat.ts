@@ -171,9 +171,10 @@ interface ToolSwitchEvent {
 
 interface ProgressEvent {
   phase: 'progress';
-  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'unavailable' | 'compose';
+  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose';
   message: string;
   source_count?: number;
+  sources?: Array<{ url: string; title: string }>;
 }
 
 interface DoneEvent {
@@ -1065,6 +1066,15 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                       ...(count !== undefined ? { source_count: count } : {}),
                     });
                   }, upstreamAbortController.signal);
+                  // Surface only real, normalized search results; never invent sources.
+                  if (outcome.sources.length) {
+                    enqueueEvent({
+                      phase: 'progress', step: 'sources', message: 'Sumber pencarian',
+                      sources: outcome.sources.slice(0, 5).map(source => ({
+                        url: source.url, title: source.title.slice(0, 100),
+                      })),
+                    });
+                  }
                   const evidence = webContextMessage(decision, outcome);
                   if (evidence) {
                     providerPayload.messages.splice(context.systemMessages.length, 0, {
