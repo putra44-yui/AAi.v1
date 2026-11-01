@@ -128,6 +128,8 @@ test('AAi shows real search sources with favicons, and model reports without too
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
   assert.match(server, /step: 'sources', message: 'Sumber pencarian'/);
+  assert.match(server, /Mencari sumber dari web/);
+  assert.doesNotMatch(server, /Mencari sumber melalui Tavily|lanjut ke Exa/);
   assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)/);
   assert.match(client, /if \(step === 'sources'\)/);
   assert.match(client, /if \(step === 'strategy'\)/);
