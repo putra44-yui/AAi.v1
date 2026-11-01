@@ -291,9 +291,9 @@ test('inline source citations blend with prose instead of rendering as buttons',
   const index = read('public/index.html');
   const sw = read('public/sw.js');
   assert.match(css, /Inline citations: blend with assistant prose/);
-  assert.match(css, /font-size:\\s*\\.94em/);
-  assert.match(css, /background:\\s*transparent/);
+  assert.ok(css.includes("font-size: .94em"));
+  assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
-  assert.match(index, /aai-studio\\.css\\?v=20261101-inline-citations/);
+  assert.ok(index.includes("aai-studio.css?v=20261101-inline-citations"));
   assert.match(sw, /aai-shell-v32/);
 });
