@@ -178,7 +178,7 @@ interface ProgressEvent {
   step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose';
   message: string;
   source_count?: number;
-  sources?: Array<{ url: string; title: string }>;
+  sources?: Array<{ url: string; title: string; snippet?: string; image?: string }>;
 }
 
 interface DoneEvent {
@@ -894,7 +894,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       async start(controller) {
         // Include pre-stream context loading in the cross-device duration.
         const activityStartedAt = requestStartedAt;
-        const activitySteps: Array<{ step: string; message: string; sources?: Array<{ url: string; title: string }> }> = [];
+        const activitySteps: Array<{ step: string; message: string; sources?: Array<{ url: string; title: string; snippet?: string; image?: string }> }> = [];
         let activityPreface = '';
         let streamClosed = false;
         let resolvedModelUsed = modelName;
@@ -913,7 +913,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             activitySteps.push({
               step: event.step.slice(0, 32), message: event.message.slice(0, 220),
               ...(event.sources ? { sources: event.sources.slice(0, 5).map(source => ({
-                url: source.url.slice(0, 600), title: source.title.slice(0, 100),
+                url: source.url.slice(0, 600),
+                title: source.title.slice(0, 100),
+                ...(source.snippet ? { snippet: source.snippet.slice(0, 420) } : {}),
+                ...(source.image ? { image: source.image.slice(0, 1200) } : {}),
               })) } : {}),
             });
           } else if ('phase' in event && event.phase === 'tool_switch' && !activityPreface && event.message) {
@@ -1125,9 +1128,12 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   // Surface only real, normalized search results; never invent sources.
                   if (outcome.sources.length) {
                     enqueueEvent({
-                      phase: 'progress', step: 'sources', message: 'Sumber pencarian',
+                      phase: 'progress', step: 'sources', message: `Menemukan ${outcome.sources.length} sumber.`,
                       sources: outcome.sources.slice(0, 5).map(source => ({
-                        url: source.url, title: source.title.slice(0, 100),
+                        url: source.url,
+                        title: source.title.slice(0, 120),
+                        snippet: source.snippet.slice(0, 420),
+                        ...(source.image ? { image: source.image } : {}),
                       })),
                     });
                   }
