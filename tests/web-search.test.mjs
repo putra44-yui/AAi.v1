@@ -15,14 +15,16 @@ test('Automatic search follows freshness and explicit web intent, respecting pri
 
 test('External sources are validated, shortened and deduplicated', () => {
   const sources = normalizeWebSources([
-    {url:'https://example.org/a',title:'Artikel',content:'Ringkasan'},
+    {url:'https://example.org/a',title:'Artikel',content:'Ringkasan',image:'https://cdn.example.org/article.jpg'},
     {url:'https://example.org/a',title:'Duplikat',content:'Duplikat'},
     {url:'javascript:alert(1)',title:'Bad',content:'Jangan'},
     {url:'http://localhost:3000',title:'Local',content:'Jangan'},
-    {url:'https://example.org/b',title:'B',highlights:['Bagian penting']},
+    {url:'https://example.org/b',title:'B',highlights:['Bagian penting'],image:'javascript:alert(1)'},
   ]);
   assert.equal(sources.length, 2);
+  assert.equal(sources[0].image, 'https://cdn.example.org/article.jpg');
   assert.equal(sources[1].snippet, 'Bagian penting');
+  assert.equal(sources[1].image, undefined);
   assert.equal(normalizeWebSources([{url:'https://docs.example.org',title:'Rujukan',snippet:'Cuplikan gabungan'}])[0].snippet, 'Cuplikan gabungan');
 });
 
@@ -53,4 +55,20 @@ test('No external API call for an offline or private query', async () => {
   });
   assert.equal(result.attempted, false);
   assert.equal(result.sources.length, 0);
+});
+
+
+test('thumbnail metadata stays out of model evidence and accepts only public HTTP images', () => {
+  const sources = normalizeWebSources([
+    {url:'https://news.example.org/story',title:'Berita',content:'Cuplikan isi',image:'https://cdn.example.org/story.jpg'},
+    {url:'https://news.example.org/unsafe',title:'Unsafe image',content:'Cuplikan',image:'file:///etc/passwd'},
+  ]);
+  assert.equal(sources[0].image, 'https://cdn.example.org/story.jpg');
+  assert.equal(sources[1].image, undefined);
+  const evidence = webContextMessage(
+    decideWebSearch('Cari berita terbaru di web'),
+    { sources, provider:'tavily', attempted:true }
+  );
+  assert.doesNotMatch(evidence, /story\\.jpg/);
+  assert.match(evidence, /Cuplikan isi/);
 });
