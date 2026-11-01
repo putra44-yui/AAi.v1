@@ -1515,3 +1515,71 @@ body:not(.aai-login-page) .composer-web-permission.is-on .composer-action-icon {
 body:not(.aai-login-page) .composer-web-switch { margin-left: auto; padding-left: 3px; color: #aa9aba; font-size: 22px; }
 body:not(.aai-login-page) .composer-web-permission.is-on .composer-web-switch { color: #56a7c6; }
 body:not(.aai-login-page) .composer-web-permission .composer-action-text small { line-height: 1.45; }
+
+/* Spoken notes, including repeated-search reports: no tool icon or status badge. */
+body:not(.aai-login-page) .aai-activity .aai-preface,
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-report .aai-activity-step-text {
+  color: #654b96;
+  font-weight: 500;
+}
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-report {
+  display: block;
+  padding: 0;
+  margin: 5px 0 7px;
+}
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-report .aai-activity-step-text {
+  display: block;
+  padding: 0;
+  line-height: 1.48;
+}
+
+/* Public search evidence sits directly below the tool milestone, in quiet link rows. */
+body:not(.aai-login-page) .aai-activity-list li.aai-activity-sources {
+  display: block;
+  margin: -1px 0 8px 29px;
+  padding: 0;
+}
+body:not(.aai-login-page) .aai-activity-source-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+body:not(.aai-login-page) .aai-activity-source-link {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  gap: 7px;
+  color: #6b647b;
+  font-size: 12.5px;
+  font-weight: 450;
+  line-height: 1.5;
+  text-decoration: none;
+}
+body:not(.aai-login-page) .aai-activity-source-link:hover {
+  color: #6044a0;
+  text-decoration: underline;
+}
+body:not(.aai-login-page) .aai-activity-source-favicon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+body:not(.aai-login-page) .aai-activity-source-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body:not(.aai-login-page) .aai-activity-source-arrow {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: .68;
+}
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-activity-list li.aai-activity-sources { margin-left: 24px; }
+  body:not(.aai-login-page) .aai-activity-source-link { font-size: 13px; }
+}
