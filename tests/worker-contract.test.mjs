@@ -139,10 +139,11 @@ test('AAi shows real search sources with favicons, and model reports without too
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.match(server, /step: 'sources', message: 'Sumber pencarian'/);
+  assert.match(server, /step: 'sources', message: `Menemukan \$\{outcome\.sources\.length\} sumber\.`/);
   assert.match(server, /Mencari sumber dari web/);
   assert.doesNotMatch(server, /Mencari sumber melalui Tavily|lanjut ke Exa/);
-  assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)/);
+  assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)\.map\(source =>/);
+  assert.match(server, /source\.image \? \{ image: source\.image \}/);
   assert.match(client, /if \(step === 'sources'\)/);
   assert.match(client, /if \(step === 'strategy'\)/);
   assert.match(client, /step === 'tavily' \? 'Mencari sumber dari web/);
