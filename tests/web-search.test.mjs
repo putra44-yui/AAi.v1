@@ -72,3 +72,51 @@ test('thumbnail metadata stays out of model evidence and accepts only public HTT
   assert.doesNotMatch(evidence, /story\\.jpg/);
   assert.match(evidence, /Cuplikan isi/);
 });
+
+test('Tavily source-linked images are enabled and attached only to their matching result', async () => {
+  const oldFetch = globalThis.fetch;
+  let tavilyPayload;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), 'https://api.tavily.com/search');
+    tavilyPayload = JSON.parse(init.body);
+    return {
+      ok: true,
+      json: async () => ({
+        // Query-level images are deliberately ignored: they are not safely
+        // attributable to any one source card.
+        images: [{ url: 'https://cdn.example.org/unrelated-query-image.jpg' }],
+        results: [
+          {
+            url: 'https://news.example.org/one',
+            title: 'Artikel satu',
+            content: 'Ringkasan artikel satu',
+            images: [
+              { url: 'https://cdn.example.org/article-one.jpg', description: 'Foto artikel satu' },
+            ],
+          },
+          {
+            url: 'https://news.example.org/two',
+            title: 'Artikel dua',
+            content: 'Ringkasan artikel dua',
+            images: [{ url: 'javascript:alert(1)', description: 'Tidak aman' }],
+          },
+        ],
+      }),
+    };
+  };
+  try {
+    const decision = decideWebSearch('Cari di web berita terbaru tentang teknologi');
+    const outcome = await collectWebSources(
+      decision,
+      { TAVILY_API_KEY: 'fake-tavily', EXA_API_KEY: 'fake-exa' },
+      () => {},
+    );
+    assert.equal(tavilyPayload.include_images, true);
+    assert.equal(outcome.sources.length, 2);
+    assert.equal(outcome.sources[0].image, 'https://cdn.example.org/article-one.jpg');
+    assert.equal(outcome.sources[1].image, undefined);
+    assert.equal(outcome.provider, 'tavily');
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});

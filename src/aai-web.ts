@@ -99,9 +99,22 @@ function cleanSource(value: unknown): WebSource | null {
   const title = typeof v.title === 'string' ? v.title.trim().slice(0, 180) : '';
   const snippetText = typeof v.content === 'string' ? v.content : typeof v.text === 'string' ? v.text : typeof v.snippet === 'string' ? v.snippet : '';
   const highlights = Array.isArray(v.highlights) ? v.highlights.filter(x => typeof x === 'string').join(' ') : '';
-  const snippet = (highlights || snippetText).replace(/\s+/g, ' ').trim().slice(0, 700);
-  const imageCandidate = [v.image, v.image_url, v.thumbnail, v.thumbnail_url, v.thumbnailUrl]
+  const snippet = (highlights || snippetText).replace(/\\s+/g, ' ').trim().slice(0, 700);
+
+  // Tavily returns images[] on each result when include_images=true.
+  // Use only images attached to this exact result; never borrow the
+  // query-level images[] array because it cannot be safely attributed.
+  const resultImages = Array.isArray(v.images) ? v.images : [];
+  const resultImage = resultImages
+    .map(item => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') return (item as Record<string, unknown>).url;
+      return undefined;
+    })
     .find(item => typeof item === 'string' && item.trim());
+  const imageCandidate = [
+    resultImage, v.image, v.image_url, v.thumbnail, v.thumbnail_url, v.thumbnailUrl,
+  ].find(item => typeof item === 'string' && item.trim());
   const image = cleanPublicHttpUrl(imageCandidate);
   if (!title && !snippet) return null;
   const publishedDate = typeof v.publishedDate === 'string' ? v.publishedDate.slice(0, 20) : undefined;
@@ -167,6 +180,7 @@ export async function collectWebSources(
       max_results: 5,
       include_answer: false,
       include_raw_content: false,
+      include_images: true,
     }, signal) as { results?: unknown } | null;
     const sources = normalizeWebSources(result?.results);
     if (sources.length >= 2 || (sources.length >= 1 && !exaKey)) {
