@@ -1583,3 +1583,138 @@ body:not(.aai-login-page) .aai-activity-source-arrow {
   body:not(.aai-login-page) .aai-activity-list li.aai-activity-sources { margin-left: 24px; }
   body:not(.aai-login-page) .aai-activity-source-link { font-size: 13px; }
 }
+
+
+/* Search preface is spoken assistant text: keep the same typography as the answer bubble. */
+body:not(.aai-login-page) .aai-activity .aai-preface {
+  margin: 8px 0 12px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.72;
+  font-weight: 400;
+  color: #303449;
+  letter-spacing: 0;
+}
+
+/* Search source previews: compact enough to scan without opening every result. */
+body:not(.aai-login-page) .aai-source-preview {
+  width: min(100%, 720px);
+  margin: 0 0 7px;
+  display: grid;
+  gap: 7px;
+}
+body:not(.aai-login-page) .aai-source-preview-heading {
+  color: #858ba0;
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 800;
+  letter-spacing: .7px;
+}
+body:not(.aai-login-page) .aai-source-preview-list {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+body:not(.aai-login-page) .aai-source-card {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 82px;
+  overflow: hidden;
+  border: 1px solid #e8e9f2;
+  border-radius: 11px;
+  background: #fff;
+  color: #303449;
+  text-decoration: none;
+  box-shadow: 0 2px 8px rgba(20,25,55,.035);
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+}
+body:not(.aai-login-page) .aai-source-card:not(.has-thumbnail) {
+  grid-template-columns: minmax(0, 1fr);
+}
+body:not(.aai-login-page) .aai-source-card:hover {
+  border-color: #c9c8ec;
+  background: #fdfdff;
+  transform: translateY(-1px);
+}
+body:not(.aai-login-page) .aai-source-thumb {
+  display: block;
+  width: 104px;
+  height: 100%;
+  min-height: 82px;
+  object-fit: cover;
+  background: #f0f1f6;
+}
+body:not(.aai-login-page) .aai-source-card-content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 11px;
+}
+body:not(.aai-login-page) .aai-source-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+body:not(.aai-login-page) .aai-source-favicon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #fff;
+}
+body:not(.aai-login-page) .aai-source-card-title {
+  min-width: 0;
+  color: #343750;
+  font-size: 12.5px;
+  line-height: 1.35;
+  font-weight: 700;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+body:not(.aai-login-page) .aai-source-card-arrow {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #9a9db0;
+  font-size: 10px;
+}
+body:not(.aai-login-page) .aai-source-card-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: #70768b;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 400;
+}
+body:not(.aai-login-page) .aai-source-card-domain {
+  color: #9a9eb0;
+  font-size: 10px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-source-card {
+    grid-template-columns: 88px minmax(0, 1fr);
+    min-height: 76px;
+    border-radius: 10px;
+  }
+  body:not(.aai-login-page) .aai-source-thumb {
+    width: 88px;
+    min-height: 76px;
+  }
+  body:not(.aai-login-page) .aai-source-card-content {
+    padding: 7px 9px;
+    gap: 3px;
+  }
+  body:not(.aai-login-page) .aai-source-card-title { font-size: 12px; }
+  body:not(.aai-login-page) .aai-source-card-snippet { font-size: 11px; }
+}
