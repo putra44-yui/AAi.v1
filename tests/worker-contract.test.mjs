@@ -77,7 +77,7 @@ test('legacy memory and file endpoints receive runtime Supabase bindings', () =>
 test('Markdown tables preserve columns and scroll horizontally', () => {
   const renderer = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.match(renderer, /makeReadableMarkdownTables\\(compactExternalLinks\\(safeHtml\\)\\)/);
+  assert.ok(renderer.includes('makeReadableMarkdownTables(compactExternalLinks(safeHtml))'));
   assert.ok(renderer.includes("table.classList.add('aai-data-table')"));
   assert.ok(renderer.includes("scroll.className = 'aai-table-scroll'"));
   assert.ok(renderer.includes("scroll.appendChild(table)"));
