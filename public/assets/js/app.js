@@ -1048,6 +1048,21 @@ const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   compose: 'fa-feather-alt'
 });
 
+function renderActivitySourceHTML(source) {
+  const href = String(source?.url || '').trim();
+  let parsed;
+  try { parsed = new URL(href); } catch { return ''; }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+  const hostname = parsed.hostname.replace(/^www\./i, '');
+  const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 100);
+  // The favicon service receives the public source domain only, never a chat query.
+  const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+  return '<a class="aai-activity-source-link" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
+    + '<img class="aai-activity-source-favicon" src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer">'
+    + '<span class="aai-activity-source-title">' + escHtml(title) + '</span>'
+    + '<span class="aai-activity-source-arrow" aria-hidden="true">↗</span></a>';
+}
+
 function renderActivityStepHTML(entry) {
   const step = entry && typeof entry === 'object' ? entry.step : '';
   const message = entry && typeof entry === 'object' ? entry.message : entry;
@@ -1056,6 +1071,11 @@ function renderActivityStepHTML(entry) {
   // Apply this to saved traces too so past sessions get the same presentation.
   if (step === 'strategy') {
     return '<li class="aai-activity-step aai-activity-report"><span class="aai-activity-step-text">' + safeText + '</span></li>';
+  }
+  if (step === 'sources') {
+    const links = (Array.isArray(entry?.sources) ? entry.sources : []).slice(0, 5)
+      .map(renderActivitySourceHTML).filter(Boolean).join('');
+    return links ? '<li class="aai-activity-step aai-activity-sources"><div class="aai-activity-source-links">' + links + '</div></li>' : '';
   }
   const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
   return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
@@ -1945,7 +1965,15 @@ async function processStream(response, streamId, onDone) {
       if (activityEl && activityListEl && typeof parsed.message === 'string') {
         activityEl.hidden = false;
         activityEl.open = true;
-        const step = { step: String(parsed.step || ''), message: parsed.message.slice(0, 220) };
+        const step = {
+          step: String(parsed.step || ''),
+          message: parsed.message.slice(0, 220),
+          ...(Array.isArray(parsed.sources)
+            ? { sources: parsed.sources.slice(0, 5).map(source => ({
+                url: String(source?.url || '').slice(0, 600),
+                title: String(source?.title || '').slice(0, 100)
+              })) } : {})
+        };
         activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
