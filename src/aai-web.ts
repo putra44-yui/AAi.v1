@@ -99,7 +99,7 @@ function cleanSource(value: unknown): WebSource | null {
   const title = typeof v.title === 'string' ? v.title.trim().slice(0, 180) : '';
   const snippetText = typeof v.content === 'string' ? v.content : typeof v.text === 'string' ? v.text : typeof v.snippet === 'string' ? v.snippet : '';
   const highlights = Array.isArray(v.highlights) ? v.highlights.filter(x => typeof x === 'string').join(' ') : '';
-  const snippet = (highlights || snippetText).replace(/\\s+/g, ' ').trim().slice(0, 700);
+  const snippet = (highlights || snippetText).replace(/\s+/g, ' ').trim().slice(0, 700);
 
   // Tavily returns images[] on each result when include_images=true.
   // Use only images attached to this exact result; never borrow the
@@ -111,11 +111,12 @@ function cleanSource(value: unknown): WebSource | null {
       if (item && typeof item === 'object') return (item as Record<string, unknown>).url;
       return undefined;
     })
-    .find(item => typeof item === 'string' && item.trim());
+    .map(cleanPublicHttpUrl)
+    .find(item => Boolean(item));
   const imageCandidate = [
-    resultImage, v.image, v.image_url, v.thumbnail, v.thumbnail_url, v.thumbnailUrl,
+    v.image, v.image_url, v.thumbnail, v.thumbnail_url, v.thumbnailUrl,
   ].find(item => typeof item === 'string' && item.trim());
-  const image = cleanPublicHttpUrl(imageCandidate);
+  const image = resultImage || cleanPublicHttpUrl(imageCandidate);
   if (!title && !snippet) return null;
   const publishedDate = typeof v.publishedDate === 'string' ? v.publishedDate.slice(0, 20) : undefined;
   return {

@@ -91,6 +91,7 @@ test('Tavily source-linked images are enabled and attached only to their matchin
             title: 'Artikel satu',
             content: 'Ringkasan artikel satu',
             images: [
+              { url: 'javascript:alert(1)', description: 'Tidak aman' },
               { url: 'https://cdn.example.org/article-one.jpg', description: 'Foto artikel satu' },
             ],
           },
