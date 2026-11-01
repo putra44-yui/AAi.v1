@@ -156,6 +156,7 @@ test('AAi shows real search sources with favicons, and model reports without too
   assert.match(client, /entry\?\.sources/);
   assert.match(client, /map\(renderActivitySourceHTML\)/);
   assert.match(client, /data-aai-favicon/);
+  assert.match(client, /image\.complete && image\.naturalWidth === 0/);
   assert.match(client, /aai-source-thumb-placeholder/);
   assert.match(client, /aai-inline-source-icon/);
   assert.match(css, /overflow-x:\s*auto/);
@@ -197,7 +198,9 @@ test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   assert.ok(server.includes("tool_choice: toolChoice"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
   assert.ok(server.includes('answerReady = true'));
-  assert.ok(server.includes("tool_choice: 'none'"));
+  assert.ok(server.includes("toolChoice = toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto'"));
+  assert.ok(server.includes("const finalPayload: ProviderRequestBody"));
+  assert.ok(!server.includes("tool_choice: 'none'"));
   assert.ok(server.includes("phase: 'tool_switch'"));
   assert.ok(!server.includes('generateAAiKnowledgeProbe'));
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
@@ -249,8 +252,9 @@ test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
 test('agent loop can make bounded, sequential model-selected web calls', () => {
   const server = read('src/chat.ts');
   assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
-  assert.match(server, /while \(!streamCanceled && toolRounds <= MAX_WEB_TOOL_ROUNDS\)/);
-  assert.match(server, /toolChoice = mustFinish \? 'none'/);
+  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
+  assert.match(server, /toolChoice = toolRounds === 0 && requestedWebDecision\.explicit/);
+  assert.doesNotMatch(server, /mustFinish|reachedLimit/);
   assert.match(server, /const searchedQueries = new Set<string>\(\)/);
   assert.match(server, /searchedQueries\.has\(queryKey\)/);
   assert.match(server, /limiter\.limit\(\{ key: ip \}\)/);

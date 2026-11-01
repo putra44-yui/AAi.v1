@@ -1133,7 +1133,7 @@ function wireSourcePreviewImages(root = document) {
   root.querySelectorAll('.aai-source-thumb[data-source-image]').forEach(image => {
     if (image.dataset.fallbackBound) return;
     image.dataset.fallbackBound = '1';
-    image.addEventListener('error', () => {
+    const showPlaceholder = () => {
       const card = image.closest('.aai-source-card');
       const placeholder = document.createElement('span');
       placeholder.className = 'aai-source-thumb-placeholder';
@@ -1144,14 +1144,16 @@ function wireSourcePreviewImages(root = document) {
       image.replaceWith(placeholder);
       card?.classList.remove('has-thumbnail');
       card?.classList.add('has-placeholder');
-    }, { once: true });
+    };
+    image.addEventListener('error', showPlaceholder, { once: true });
+    if (image.complete && image.naturalWidth === 0) showPlaceholder();
   });
   root.querySelectorAll('img[data-aai-favicon]').forEach(image => {
     if (image.dataset.fallbackBound) return;
     image.dataset.fallbackBound = '1';
-    image.addEventListener('error', () => {
-      image.hidden = true;
-    }, { once: true });
+    const hideBrokenFavicon = () => { image.hidden = true; };
+    image.addEventListener('error', hideBrokenFavicon, { once: true });
+    if (image.complete && image.naturalWidth === 0) hideBrokenFavicon();
   });
 }
 
