@@ -1063,6 +1063,83 @@ function renderActivitySourceHTML(source) {
     + '<span class="aai-activity-source-arrow" aria-hidden="true">↗</span></a>';
 }
 
+function parsePublicSourceUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    const hostname = parsed.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(parsed.protocol)
+      || !hostname
+      || hostname === 'localhost'
+      || hostname.endsWith('.localhost')
+      || hostname.endsWith('.local')
+      || /^(?:127\.|10\.|192\.168\.|169\.254\.|0\.)/i.test(hostname)) return null;
+    return parsed;
+  } catch { return null; }
+}
+
+function collectActivitySources(activityTrace) {
+  const steps = Array.isArray(activityTrace?.steps) ? activityTrace.steps : [];
+  const seen = new Set();
+  const sources = [];
+  for (const step of steps) {
+    if (step?.step !== 'sources' || !Array.isArray(step.sources)) continue;
+    for (const source of step.sources) {
+      const parsed = parsePublicSourceUrl(source?.url);
+      if (!parsed || seen.has(parsed.href)) continue;
+      seen.add(parsed.href);
+      sources.push({ ...source, url: parsed.href });
+      if (sources.length >= 5) return sources;
+    }
+  }
+  return sources;
+}
+
+function renderMessageSourceCardHTML(source) {
+  const parsed = parsePublicSourceUrl(source?.url);
+  if (!parsed) return '';
+  const hostname = parsed.hostname.replace(/^www\./i, '');
+  const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 140);
+  const snippet = String(source?.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  const image = parsePublicSourceUrl(source?.image);
+  const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+  const thumbnailHtml = image
+    ? '<img class="aai-source-thumb" data-source-image src="' + escHtml(image.href) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+    : '';
+  return '<a class="aai-source-card' + (image ? ' has-thumbnail' : '') + '" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
+    + thumbnailHtml
+    + '<span class="aai-source-card-content">'
+    + '<span class="aai-source-card-heading">'
+    + '<img class="aai-source-favicon" src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer">'
+    + '<span class="aai-source-card-title">' + escHtml(title) + '</span>'
+    + '<i class="fas fa-arrow-up-right-from-square aai-source-card-arrow" aria-hidden="true"></i>'
+    + '</span>'
+    + (snippet ? '<span class="aai-source-card-snippet">' + escHtml(snippet) + '</span>' : '')
+    + '<span class="aai-source-card-domain">' + escHtml(hostname) + '</span>'
+    + '</span></a>';
+}
+
+function buildMessageSourcePreviewHTML(activityTrace) {
+  const cards = collectActivitySources(activityTrace)
+    .map(renderMessageSourceCardHTML).filter(Boolean).join('');
+  if (!cards) return '';
+  return '<section class="aai-source-preview" aria-label="Sumber yang ditemukan">'
+    + '<div class="aai-source-preview-heading">Sumber yang ditemukan</div>'
+    + '<div class="aai-source-preview-list">' + cards + '</div>'
+    + '</section>';
+}
+
+function wireSourcePreviewImages(root = document) {
+  root.querySelectorAll('.aai-source-thumb[data-source-image]').forEach(image => {
+    if (image.dataset.fallbackBound) return;
+    image.dataset.fallbackBound = '1';
+    image.addEventListener('error', () => {
+      const card = image.closest('.aai-source-card');
+      image.remove();
+      card?.classList.remove('has-thumbnail');
+    }, { once: true });
+  });
+}
+
 function renderActivityStepHTML(entry) {
   const step = entry && typeof entry === 'object' ? entry.step : '';
   const message = entry && typeof entry === 'object' ? entry.message : entry;
@@ -1076,9 +1153,9 @@ function renderActivityStepHTML(entry) {
     return '<li class="aai-activity-step aai-activity-report"><span class="aai-activity-step-text">' + safeText + '</span></li>';
   }
   if (step === 'sources') {
-    const links = (Array.isArray(entry?.sources) ? entry.sources : []).slice(0, 5)
-      .map(renderActivitySourceHTML).filter(Boolean).join('');
-    return links ? '<li class="aai-activity-step aai-activity-sources"><div class="aai-activity-source-links">' + links + '</div></li>' : '';
+    const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-book-open';
+    return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
+      + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
   }
   const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
   return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
@@ -1978,7 +2055,9 @@ async function processStream(response, streamId, onDone) {
           ...(Array.isArray(parsed.sources)
             ? { sources: parsed.sources.slice(0, 5).map(source => ({
                 url: String(source?.url || '').slice(0, 600),
-                title: String(source?.title || '').slice(0, 100)
+                title: String(source?.title || '').slice(0, 140),
+                ...(typeof source?.snippet === 'string' ? { snippet: source.snippet.slice(0, 420) } : {}),
+                ...(typeof source?.image === 'string' ? { image: source.image.slice(0, 1200) } : {})
               })) } : {})
         };
         activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
@@ -2075,6 +2154,11 @@ async function processStream(response, streamId, onDone) {
         saveActivityTrace(parsed.message_id, Date.now() - activityStartedAt, activityTimeline, prefaceEl?.textContent || '');
       }
       flushStreamingRender(true);
+      const liveSourcePreviewHtml = buildMessageSourcePreviewHTML({ steps: activityTimeline });
+      if (liveSourcePreviewHtml && bubbleEl && !streamRow.querySelector('.aai-source-preview')) {
+        bubbleEl.insertAdjacentHTML('afterend', liveSourcePreviewHtml);
+        wireSourcePreviewImages(streamRow);
+      }
       stopPreviewTicker('', true);
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
@@ -3030,6 +3114,11 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     const previewBlock = extra?.preview ? buildPreviewPanelHTML(extra.preview) : '';
     const modelName = String(extra?.model || '').trim();
     const modelLabel = normalizeAssistantModelLabel(modelName, extra?.modelLabel || '');
+    const persistedTrace = extra?.activityTrace;
+    const localTrace = messageId ? getStoredActivityTraces()[messageId] : null;
+    const activityTrace = persistedTrace && Array.isArray(persistedTrace.steps) && persistedTrace.steps.length
+      ? persistedTrace : localTrace || persistedTrace || null;
+    const sourcePreviewHtml = buildMessageSourcePreviewHTML(activityTrace);
 
     let sourcesHtml = '';
     if (metadata?.sources?.length) {
@@ -3061,6 +3150,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       ${previewBlock}
       ${buildStoredActivityPanelHTML(messageId, extra?.activityTrace)}
       <div class="bubble">${formatContent(content)}</div>
+      ${sourcePreviewHtml}
       ${sourcesHtml}
       <div class="msg-actions">
         <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
@@ -3108,6 +3198,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
 
   ensureChatDateDivider(area, chatDate);
   area.insertAdjacentHTML('beforeend', html);
+  if (role === 'assistant') wireSourcePreviewImages(area.lastElementChild);
   if (role === 'user') refreshUserMessageCollapse(area.lastElementChild);
   if (!suppressAutoScroll) {
     scrollBottom();
