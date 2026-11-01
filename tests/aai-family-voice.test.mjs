@@ -18,6 +18,10 @@ test('AAi recognizes Guh as Teguh Putra speaking directly', () => {
   assert.match(voice.instruction, /berbicara LANGSUNG dengan Teguh Putra/);
   assert.match(voice.instruction, /orang ketiga yang berbeda/);
   assert.match(voice.instruction, /kamu yang merancang aku/);
+  assert.match(voice.instruction, /termasuk ketika membahas hal serius/);
+  assert.match(voice.instruction, /Jangan menunggu Guh bercanda lebih dulu/);
+  assert.match(voice.instruction, /ketepatan tetap utama/);
+  assert.match(voice.instruction, /dokumen resmi tetap formal/);
 });
 
 test('AAi addresses Rosalia naturally as Lia or Ya without family-role intros', () => {
