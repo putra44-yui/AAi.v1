@@ -1007,11 +1007,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             const searchedQueries = new Set<string>();
             let toolRounds = 0;
             const agentStartedAt = Date.now();
-            while (!streamCanceled && toolRounds <= MAX_WEB_TOOL_ROUNDS) {
-              const mustFinish = toolRounds >= MAX_WEB_TOOL_ROUNDS
-                || Date.now() - agentStartedAt >= MAX_AGENT_WALL_MS;
-              const toolChoice = mustFinish ? 'none'
-                : toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto';
+            while (!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS
+              && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
+              const toolChoice = toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto';
               const result = await fetchProviderStream({
                 apiKey, providerUrl,
                 payload: {
@@ -1057,7 +1055,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   if (visible) enqueueEvent({ token: visible });
                   answerReady = true;
                 } else {
-                  enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Model tidak mengirim jawaban; aku mencoba sekali lagi tanpa tools.' });
+                  enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Model belum memberi teks akhir; aku menyusun jawaban tanpa tools.' });
                 }
                 break;
               }
@@ -1077,16 +1075,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               emittedTokenCount = 0;
               displayFilter = createAAiMemoryStreamFilter();
 
-              // Even a misbehaving model cannot exceed the fixed number of calls.
-              const reachedLimit = mustFinish || toolRounds >= MAX_WEB_TOOL_ROUNDS;
               const chosenCall = calls[0];
               const query = extractSearchWebQuery(chosenCall);
               const queryKey = query?.toLocaleLowerCase('id-ID') || '';
               let toolResult: string;
-              if (reachedLimit) {
-                toolResult = JSON.stringify({ ok: false, error: 'Batas langkah agent tercapai. Susun jawaban dari informasi yang sudah ada.' });
-                enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Batas langkah tercapai; aku merangkum temuan sekarang.' });
-              } else if (!query || !isAllowedPublicWebQuery(message, query)) {
+              if (!query || !isAllowedPublicWebQuery(message, query)) {
                 toolResult = JSON.stringify({ ok: false, error: 'Query tidak memenuhi batasan privasi atau schema. Tidak ada pencarian yang dijalankan.' });
                 enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Query ditahan demi privasi; tidak ada data pribadi yang dicari.' });
               } else if (searchedQueries.has(queryKey)) {
@@ -1164,22 +1157,33 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 });
               });
               toolRounds += 1;
-              if (reachedLimit) break;
               // The next pass sees all prior tool outputs and decides whether to
-              // call search_web again or finish directly. No scripted tool sequence.
+              // call search_web again or finish directly. The hard cap exits to composition.
             }
           }
-
           if (!answerReady) {
             // No permission, incompatible model, empty answer, or exhausted loop:
             // stream one final answer. Tool results remain available as evidence.
-            const finalPayload: ProviderRequestBody = providerPayload.messages
-              .some(item => item.role === 'tool')
-              ? { ...providerPayload, tools: [SEARCH_WEB_TOOL], tool_choice: 'none', parallel_tool_calls: false }
-              : providerPayload;
+            const hasToolResults = providerPayload.messages.some(item => item.role === 'tool');
+            const finalMessages = [...providerPayload.messages];
+            if (hasToolResults) {
+              finalMessages.splice(context.systemMessages.length, 0, {
+                role: 'system',
+                content: '[TAHAP JAWABAN AKHIR] Pencarian sudah selesai. Jawab sekarang berdasarkan hasil tool yang tersedia. Jangan memanggil tool lagi. Jika bukti belum cukup, jelaskan batas informasinya.',
+              });
+            }
+            // Deliberately omit tools/tool_choice here. Some OpenRouter routes return an
+            // empty content stream when tool_choice:none is sent with the tool schema.
+            const finalPayload: ProviderRequestBody = {
+              model: providerPayload.model,
+              stream: true,
+              messages: finalMessages,
+              temperature: 0.45,
+              user: providerPayload.user,
+            };
             enqueueEvent({
               phase: 'progress', step: 'compose',
-              message: finalPayload.tool_choice === 'none'
+              message: hasToolResults
                 ? 'Merangkum temuan dan menyusun jawaban...'
                 : 'Menyusun jawaban dari konteks yang tersedia...',
             });
@@ -1192,10 +1196,36 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               return;
             }
             await receiveProviderResponse(final.response);
+            if (emittedTokenCount === 0 && !streamCanceled) {
+              enqueueEvent({
+                phase: 'progress', step: 'unavailable',
+                message: 'Respons akhir kosong; aku mencoba satu kali lagi tanpa tools.',
+              });
+              const retryPayload: ProviderRequestBody = {
+                ...finalPayload,
+                temperature: 0.25,
+                messages: [
+                  ...finalPayload.messages,
+                  {
+                    role: 'system',
+                    content: '[COBA LAGI] Kirim jawaban teks final sekarang. Jangan gunakan tools. Jika informasi tidak cukup, nyatakan keterbatasannya.',
+                  },
+                ],
+              };
+              const retry = await fetchProviderStream({
+                apiKey, providerUrl, payload: retryPayload, traceId,
+                abortSignal: upstreamAbortController.signal, env,
+              });
+              if (!retry.ok) {
+                if (!streamCanceled) emitStreamError(retry.message);
+                return;
+              }
+              await receiveProviderResponse(retry.response);
+            }
           }
 
           if (emittedTokenCount === 0) {
-            emitStreamError('Provider tidak mengirim token jawaban.');
+            emitStreamError('Provider menyelesaikan stream tanpa teks jawaban, bahkan setelah satu kali percobaan ulang.');
             return;
           }
           const trailing = displayFilter.finish();

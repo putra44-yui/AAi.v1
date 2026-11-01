@@ -1049,16 +1049,15 @@ const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
 });
 
 function renderActivitySourceHTML(source) {
-  const href = String(source?.url || '').trim();
-  let parsed;
-  try { parsed = new URL(href); } catch { return ''; }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+  const parsed = parsePublicSourceUrl(source?.url);
+  if (!parsed) return '';
   const hostname = parsed.hostname.replace(/^www\./i, '');
   const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 100);
-  // The favicon service receives the public source domain only, never a chat query.
+  // Only the public source hostname is sent to the favicon service.
   const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
   return '<a class="aai-activity-source-link" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
-    + '<img class="aai-activity-source-favicon" src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer">'
+    + '<span class="aai-activity-source-icon" aria-hidden="true"><i class="fas fa-globe"></i>'
+    + '<img class="aai-activity-source-favicon" data-aai-favicon src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer"></span>'
     + '<span class="aai-activity-source-title">' + escHtml(title) + '</span>'
     + '<span class="aai-activity-source-arrow" aria-hidden="true">↗</span></a>';
 }
@@ -1104,12 +1103,14 @@ function renderMessageSourceCardHTML(source) {
   const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
   const thumbnailHtml = image
     ? '<img class="aai-source-thumb" data-source-image src="' + escHtml(image.href) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
-    : '';
-  return '<a class="aai-source-card' + (image ? ' has-thumbnail' : '') + '" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
+    : '<span class="aai-source-thumb-placeholder" aria-hidden="true"><i class="fas fa-newspaper"></i></span>';
+  const cardState = image ? 'has-thumbnail' : 'has-placeholder';
+  return '<a class="aai-source-card ' + cardState + '" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
     + thumbnailHtml
     + '<span class="aai-source-card-content">'
     + '<span class="aai-source-card-heading">'
-    + '<img class="aai-source-favicon" src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer">'
+    + '<span class="aai-source-favicon-wrap" aria-hidden="true"><i class="fas fa-globe"></i>'
+    + '<img class="aai-source-favicon" data-aai-favicon src="' + escHtml(favicon) + '" alt="" width="18" height="18" loading="lazy" referrerpolicy="no-referrer"></span>'
     + '<span class="aai-source-card-title">' + escHtml(title) + '</span>'
     + '<i class="fas fa-arrow-up-right-from-square aai-source-card-arrow" aria-hidden="true"></i>'
     + '</span>'
@@ -1134,8 +1135,22 @@ function wireSourcePreviewImages(root = document) {
     image.dataset.fallbackBound = '1';
     image.addEventListener('error', () => {
       const card = image.closest('.aai-source-card');
-      image.remove();
+      const placeholder = document.createElement('span');
+      placeholder.className = 'aai-source-thumb-placeholder';
+      placeholder.setAttribute('aria-hidden', 'true');
+      const icon = document.createElement('i');
+      icon.className = 'fas fa-newspaper';
+      placeholder.appendChild(icon);
+      image.replaceWith(placeholder);
       card?.classList.remove('has-thumbnail');
+      card?.classList.add('has-placeholder');
+    }, { once: true });
+  });
+  root.querySelectorAll('img[data-aai-favicon]').forEach(image => {
+    if (image.dataset.fallbackBound) return;
+    image.dataset.fallbackBound = '1';
+    image.addEventListener('error', () => {
+      image.hidden = true;
     }, { once: true });
   });
 }
@@ -1147,6 +1162,9 @@ function renderActivityStepHTML(entry) {
   const displayMessage = step === 'tavily' ? 'Mencari sumber dari web...'
     : step === 'exa' ? 'Hasil awal belum cukup; mencari sumber lain...' : message;
   const safeText = escHtml(String(displayMessage || '').slice(0, 220));
+  const sourceLinks = Array.isArray(entry?.sources)
+    ? entry.sources.slice(0, 5).map(renderActivitySourceHTML).filter(Boolean).join('')
+    : '';
   // Model-authored reports are conversation, not mechanical tool status.
   // Apply this to saved traces too so past sessions get the same presentation.
   if (step === 'strategy') {
@@ -1154,8 +1172,12 @@ function renderActivityStepHTML(entry) {
   }
   if (step === 'sources') {
     const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-book-open';
-    return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
+    const milestone = '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
       + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
+    const links = sourceLinks
+      ? '<li class="aai-activity-sources"><div class="aai-activity-source-links">' + sourceLinks + '</div></li>'
+      : '';
+    return milestone + links;
   }
   const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
   return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
@@ -1495,6 +1517,7 @@ function updateAssistantMessageContent(messageId, content) {
   if (bubble) {
     bubble.classList.remove('stream-cursor');
     bubble.innerHTML = formatContent(normalizedContent);
+    wireSourcePreviewImages(row);
   }
 
   row.setAttribute('data-plain-text', encodeURIComponent(normalizedContent));
@@ -2061,6 +2084,7 @@ async function processStream(response, streamId, onDone) {
               })) } : {})
         };
         activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
+        wireSourcePreviewImages(activityListEl);
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
@@ -2157,8 +2181,8 @@ async function processStream(response, streamId, onDone) {
       const liveSourcePreviewHtml = buildMessageSourcePreviewHTML({ steps: activityTimeline });
       if (liveSourcePreviewHtml && bubbleEl && !streamRow.querySelector('.aai-source-preview')) {
         bubbleEl.insertAdjacentHTML('afterend', liveSourcePreviewHtml);
-        wireSourcePreviewImages(streamRow);
       }
+      wireSourcePreviewImages(streamRow);
       stopPreviewTicker('', true);
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
@@ -3528,6 +3552,25 @@ function compactExternalLinks(sanitizedHtml) {
     link.setAttribute('target', '_blank');
     link.setAttribute('rel', 'noopener noreferrer');
     link.setAttribute('aria-label', (link.textContent || hostname).trim() + ' — buka situs eksternal');
+
+    if (!link.querySelector('.aai-inline-source-icon') && !link.querySelector('img')) {
+      const iconWrap = document.createElement('span');
+      iconWrap.className = 'aai-inline-source-icon';
+      iconWrap.setAttribute('aria-hidden', 'true');
+      const fallback = document.createElement('i');
+      fallback.className = 'fas fa-globe';
+      const favicon = document.createElement('img');
+      favicon.className = 'aai-inline-source-favicon';
+      favicon.setAttribute('data-aai-favicon', '');
+      favicon.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+      favicon.alt = '';
+      favicon.width = 14;
+      favicon.height = 14;
+      favicon.loading = 'lazy';
+      favicon.referrerPolicy = 'no-referrer';
+      iconWrap.append(fallback, favicon);
+      link.prepend(iconWrap);
+    }
   });
   return fragment.innerHTML;
 }

@@ -153,6 +153,14 @@ test('AAi shows real search sources with favicons, and model reports without too
   assert.match(client, /rel="noopener noreferrer nofollow"/);
   assert.match(css, /\.aai-activity-report/);
   assert.match(css, /\.aai-activity-source-link/);
+  assert.match(client, /entry\?\.sources/);
+  assert.match(client, /map\(renderActivitySourceHTML\)/);
+  assert.match(client, /data-aai-favicon/);
+  assert.match(client, /aai-source-thumb-placeholder/);
+  assert.match(client, /aai-inline-source-icon/);
+  assert.match(css, /overflow-x:\s*auto/);
+  assert.match(css, /scroll-snap-type:\s*x proximity/);
+  assert.match(css, /\.bubble a\.aai-source-link[\s\S]*inline-flex/);
 });
 
 test('AAi promotes model-generated opening text into the compact tool activity', () => {
@@ -258,4 +266,18 @@ test('family identity uses the linked account and speaks to the person directly'
   assert.match(context, /berbicara LANGSUNG dengan Teguh Putra/);
   assert.match(context, /berbicara LANGSUNG dengan Rosalia/);
   assert.match(context, /slang Indonesia ringan/);
+});
+
+
+test('web tool loop exits at the hard cap and final composition omits tool schema', () => {
+  const server = read('src/chat.ts');
+  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
+  assert.doesNotMatch(server, /toolRounds <= MAX_WEB_TOOL_ROUNDS/);
+  const finalStart = server.indexOf('const finalPayload: ProviderRequestBody');
+  const finalEnd = server.indexOf('const final = await fetchProviderStream', finalStart);
+  assert.ok(finalStart >= 0 && finalEnd > finalStart);
+  const finalBlock = server.slice(finalStart, finalEnd);
+  assert.match(finalBlock, /temperature: 0\.45/);
+  assert.doesNotMatch(finalBlock, /tools:\s*\[SEARCH_WEB_TOOL\]|tool_choice/);
+  assert.match(server, /COBA LAGI.*Kirim jawaban teks final sekarang/s);
 });

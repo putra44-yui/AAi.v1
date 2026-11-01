@@ -1718,3 +1718,159 @@ body:not(.aai-login-page) .aai-source-card-domain {
   body:not(.aai-login-page) .aai-source-card-title { font-size: 12px; }
   body:not(.aai-login-page) .aai-source-card-snippet { font-size: 11px; }
 }
+
+
+/* AAi source cards: square-ish cards in a swipeable horizontal rail. */
+body:not(.aai-login-page) .aai-source-preview-list {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 2px 11px;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 2px;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  scrollbar-color: #b9a8dd rgba(151, 130, 190, .12);
+}
+body:not(.aai-login-page) .aai-source-preview-list::-webkit-scrollbar { height: 5px; }
+body:not(.aai-login-page) .aai-source-preview-list::-webkit-scrollbar-track {
+  background: rgba(151, 130, 190, .12);
+  border-radius: 999px;
+}
+body:not(.aai-login-page) .aai-source-preview-list::-webkit-scrollbar-thumb {
+  background: #b9a8dd;
+  border-radius: 999px;
+}
+body:not(.aai-login-page) .aai-source-card {
+  display: flex;
+  flex: 0 0 292px;
+  flex-direction: column;
+  width: 292px;
+  min-width: 0;
+  min-height: 258px;
+  max-height: 290px;
+  grid-template-columns: none;
+  scroll-snap-align: start;
+  border-radius: 15px;
+}
+body:not(.aai-login-page) .aai-source-card.has-thumbnail,
+body:not(.aai-login-page) .aai-source-card.has-placeholder {
+  grid-template-columns: none;
+}
+body:not(.aai-login-page) .aai-source-thumb,
+body:not(.aai-login-page) .aai-source-thumb-placeholder {
+  display: flex;
+  flex: 0 0 146px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 146px;
+  min-height: 146px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #eee9fb, #e7f3fb);
+  color: #9885bf;
+  font-size: 28px;
+}
+body:not(.aai-login-page) .aai-source-card-content {
+  flex: 1;
+  justify-content: flex-start;
+  gap: 7px;
+  min-height: 0;
+  padding: 11px 13px 12px;
+}
+body:not(.aai-login-page) .aai-source-card-heading { gap: 8px; }
+body:not(.aai-login-page) .aai-source-card-title {
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
+}
+body:not(.aai-login-page) .aai-source-card-snippet {
+  -webkit-line-clamp: 2;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+body:not(.aai-login-page) .aai-source-card-domain { margin-top: auto; }
+body:not(.aai-login-page) .aai-source-favicon-wrap,
+body:not(.aai-login-page) .aai-activity-source-icon {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: #9885bf;
+}
+body:not(.aai-login-page) .aai-source-favicon-wrap .aai-source-favicon,
+body:not(.aai-login-page) .aai-activity-source-icon .aai-activity-source-favicon {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #fff;
+}
+body:not(.aai-login-page) .aai-activity-source-icon { flex-basis: 16px; width: 16px; height: 16px; }
+body:not(.aai-login-page) .aai-activity-source-icon .aai-activity-source-favicon {
+  width: 16px;
+  height: 16px;
+}
+body:not(.aai-login-page) .bubble a.aai-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  margin: 0 2px;
+  padding: 1px 7px 2px;
+  vertical-align: baseline;
+  white-space: nowrap;
+  border: 1px solid rgba(132, 104, 190, .20);
+  border-bottom: 1px solid rgba(132, 104, 190, .20);
+  border-radius: 999px;
+  background: rgba(132, 104, 190, .075);
+  line-height: 1.45;
+}
+body:not(.aai-login-page) .aai-inline-source-icon {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: #927eb8;
+}
+body:not(.aai-login-page) .aai-inline-source-favicon {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: #fff;
+  object-fit: contain;
+}
+body:not(.aai-login-page) .aai-activity-source-icon .aai-activity-source-favicon[hidden],
+body:not(.aai-login-page) .aai-source-favicon[hidden],
+body:not(.aai-login-page) .aai-inline-source-favicon[hidden] { display: none; }
+@media (max-width: 600px) {
+  body:not(.aai-login-page) .aai-source-card {
+    flex-basis: min(82vw, 292px);
+    width: min(82vw, 292px);
+    min-height: 250px;
+    max-height: 280px;
+    border-radius: 14px;
+  }
+  body:not(.aai-login-page) .aai-source-thumb,
+  body:not(.aai-login-page) .aai-source-thumb-placeholder {
+    flex-basis: 138px;
+    height: 138px;
+    min-height: 138px;
+  }
+  body:not(.aai-login-page) .bubble a.aai-source-link { padding-inline: 6px; }
+}
