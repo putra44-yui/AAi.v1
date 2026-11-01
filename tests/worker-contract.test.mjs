@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v29/);
+  assert.match(sw, /aai-shell-v30/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -133,6 +133,8 @@ test('AAi shows real search sources with favicons, and model reports without too
   assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)/);
   assert.match(client, /if \(step === 'sources'\)/);
   assert.match(client, /if \(step === 'strategy'\)/);
+  assert.match(client, /step === 'tavily' \? 'Mencari sumber dari web/);
+  assert.match(client, /step === 'exa' \? 'Hasil awal belum cukup/);
   assert.match(client, /renderActivitySourceHTML/);
   assert.match(client, /www\.google\.com\/s2\/favicons/);
   assert.match(client, /rel="noopener noreferrer nofollow"/);
