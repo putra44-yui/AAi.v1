@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v28/);
+  assert.match(sw, /aai-shell-v29/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -121,6 +121,21 @@ test('AAi displays measured collapsible activity and readable named source links
   assert.match(client, /link\.classList\.add\('aai-source-link'\)/);
   assert.match(css, /\.aai-source-link::after/);
   assert.match(css, /content: '↗'/);
+});
+
+test('AAi shows real search sources with favicons, and model reports without tool icons', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  const css = read('public/assets/css/aai-studio.css');
+  assert.match(server, /step: 'sources', message: 'Sumber pencarian'/);
+  assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)/);
+  assert.match(client, /if \(step === 'sources'\)/);
+  assert.match(client, /if \(step === 'strategy'\)/);
+  assert.match(client, /renderActivitySourceHTML/);
+  assert.match(client, /www\.google\.com\/s2\/favicons/);
+  assert.match(client, /rel="noopener noreferrer nofollow"/);
+  assert.match(css, /\.aai-activity-report/);
+  assert.match(css, /\.aai-activity-source-link/);
 });
 
 test('AAi promotes model-generated opening text into the compact tool activity', () => {
