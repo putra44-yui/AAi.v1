@@ -1031,7 +1031,7 @@ function saveActivityTrace(messageId, durationMs, steps, preface = '') {
   if (!messageId || !Array.isArray(steps) || !steps.length) return;
   try {
     const traces = getStoredActivityTraces();
-    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(0, 14), preface: String(preface).slice(0, 240), savedAt: Date.now() };
+    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(-18), preface: String(preface).slice(0, 240), savedAt: Date.now() };
     const latest = Object.entries(traces).sort((left, right) => (right[1]?.savedAt || 0) - (left[1]?.savedAt || 0)).slice(0, 80);
     localStorage.setItem(AAI_ACTIVITY_STORE_KEY, JSON.stringify(Object.fromEntries(latest)));
   } catch { /* Storage may be disabled; live activity still works. */ }
@@ -1941,7 +1941,8 @@ async function processStream(response, streamId, onDone) {
         activityEl.open = true;
         const step = { step: String(parsed.step || ''), message: parsed.message.slice(0, 220) };
         activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
-        if (activityTimeline.length < 14) activityTimeline.push(step);
+        activityTimeline.push(step);
+        if (activityTimeline.length > 18) activityTimeline.shift();
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
         updateActivityClock();
         scrollBottom();

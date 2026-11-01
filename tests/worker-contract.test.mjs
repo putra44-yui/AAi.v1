@@ -40,7 +40,7 @@ test('PWA precache references real files and prefers network for updated app cod
   for (const [, path] of list[1].matchAll(/'([^']+)'/g)) {
     assert.ok(existsSync(new URL(`../public${path}`, import.meta.url)), `Missing PWA asset: ${path}`);
   }
-  assert.match(sw, /aai-shell-v27/);
+  assert.match(sw, /aai-shell-v28/);
   assert.match(sw, /pathname\.startsWith\('\/assets\/'\)/);
 });
 
@@ -156,8 +156,8 @@ test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
   assert.ok(server.includes("tool_choice: requestedWebDecision.explicit ? 'required' : 'auto'"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
-  assert.ok(server.includes('shouldRequestFinalAnswer = false'));
-  assert.ok(server.includes("providerPayload.tool_choice = 'none'"));
+  assert.ok(server.includes('answerReady = true'));
+  assert.ok(server.includes("tool_choice: 'none'"));
   assert.ok(server.includes("phase: 'tool_switch'"));
   assert.ok(!server.includes('generateAAiKnowledgeProbe'));
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
@@ -204,4 +204,26 @@ test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
   assert.match(prompt, /untuk ajakan diskusi/);
   assert.match(prompt, /Jangan membatasi panjang jawaban secara kaku/);
   assert.doesNotMatch(prompt, /jawaban langsung ke inti, jelas, dan tidak berputar-putar/);
+});
+
+test('agent loop can make bounded, sequential model-selected web calls', () => {
+  const server = read('src/chat.ts');
+  assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
+  assert.match(server, /while \(!streamCanceled && toolRounds <= MAX_WEB_TOOL_ROUNDS\)/);
+  assert.match(server, /toolChoice = mustFinish \? 'none'/);
+  assert.match(server, /const searchedQueries = new Set<string>\(\)/);
+  assert.match(server, /searchedQueries\.has\(queryKey\)/);
+  assert.match(server, /limiter\.limit\(\{ key: ip \}\)/);
+  assert.match(server, /toolRounds \+= 1/);
+  assert.match(server, /role: 'tool'/);
+  assert.match(server, /phase: 'tool_switch'/);
+});
+
+test('family identity uses the linked account and speaks to the person directly', () => {
+  const context = read('src/aai-context.ts');
+  assert.match(context, /resolveAAiFamilyVoice\(user\.username/);
+  assert.match(context, /SAPAAAN DAN PERSPEKTIF PEMBICARA/);
+  assert.match(context, /berbicara LANGSUNG dengan Teguh Putra/);
+  assert.match(context, /berbicara LANGSUNG dengan Rosalia/);
+  assert.match(context, /slang Indonesia ringan/);
 });
