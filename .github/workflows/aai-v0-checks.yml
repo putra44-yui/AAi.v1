@@ -1,0 +1,26 @@
+name: AAi v0 checks
+
+on:
+  push:
+    branches:
+      - fix/aai-v0-progress-plain-language-20261102
+  pull_request:
+    branches:
+      - design/aai-crystal-refresh
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node --check public/assets/js/app.js
+      - run: npx wrangler deploy --dry-run
