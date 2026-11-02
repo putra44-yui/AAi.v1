@@ -7,6 +7,7 @@ export interface AAiContext {
   personaUsed: string;
   systemMessages: AAiSystemMessage[];
   memoryCount: number;
+  selectedMemoryIds: string[];
 }
 type Person = { id: string; name: string; role: string | null; description?: string | null };
 type Memory = {
@@ -98,6 +99,53 @@ function similarity(memory: Memory, messageWords: Set<string>): number {
   for (const word of messageWords) if (terms.has(word)) common += 1;
   return common / Math.max(1, Math.min(messageWords.size, 8));
 }
+// A recall request is different from a request to memorize a new fact.
+// In particular, "ingatkan aku besok" must not trigger a historical search.
+export function isAAiRecallQuestion(message: string): boolean {
+  const normalized = message.toLowerCase().normalize('NFKC');
+  return /\b(?:kamu|kau|aai|kita)\b.{0,90}\b(?:ingat|inget|ingatan|pernah|janji|berjanji)\b/u.test(normalized)
+    || /\b(?:masih\s+)?(?:ingat|inget)\b.{0,90}\b(?:gak|nggak|tidak|lagi|apa|yang|waktu|tentang|dulu|janji|kita|pernah)\b/u.test(normalized)
+    || /\b(?:pernah|dulu)\b.{0,90}\b(?:bahas|ngobrol|diskusi|sepakat|bilang|cerita|berjanji)\b/u.test(normalized)
+    || /\b(?:janji|berjanji)\b.{0,60}\b(?:kita|aku|kamu|dulu|pernah)\b/u.test(normalized);
+}
+
+const RECALL_MAX_EXTRA_MEMORIES = 8;
+// Tokens, passwords and similar keys are never forwarded during the expanded search.
+const SENSITIVE_MEMORY_KEY = /(?:^|_)(?:password|passwd|sandi|pin|token|api_key|secret|credential|private_key|kunci_privat)(?:_|$)/i;
+
+export interface AAiRecallResult {
+  contextMessage: AAiSystemMessage | null;
+  matchCount: number;
+}
+
+export async function searchAAiRecallMemories(
+  supabase: SupabaseClient, personId: string, message: string, excludedIds: string[],
+): Promise<AAiRecallResult> {
+  // personId must come from the authenticated user lookup, not the chat request.
+  const { data, error } = await supabase.from('person_memory')
+    .select('id, key, value, memory_type, category, priority_score, updated_at')
+    .eq('person_id', personId).eq('status', 'active')
+    .order('priority_score', { ascending: false }).limit(420);
+  if (error) throw error;
+
+  const queryTerms = words(message);
+  const seen = new Set(excludedIds);
+  const relevant = ((data ?? []) as Memory[])
+    .filter(memory => !seen.has(memory.id)
+      && !SENSITIVE_MEMORY_KEY.test(memory.key ?? '')
+      && !SENSITIVE_MEMORY_KEY.test(memory.category ?? '')
+      && similarity(memory, queryTerms) > 0);
+  const selected = selectRelevantAAiMemories(relevant, message, RECALL_MAX_EXTRA_MEMORIES);
+  return {
+    matchCount: selected.length,
+    contextMessage: selected.length ? {
+      role: 'system',
+      content: '[CATATAN LAMA TAMBAHAN: HASIL PENCARIAN MEMORI AKUN INI]\n'
+        + selected.map(summarizeMemory).join('\n')
+        + '\nIni hanya petunjuk kontekstual, bukan bukti lengkap riwayat. Jangan menyatakan janji lama benar-benar ada jika catatan tidak mendukungnya.',
+    } : null,
+  };
+}
 export function selectRelevantAAiMemories(memories: Memory[], message: string, limit = 14): Memory[] {
   const query = words(message);
   const wantsOverview = /ingat tentang (aku|saya|ku)|apa (yang )?(kau|kamu|aai) (ingat|tahu)|kenal (aku|saya)|siapa aku/i.test(message);
@@ -179,7 +227,7 @@ export async function loadAAiContext(
     + 'Jangan buat tag untuk dugaan, rahasia orang lain, detail medis sensitif, pertanyaan biasa, atau fakta yang tidak berasal dari pengguna. '
     + 'Untuk permintaan eksplisit melupakan memori gunakan [MEMORY_FORGET:key=nama_kunci]. '
     + 'Tag ini diproses server dan tidak untuk ditampilkan ke pengguna.' });
-  return { personId, personaUsed, systemMessages, memoryCount: selected.length };
+  return { personId, personaUsed, systemMessages, memoryCount: selected.length, selectedMemoryIds: selected.map(row => row.id) };
 }
 
 function normalizeKey(input: string): string {
