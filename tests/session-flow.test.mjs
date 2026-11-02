@@ -114,6 +114,69 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
   }
 });
 
+test('explicit recall streams a genuine second memory search without exposing private notes in activity', async () => {
+  const originalFetch = globalThis.fetch;
+  const ownerPersonId = '55555555-5555-4555-8555-555555555555';
+  const queries = [];
+  const providerCalls = [];
+  const memory = (id, key, value) => ({ id, key, value, priority_score: 0.5, memory_type: 'fakta', category: 'umum' });
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      const method = init.method || 'GET';
+      if (url.hostname === 'openrouter.ai') {
+        providerCalls.push(JSON.parse(init.body));
+        return new Response('data: {"choices":[{"delta":{"content":"Aku cek catatan yang ada, ya."}}]}\n\ndata: [DONE]\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      const resource = url.pathname.split('/').at(-1);
+      if (resource === 'users' && method === 'GET') {
+        return Response.json({ id: userId, username:'teguh', person_id:ownerPersonId });
+      }
+      if (resource === 'persons' && method === 'GET') {
+        return url.searchParams.has('id')
+          ? Response.json({ id: ownerPersonId, name:'Teguh Putra', role:'ayah' })
+          : Response.json([{ id:ownerPersonId, name:'Teguh Putra', role:'ayah' }]);
+      }
+      if (resource === 'person_memory' && method === 'GET') {
+        queries.push(url);
+        return Response.json(url.searchParams.get('limit') === '140'
+          ? [memory('initial', 'gaya_bahasa', 'Senang gaya santai')]
+          : [memory('initial', 'gaya_bahasa', 'Senang gaya santai'),
+            memory('extra', 'benih_aai_janji', 'Benih AAi janji untuk mengaudit korpus'),
+            memory('private', 'benih_aai_api_token', 'Token rahasia Benih AAi')]);
+      }
+      if (resource === 'sessions' && method === 'POST') return Response.json({ id:sessionId }, { status:201 });
+      if (resource === 'sessions' && method === 'PATCH') return new Response(null, { status:204 });
+      if (resource === 'messages' && method === 'GET') return Response.json([]);
+      if (resource === 'messages' && method === 'POST') {
+        return Response.json({ id:JSON.parse(init.body).role === 'user'
+          ? userMessageId : assistantMessageId }, { status:201 });
+      }
+      throw new Error('Unexpected fixture: ' + method + ' ' + url);
+    };
+
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method:'POST', body:JSON.stringify({ user_id:userId, message:'Kamu ingat janji Benih AAi yang pernah kita bahas?' }),
+    }), { ...env, AAI_RECALL_SEARCH_ENABLED:'true' });
+    assert.equal(response.status, 200);
+    const events = (await response.text()).split('\n\n').filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6)));
+    assert.equal(queries.length, 2);
+    assert.ok(queries.every(query => query.searchParams.get('person_id') === 'eq.' + ownerPersonId));
+    assert.deepEqual(queries.map(query => query.searchParams.get('limit')), ['140', '420']);
+    assert.ok(events.some(event => event.phase === 'progress' && /telusuri lagi catatan lama/.test(event.message)));
+    assert.ok(events.some(event => event.phase === 'progress' && /1 catatan tambahan/.test(event.message)));
+    assert.doesNotMatch(JSON.stringify(events.filter(event => event.phase === 'progress')), /aai_janji|Token rahasia|mengaudit korpus/);
+    const prompt = JSON.stringify(providerCalls[0].messages);
+    assert.match(prompt, /Benih AAi janji untuk mengaudit korpus/);
+    assert.doesNotMatch(prompt, /Token rahasia/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('session API requires a user ID for deleting a session', async () => {
   const response = await handleSessionApi(new Request(
     `https://aai.example/api/sessions/${sessionId}`, { method: 'DELETE' },

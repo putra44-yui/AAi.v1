@@ -4,6 +4,30 @@
 const LAST_SESSION_OWNER_KEY = 'aai_last_session_owner';
 const currentUser = JSON.parse(localStorage.getItem('aai_user') || '{}');
 if (!currentUser.id) window.location.href = '/login';
+(async function verifyLiveSession() {
+  try {
+    const configResponse = await fetch('/api/auth-config', { cache: 'no-store' });
+    if (!configResponse.ok) return;
+    const config = await configResponse.json();
+    if (!config.required) return;
+    const response = await fetch('/api/me', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Session expired');
+    const { user } = await response.json();
+    if (!user?.id) throw new Error('Missing verified account');
+    if (currentUser.id !== user.id) {
+      localStorage.setItem('aai_user', JSON.stringify(user));
+      clearStoredSessionState();
+      window.location.reload();
+      return;
+    }
+    currentUser.username = user.username;
+    currentUser.person_id = user.person_id || null;
+  } catch {
+    localStorage.removeItem('aai_user');
+    window.location.replace('/login');
+  }
+})();
+
 clearStoredSessionOnUserMismatch();
 if (currentUser.username || currentUser.person_name) {
   document.getElementById('cardUsername').textContent = currentUser.username || currentUser.person_name;
@@ -3963,6 +3987,7 @@ document.addEventListener('keydown', (event) => {
 async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
   if (!shouldLogout) return;
+  try { await fetch('/api/logout', { method: 'POST' }); } catch { /* Local exit still works. */ }
   clearStoredSessionState();
   localStorage.removeItem('aai_user');
   await clearRuntimeCaches();

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, shouldRunWebToolDecision, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
 import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, sanitizeUnverifiedToolOpening, type NativeToolCall } from './aai-tools.ts';
-import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
+import { loadAAiContext, searchAAiRecallMemories, isAAiRecallQuestion, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 import { buildAAiClockContext, normalizeAAiTimeZone } from './aai-clock.ts';
 type RuntimeEnv = Record<string, unknown>;
@@ -886,6 +886,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const webPermissionGranted = requestBody.value.webPermission === 'allow';
     // Only a direct user request may REQUIRE a search. Otherwise the model chooses.
     const requestedWebDecision = decideWebSearch(message);
+    // Username-only login is not authentication yet. Until the server verifies
+    // caller identity, keep expanded personal-memory retrieval OFF by default.
+    const expandedRecallEnabled = readEnv('AAI_RECALL_SEARCH_ENABLED', env) === 'true';
     const hasSearchProvider = !!(readEnv('TAVILY_API_KEY', env) || readEnv('EXA_API_KEY', env));
     const shouldRunToolDecision = !webSearchOptedOut
       && shouldRunWebToolDecision(requestedWebDecision, requestBody.value.webPermission, hasSearchProvider);
@@ -990,6 +993,43 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               message: 'Mengingat ' + context.memoryCount + ' catatan konteks percakapan...',
               source_count: context.memoryCount,
             });
+          }
+
+          // Only explicit requests to remember our earlier conversation earn a
+          // deeper search. Never look up another family member's memories and
+          // never put raw personal records into progress events or logs.
+          if (isAAiRecallQuestion(message) && !expandedRecallEnabled) {
+            enqueueEvent({ phase: 'progress', step: 'unavailable',
+              message: 'Pencarian catatan tambahan belum diaktifkan sampai perlindungan akun siap. Aku gunakan konteks yang sudah ada.' });
+          } else if (isAAiRecallQuestion(message)) {
+            enqueueEvent({ phase: 'progress', step: 'strategy',
+              message: 'Bentar, aku cocokkan dulu dengan ingatan yang tersimpan. Jangan sampai aku asal mengaku ingat, ya.' });
+            if (context.personId) {
+              enqueueEvent({ phase: 'progress', step: 'memory',
+                message: 'Aku telusuri lagi catatan lama yang terkait...' });
+              try {
+                const recall = await searchAAiRecallMemories(
+                  supabase as unknown as SupabaseClient, context.personId, message, context.selectedMemoryIds,
+                );
+                if (recall.contextMessage) {
+                  providerPayload.messages.splice(context.systemMessages.length, 0, recall.contextMessage);
+                  enqueueEvent({ phase: 'progress', step: 'strategy',
+                    message: `Nah, ada ${recall.matchCount} catatan tambahan yang mungkin terkait. Aku cocokkan dulu sebelum menyimpulkan.`,
+                    source_count: recall.matchCount });
+                } else {
+                  enqueueEvent({ phase: 'progress', step: 'strategy',
+                    message: 'Belum ketemu catatan tambahan yang benar-benar cocok. Aku tetap jawab dari konteks yang ada, tanpa mengarang janji lama.' });
+                }
+                logTiming('recall_search_complete', { additional_count: recall.matchCount });
+              } catch {
+                enqueueEvent({ phase: 'progress', step: 'unavailable',
+                  message: 'Catatan lama belum berhasil kubuka lagi. Aku lanjut dari ingatan yang sudah tersedia.' });
+                logTiming('recall_search_unavailable');
+              }
+            } else {
+              enqueueEvent({ phase: 'progress', step: 'unavailable',
+                message: 'Akun ini belum terhubung ke catatan pribadi yang bisa kutelusuri.' });
+            }
           }
 
           if (webSearchOptedOut) {
@@ -1151,6 +1191,12 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Kuota pencarian terbatas; aku tidak akan mengarang sumber baru.' });
                 } else {
                   enqueueEvent({
+                    phase: 'progress', step: 'strategy',
+                    message: toolRounds === 0
+                      ? 'Aku cek sumber publik dulu, ya. Ada bagian yang perlu kupastikan sebelum menjawab.'
+                      : 'Bukti sebelumnya masih menyisakan pertanyaan. Aku coba telusuri lagi dari sudut lain.',
+                  });
+                  enqueueEvent({
                     phase: 'progress', step: 'assess',
                     message: toolRounds === 0 ? 'Butuh sumber tambahan untuk memastikan jawaban.'
                       : 'Mencari lagi untuk mengecek detail yang belum jelas...',
@@ -1181,6 +1227,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                         ...(source.image ? { image: source.image } : {}),
                       })),
                     });
+                    enqueueEvent({ phase: 'progress', step: 'strategy',
+                      message: `Nah, ada ${outcome.sources.length} sumber yang berhasil ditemukan. Aku periksa dulu apakah isinya benar-benar menjawab pertanyaanmu.` });
+                  } else {
+                    enqueueEvent({ phase: 'progress', step: 'strategy',
+                      message: 'Hmm, pencarian tadi belum menghasilkan sumber yang bisa dipakai. Aku akan jujur soal batasnya.' });
                   }
                   const evidence = webContextMessage(decision, outcome);
                   if (evidence) {
