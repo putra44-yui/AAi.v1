@@ -178,8 +178,9 @@ interface ToolSwitchEvent {
 
 interface ProgressEvent {
   phase: 'progress';
-  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose';
+  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose' | 'provider';
   message: string;
+  at_ms?: number;
   source_count?: number;
   sources?: Array<{ url: string; title: string; snippet?: string; image?: string }>;
 }
@@ -194,6 +195,7 @@ interface DoneEvent {
   session_title?: string;
   final_text?: string;
   replace_stream_text?: boolean;
+  timings?: { duration_ms: number; first_token_ms: number | null };
 }
 
 interface ErrorEvent {
@@ -519,7 +521,11 @@ const TITLE_STOPWORDS = new Set([
 ]);
 
 function fallbackTopicTitle(message: string): string {
-  const words = (message.match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
+  const meaningfulMessage = message
+    .replace(/^\s*uji\s+(?:ux|ui|tool|streaming|web)\b\s*[:,.-]?\s*/i, '')
+    .replace(/\b(?:jangan|tanpa)\s+(?:cari|mencari|gunakan)\s+(?:web|internet)\b[.,;:]?/gi, '');
+  const subject = meaningfulMessage.match(/\b(?:tentang|mengenai|soal)\s+([^.!?\n]{4,140})/i);
+  const words = ((subject?.[1] || meaningfulMessage).match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
     .filter(word => word.length > 1 && !TITLE_STOPWORDS.has(word.toLowerCase()) &&
       !/^a?(?:wk){2,}w?k?$/i.test(word) && !/^ak(?:wk){2,}$/i.test(word));
   const selected = words.slice(0, 5);
@@ -560,7 +566,7 @@ async function generateSessionTitle(
         temperature: 0.2,
         max_tokens: 48,
         messages: [
-          { role: 'system', content: 'Buat JUDUL sesi percakapan berbahasa Indonesia, tepat 2 sampai 5 kata yang menggambarkan topik utama. Jangan menyalin pembukaan pesan. Balas hanya judul tanpa kutip, emoji, atau penjelasan.' },
+          { role: 'system', content: 'Buat JUDUL sesi percakapan berbahasa Indonesia, tepat 2 sampai 5 kata yang menggambarkan SUBJEK utama. Abaikan label eksperimen seperti UJI UX, instruksi format, dan larangan cari web. Jangan menyalin pembukaan pesan. Balas hanya judul tanpa kutip, emoji, atau penjelasan.' },
           { role: 'user', content: message.slice(0, 1000) },
         ],
       }),
@@ -915,12 +921,13 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       async start(controller) {
         // Include pre-stream context loading in the cross-device duration.
         const activityStartedAt = requestStartedAt;
-        const activitySteps: Array<{ step: string; message: string; sources?: Array<{ url: string; title: string; snippet?: string; image?: string }> }> = [];
+        const activitySteps: Array<{ step: string; message: string; atMs: number; sources?: Array<{ url: string; title: string; snippet?: string; image?: string }> }> = [];
         let activityPreface = '';
         let streamClosed = false;
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
         let firstVisibleTokenLogged = false;
+        let firstVisibleTokenMs: number | null = null;
         const replyParts: string[] = [];
         let displayFilter = createAAiMemoryStreamFilter();
 
@@ -932,8 +939,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           // Keep the same factual process milestones in Supabase so reopening
           // a conversation on a phone shows what the desktop observed.
           if ('phase' in event && event.phase === 'progress' && activitySteps.length < 24) {
+            event.at_ms = Math.max(0, Date.now() - activityStartedAt);
             activitySteps.push({
-              step: event.step.slice(0, 32), message: event.message.slice(0, 220),
+              step: event.step.slice(0, 32), message: event.message.slice(0, 220), atMs: event.at_ms,
               ...(event.sources ? { sources: event.sources.slice(0, 5).map(source => ({
                 url: source.url.slice(0, 600),
                 title: source.title.slice(0, 100),
@@ -947,6 +955,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
           if ('token' in event && typeof event.token === 'string' && !firstVisibleTokenLogged) {
             firstVisibleTokenLogged = true;
+            firstVisibleTokenMs = Math.max(0, Date.now() - activityStartedAt);
             logTiming('first_visible_token');
           }
           controller.enqueue(encoder.encode(serializeEvent(event)));
@@ -1230,6 +1239,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 ? 'Merangkum temuan dan menyusun jawaban...'
                 : 'Menyusun jawaban dari konteks yang tersedia...',
             });
+            enqueueEvent({ phase: 'progress', step: 'provider', message: 'Menghubungi model untuk menyiapkan jawaban...' });
             logTiming('final_answer_start');
             const final = await fetchProviderStream({
               apiKey, providerUrl, payload: finalPayload, traceId,
@@ -1240,6 +1250,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               if (!streamCanceled) emitStreamError(final.message);
               return;
             }
+            enqueueEvent({ phase: 'progress', step: 'provider', message: 'Model terhubung; menunggu kata pertama...' });
             await receiveProviderResponse(final.response);
             if (emittedTokenCount === 0 && !streamCanceled) {
               enqueueEvent({
@@ -1290,6 +1301,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               parent_id: userMessageId,
               activity_trace: {
                 durationMs: Math.max(0, Date.now() - activityStartedAt),
+                firstTokenMs: firstVisibleTokenMs,
                 steps: activitySteps.slice(-18),
                 preface: activityPreface,
               },
@@ -1336,6 +1348,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             persona_used: context.personaUsed,
             model_used: resolvedModelUsed,
             session_title: sessionTitle,
+            timings: { duration_ms: Math.max(0, Date.now() - activityStartedAt), first_token_ms: firstVisibleTokenMs },
             ...(cleanReply !== rawReply ? { final_text: cleanReply, replace_stream_text: true } : {}),
           });
           closeStream();
