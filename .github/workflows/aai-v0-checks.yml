@@ -24,3 +24,12 @@ jobs:
       - run: npm test
       - run: node --check public/assets/js/app.js
       - run: npx wrangler deploy --dry-run
+      - name: Check Cloudflare deployment access (no secrets printed)
+        env:
+          AAI_CF_DEPLOY_TOKEN_SET: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          if [ "$AAI_CF_DEPLOY_TOKEN_SET" = "true" ]; then
+            echo "::notice::Cloudflare deployment token is configured."
+          else
+            echo "::warning::Cloudflare deployment token is missing from GitHub Actions secrets."
+          fi
