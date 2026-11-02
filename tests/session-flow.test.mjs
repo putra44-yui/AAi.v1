@@ -102,6 +102,9 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
     const trace = dbCalls.find(c => c.resource === 'messages' && c.body?.role === 'assistant').body.activity_trace;
     assert.ok(trace.steps.some(step => step.step === 'provider' && Number.isFinite(step.atMs)));
     assert.ok(Number.isFinite(trace.firstTokenMs));
+    assert.equal(completed.timings.duration_ms, trace.durationMs,
+      'Live JSON duration and persisted JSON duration must not change after reload');
+    assert.equal(completed.timings.first_token_ms, trace.firstTokenMs);
     assert.doesNotMatch(JSON.stringify(trace), /fixture-not-a-secret/);
     assert.equal(providerCalls[0].model, 'qwen/qwen3.8-omni-flash');
     assert.match(providerCalls[0].messages[0].content, /AAi.*Teguh/);
