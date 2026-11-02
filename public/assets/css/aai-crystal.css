@@ -599,10 +599,10 @@ body.aai-login-page .orb {opacity:.14;}
   .aai-welcome-copy {width:100%;text-align:center;}
   .aai-kicker {font-size:9px;padding:6px 10px;}
   .aai-welcome h1 {font-size:clamp(27px,6.6vw,38px);letter-spacing:-1.6px;margin:13px 0 8px;}
-  .aai-welcome-copy>p {font-size:12.5px;line-height:1.6;margin:0 auto 17px;max-width:330px;}
+  .aai-welcome-copy>p {font-size:14px;line-height:1.6;margin:0 auto 17px;max-width:330px;}
   .aai-prompt-heading {margin-bottom:10px;}
   .aai-prompt-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-width:none;}
-  .aai-prompt {font-size:10.5px;min-height:47px;padding:9px;gap:7px;}
+  .aai-prompt {font-size:12.5px;min-height:47px;padding:9px;gap:7px;}
   .aai-prompt i {font-size:13px;}
   .input-area {padding:5px 12px max(9px,env(safe-area-inset-bottom));}
   .input-wrap {padding:9px 10px 9px;gap:7px;border-radius:19px;}
@@ -629,7 +629,7 @@ body.aai-login-page .orb {opacity:.14;}
 @media (max-width:380px) {
   .aai-welcome-art {height:142px;min-height:142px;}
   .aai-welcome {padding:12px 12px 17px;}
-  .aai-prompt {font-size:10px;padding:7px;min-height:41px;}
+  .aai-prompt {font-size:12px;padding:7px;min-height:44px;}
   .aai-welcome h1 {font-size:26px;}
   .aai-welcome-copy>p {margin-bottom:11px;}
   .quick-compact-btn .compact-label {display:none;}

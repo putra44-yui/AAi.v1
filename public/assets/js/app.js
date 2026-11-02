@@ -85,7 +85,12 @@ function buildTopicSessionTitle(rawMessage = '') {
     'membahas', 'bersama', 'sedang', 'sebuah',
     'the', 'a', 'an', 'is', 'are', 'i', 'you', 'we', 'and', 'for', 'with', 'to', 'of', 'in'
   ]);
-  const words = (String(rawMessage).match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
+  // A test label or a tool prohibition is not the topic of the conversation.
+  const meaningfulMessage = String(rawMessage)
+    .replace(/^\s*uji\s+(?:ux|ui|tool|streaming|web)\b\s*[:,.-]?\s*/i, '')
+    .replace(/\b(?:jangan|tanpa)\s+(?:cari|mencari|gunakan)\s+(?:web|internet)\b[.,;:]?/gi, '');
+  const subject = meaningfulMessage.match(/\b(?:tentang|mengenai|soal)\s+([^.!?\n]{4,140})/i);
+  const words = ((subject?.[1] || meaningfulMessage).match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
     .filter(word => word.length > 1 && !stopwords.has(word.toLowerCase()) &&
       !/^a?(?:wk){2,}w?k?$/i.test(word) && !/^ak(?:wk){2,}$/i.test(word)).slice(0, 5);
   if (!words.length) return 'Obrolan Bersama AAi';
@@ -1032,14 +1037,63 @@ function formatActivityDuration(ms) {
   return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
 }
 
-function saveActivityTrace(messageId, durationMs, steps, preface = '') {
+function saveActivityTrace(messageId, durationMs, steps, preface = '', firstTokenMs = null) {
   if (!messageId || !Array.isArray(steps) || !steps.length) return;
   try {
     const traces = getStoredActivityTraces();
-    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), steps: steps.slice(-18), preface: String(preface).slice(0, 240), savedAt: Date.now() };
+    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), firstTokenMs, steps: steps.slice(-18), preface: String(preface).slice(0, 240), savedAt: Date.now() };
     const latest = Object.entries(traces).sort((left, right) => (right[1]?.savedAt || 0) - (left[1]?.savedAt || 0)).slice(0, 80);
     localStorage.setItem(AAI_ACTIVITY_STORE_KEY, JSON.stringify(Object.fromEntries(latest)));
   } catch { /* Storage may be disabled; live activity still works. */ }
+}
+
+// A public, bounded activity report: timing and tool milestones, never prompt,
+// private memory text, model chain of thought, API credentials, or tool snippets.
+function createPublicActivityReport(trace = {}) {
+  const seconds = value => Number.isFinite(Number(value)) && value != null
+    ? Math.max(0, Math.round(Number(value))) : null;
+  const steps = (Array.isArray(trace.steps) ? trace.steps : []).slice(-18).map(entry => {
+    const step = String(entry?.step || '').slice(0, 32);
+    const item = {
+      step,
+      at_ms: seconds(entry?.atMs),
+      message: step === 'strategy' ? 'Model memberikan pembuka publik.' : String(entry?.message || '').slice(0, 220),
+    };
+    if (step === 'sources' && Array.isArray(entry.sources)) {
+      item.sources = entry.sources.slice(0, 5).flatMap(source => {
+        const url = parsePublicSourceUrl(source?.url);
+        return url ? [{ url: url.href, title: String(source?.title || '').slice(0, 100) }] : [];
+      });
+    }
+    return item;
+  });
+  return {
+    schema: 'aai.public_activity.v1',
+    status: trace.completed ? 'completed' : 'running',
+    duration_ms: seconds(trace.durationMs),
+    first_token_ms: seconds(trace.firstTokenMs),
+    steps,
+  };
+}
+
+function buildActivityJsonHTML(trace, streamId = '') {
+  const report = JSON.stringify(createPublicActivityReport(trace), null, 2);
+  const id = streamId ? ' id="activity_json_' + escHtml(streamId) + '"' : '';
+  return '<details class="aai-activity-json">'
+    + '<summary>JSON aktivitas <i class="fas fa-code" aria-hidden="true"></i></summary>'
+    + '<button type="button" class="aai-activity-json-copy" aria-label="Salin JSON aktivitas" onclick="copyActivityJson(this)">Salin JSON</button>'
+    + '<pre' + id + '>' + escHtml(report) + '</pre></details>';
+}
+
+async function copyActivityJson(button) {
+  const report = button.closest('.aai-activity-json')?.querySelector('pre')?.textContent;
+  if (!report) return;
+  try {
+    await navigator.clipboard.writeText(report);
+    showUserCopyFeedback(true, 'JSON aktivitas disalin');
+  } catch {
+    showUserCopyFeedback(false);
+  }
 }
 
 const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
@@ -1050,7 +1104,8 @@ const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   exa: 'fa-globe',
   found: 'fa-book-open',
   unavailable: 'fa-exclamation-circle',
-  compose: 'fa-feather-alt'
+  compose: 'fa-feather-alt',
+  provider: 'fa-hourglass-half'
 });
 
 function renderActivitySourceHTML(source) {
@@ -1103,13 +1158,20 @@ function renderMessageSourceCardHTML(source) {
   if (!parsed) return '';
   const hostname = parsed.hostname.replace(/^www\./i, '');
   const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 140);
-  const snippet = String(source?.snippet || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  const rawSnippet = String(source?.snippet || '').replace(/\s+/g, ' ').trim();
+  // Search extracts sometimes return code or repeated markup, not a useful summary.
+  const snippet = /(?:=>|for await|\b(?:stream\.write|stream\.close)\(|[{};].*[{};])/.test(rawSnippet)
+    ? '' : rawSnippet.slice(0, 180);
   const image = parsePublicSourceUrl(source?.image);
+  const isDocumentation = /^(?:developers|community|docs)\./i.test(hostname)
+    || /\b(?:documentation|docs)\b/i.test(title);
+  const showThumbnail = !!image && !isDocumentation;
   const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
-  const thumbnailHtml = image
+  const thumbnailHtml = showThumbnail
     ? '<img class="aai-source-thumb" data-source-image src="' + escHtml(image.href) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
-    : '<span class="aai-source-thumb-placeholder" aria-hidden="true"><i class="fas fa-newspaper"></i></span>';
-  const cardState = image ? 'has-thumbnail' : 'has-placeholder';
+    : '<span class="aai-source-thumb-placeholder" aria-hidden="true"><i class="fas ' + (isDocumentation ? 'fa-book-open' : 'fa-newspaper') + '"></i>'
+      + (isDocumentation ? '<span class="aai-source-kind">Dokumentasi</span>' : '') + '</span>';
+  const cardState = (showThumbnail ? 'has-thumbnail' : 'has-placeholder') + (isDocumentation ? ' is-documentation' : '');
   return '<a class="aai-source-card ' + cardState + '" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
     + thumbnailHtml
     + '<span class="aai-source-card-content">'
@@ -1207,6 +1269,7 @@ function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
     <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     ${intro}
     <ul class="aai-activity-list">${trace.steps.map(renderActivityStepHTML).join('')}</ul>
+    ${buildActivityJsonHTML({ ...trace, completed: true })}
   </details>`;
 }
 
@@ -1250,6 +1313,7 @@ function buildStreamBubbleHTML(streamId, timeStr) {
     <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     <p class="aai-preface" id="preface_${streamId}" hidden></p>
     <ul class="aai-activity-list" id="activity_list_${streamId}"><li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></span><span class="aai-activity-step-text">Menghubungkan ke AAi dan menyiapkan konteks...</span></li></ul>
+    ${buildActivityJsonHTML({ durationMs: 0, steps: [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...', atMs: 0 }] }, streamId)}
   </details>`;
 
   return `
@@ -1266,9 +1330,9 @@ function buildStreamBubbleHTML(streamId, timeStr) {
         </div>
       </div>
       <div class="msg-actions" id="actions_${streamId}" style="display:none;">
-        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan"
+        <button type="button" aria-label="Salin jawaban" title="Salin jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button type="button" aria-label="Ulangi jawaban" title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button type="button" class="tts-btn" aria-label="Dengarkan jawaban" title="Dengarkan"
           onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
@@ -1791,12 +1855,28 @@ async function processStream(response, streamId, onDone) {
   const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
   const prefaceEl = document.getElementById(`preface_${streamId}`);
   const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
-  const activityTimeline = [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...' }];
+  const activityTimeline = [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...', atMs: 0 }];
   let activityTimer = null;
+  let firstVisibleTokenMs = null;
+  let waitingForModel = false;
+  let hasAnswerToken = false;
+  const updateActivityJson = (completed = false, timings = null) => {
+    const target = document.getElementById(`activity_json_${streamId}`);
+    if (!target) return;
+    target.textContent = JSON.stringify(createPublicActivityReport({
+      durationMs: completed ? timings?.duration_ms ?? Date.now() - activityStartedAt : Date.now() - activityStartedAt,
+      firstTokenMs: timings?.first_token_ms ?? firstVisibleTokenMs,
+      steps: activityTimeline,
+      completed,
+    }), null, 2);
+  };
   const updateActivityClock = (completed = false) => {
     if (!activityTitleEl) return;
     const duration = formatActivityDuration(Date.now() - activityStartedAt);
-    activityTitleEl.textContent = completed ? 'Memproses selama ' + duration : 'Memproses... ' + duration;
+    const label = completed ? 'Memproses selama ' : hasAnswerToken ? 'Menjawab... '
+      : waitingForModel ? 'Menunggu jawaban model... ' : 'Memproses... ';
+    activityTitleEl.textContent = label + duration;
+    if (!completed) updateActivityJson();
   };
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
@@ -2104,9 +2184,11 @@ async function processStream(response, streamId, onDone) {
       if (activityEl && activityListEl && typeof parsed.message === 'string') {
         activityEl.hidden = false;
         activityEl.open = true;
+        waitingForModel = parsed.step === 'provider';
         const step = {
           step: String(parsed.step || ''),
           message: parsed.message.slice(0, 220),
+          atMs: Number.isFinite(Number(parsed.at_ms)) ? Math.max(0, Number(parsed.at_ms)) : Date.now() - activityStartedAt,
           ...(Array.isArray(parsed.sources)
             ? { sources: parsed.sources.slice(0, 5).map(source => ({
                 url: String(source?.url || '').slice(0, 600),
@@ -2119,6 +2201,7 @@ async function processStream(response, streamId, onDone) {
         wireSourcePreviewImages(activityListEl);
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
+        updateActivityJson();
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
         updateActivityClock();
         scrollBottom();
@@ -2162,6 +2245,11 @@ async function processStream(response, streamId, onDone) {
 
     if (parsed.token) {
       if (firstToken) {
+        hasAnswerToken = true;
+        waitingForModel = false;
+        firstVisibleTokenMs = Date.now() - activityStartedAt;
+        updateActivityJson();
+        updateActivityClock();
         streamingNode = null;
         streamingCommittedLength = 0;
         firstToken = false;
@@ -2207,7 +2295,9 @@ async function processStream(response, streamId, onDone) {
         activityEl.open = false;
         activityEl.classList.add('is-complete');
         updateActivityClock(true);
-        saveActivityTrace(parsed.message_id, Date.now() - activityStartedAt, activityTimeline, prefaceEl?.textContent || '');
+        updateActivityJson(true, parsed.timings || null);
+        saveActivityTrace(parsed.message_id, parsed.timings?.duration_ms ?? Date.now() - activityStartedAt,
+          activityTimeline, prefaceEl?.textContent || '', parsed.timings?.first_token_ms ?? firstVisibleTokenMs);
       }
       flushStreamingRender(true);
       const liveSourcePreviewHtml = buildMessageSourcePreviewHTML({ steps: activityTimeline });
@@ -3215,9 +3305,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       ${sourcePreviewHtml}
       ${sourcesHtml}
       <div class="msg-actions">
-        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan"
+        <button type="button" aria-label="Salin jawaban" title="Salin jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button type="button" aria-label="Ulangi jawaban" title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button type="button" class="tts-btn" aria-label="Dengarkan jawaban" title="Dengarkan"
           onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
@@ -3282,10 +3372,13 @@ async function copyUserMsg(target) {
   }
   return true;
 }
-function copyFullAI(btn) {
-  navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
-  const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
-  setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
+async function copyFullAI(btn) {
+  try {
+    await navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
+    const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
+    showUserCopyFeedback(true, 'Jawaban disalin');
+    setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
+  } catch { showUserCopyFeedback(false); }
 }
 
 
@@ -3300,11 +3393,11 @@ function closeUserMessageMenu() {
   activeUserMessageRow = null;
 }
 
-function showUserCopyFeedback(success) {
+function showUserCopyFeedback(success, label = 'Pesan disalin') {
   const feedback = document.createElement('div');
   feedback.className = 'aai-user-copy-feedback';
   feedback.setAttribute('role', 'status');
-  feedback.textContent = success ? '✓ Pesan disalin' : 'Gagal menyalin pesan';
+  feedback.textContent = success ? '✓ ' + label : 'Gagal menyalin';
   document.body.appendChild(feedback);
   setTimeout(() => feedback.remove(), 1800);
 }
@@ -3500,11 +3593,13 @@ document.addEventListener('click', event => {
   }
 });
 
-function copyCodeWindow(btn) {
+async function copyCodeWindow(btn) {
   const pre = btn.closest('.code-window').querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent);
+  try { await navigator.clipboard.writeText(pre.textContent); }
+  catch { showUserCopyFeedback(false); return; }
   const orig = btn.innerHTML;
   btn.innerHTML = '<i class="fas fa-check"></i> Copied!'; btn.style.color = '#a5d6ff';
+  showUserCopyFeedback(true, 'Kode disalin');
   setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
 }
 

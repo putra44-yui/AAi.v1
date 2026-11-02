@@ -87,10 +87,22 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
     assert.match(stream, new RegExp(sessionId));
     assert.match(stream, new RegExp(assistantMessageId));
     assert.match(stream, /"done":true/);
+    const events = stream.split('\n\n').filter(line => line.startsWith('data: '))
+      .map(line => JSON.parse(line.slice(6))).filter(event => typeof event === 'object');
+    const progress = events.filter(event => event.phase === 'progress');
+    assert.ok(progress.some(event => event.step === 'provider' && /menunggu kata pertama/i.test(event.message)));
+    assert.ok(progress.every(event => Number.isFinite(event.at_ms)));
+    const completed = events.find(event => event.done);
+    assert.ok(Number.isFinite(completed?.timings?.duration_ms));
+    assert.ok(Number.isFinite(completed?.timings?.first_token_ms));
     assert.equal(dbCalls.find(c => c.resource === 'sessions' && c.method === 'POST').body.user_id, userId);
     assert.deepEqual(dbCalls.filter(c => c.resource === 'messages' && c.method === 'POST')
       .map(c => c.body.role), ['user', 'assistant']);
     assert.equal(dbCalls.find(c => c.resource === 'messages' && c.body?.role === 'assistant').body.content, 'Halo lagi!');
+    const trace = dbCalls.find(c => c.resource === 'messages' && c.body?.role === 'assistant').body.activity_trace;
+    assert.ok(trace.steps.some(step => step.step === 'provider' && Number.isFinite(step.atMs)));
+    assert.ok(Number.isFinite(trace.firstTokenMs));
+    assert.doesNotMatch(JSON.stringify(trace), /fixture-not-a-secret/);
     assert.equal(providerCalls[0].model, 'qwen/qwen3.8-omni-flash');
     assert.match(providerCalls[0].messages[0].content, /AAi.*Teguh/);
     assert.deepEqual(providerCalls[0].messages.at(-1), { role: 'user', content: 'Halo AAi' });
