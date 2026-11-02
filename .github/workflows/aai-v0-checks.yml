@@ -35,8 +35,8 @@ jobs:
           fi
 
   deploy-aai-v0:
-    name: Deploy AAi v0 (one-time fix branch)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/aai-v0-progress-plain-language-20261102'
+    name: Deploy AAi v0 (trusted PR only)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/aai-v0-progress-plain-language-20261102'
     needs: test-and-build
     runs-on: ubuntu-latest
     steps:
