@@ -1076,24 +1076,14 @@ function createPublicActivityReport(trace = {}) {
   };
 }
 
-function buildActivityJsonHTML(trace, streamId = '') {
-  const report = JSON.stringify(createPublicActivityReport(trace), null, 2);
-  const id = streamId ? ' id="activity_json_' + escHtml(streamId) + '"' : '';
-  return '<details class="aai-activity-json">'
-    + '<summary>JSON aktivitas <i class="fas fa-code" aria-hidden="true"></i></summary>'
-    + '<button type="button" class="aai-activity-json-copy" aria-label="Salin JSON aktivitas" onclick="copyActivityJson(this)">Salin JSON</button>'
-    + '<pre' + id + '>' + escHtml(report) + '</pre></details>';
-}
-
-async function copyActivityJson(button) {
-  const report = button.closest('.aai-activity-json')?.querySelector('pre')?.textContent;
-  if (!report) return;
-  try {
-    await navigator.clipboard.writeText(report);
-    showUserCopyFeedback(true, 'JSON aktivitas disalin');
-  } catch {
-    showUserCopyFeedback(false);
-  }
+// The activity trail remains structured in Supabase for audits and datasets.
+// The family-facing conversation displays real milestones and streamed answer
+// text, never the raw JSON envelope or simulated model reasoning tokens.
+function buildActivityLiveHTML(streamId) {
+  return '<div class="aai-activity-live" role="status" aria-live="polite" aria-atomic="true">'
+    + '<span class="aai-activity-live-dot" aria-hidden="true"></span>'
+    + '<span class="aai-activity-live-text" id="activity_live_' + escHtml(streamId) + '">Menghubungkan ke AAi...</span>'
+    + '</div>';
 }
 
 const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
@@ -1269,7 +1259,6 @@ function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
     <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     ${intro}
     <ul class="aai-activity-list">${trace.steps.map(renderActivityStepHTML).join('')}</ul>
-    ${buildActivityJsonHTML({ ...trace, completed: true })}
   </details>`;
 }
 
@@ -1312,8 +1301,8 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" open>
     <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     <p class="aai-preface" id="preface_${streamId}" hidden></p>
+    ${buildActivityLiveHTML(streamId)}
     <ul class="aai-activity-list" id="activity_list_${streamId}"><li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></span><span class="aai-activity-step-text">Menghubungkan ke AAi dan menyiapkan konteks...</span></li></ul>
-    ${buildActivityJsonHTML({ durationMs: 0, steps: [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...', atMs: 0 }] }, streamId)}
   </details>`;
 
   return `
@@ -1853,6 +1842,7 @@ async function processStream(response, streamId, onDone) {
   stopPendingActivityClock(streamId);
   const activityListEl = document.getElementById(`activity_list_${streamId}`);
   const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
+  const activityLiveEl = document.getElementById(`activity_live_${streamId}`);
   const prefaceEl = document.getElementById(`preface_${streamId}`);
   const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
   const activityTimeline = [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...', atMs: 0 }];
@@ -1860,23 +1850,19 @@ async function processStream(response, streamId, onDone) {
   let firstVisibleTokenMs = null;
   let waitingForModel = false;
   let hasAnswerToken = false;
-  const updateActivityJson = (completed = false, timings = null) => {
-    const target = document.getElementById(`activity_json_${streamId}`);
-    if (!target) return;
-    target.textContent = JSON.stringify(createPublicActivityReport({
-      durationMs: completed ? timings?.duration_ms ?? Date.now() - activityStartedAt : Date.now() - activityStartedAt,
-      firstTokenMs: timings?.first_token_ms ?? firstVisibleTokenMs,
-      steps: activityTimeline,
-      completed,
-    }), null, 2);
+  const updateActivityLive = (message, streaming = false) => {
+    if (!activityLiveEl) return;
+    activityLiveEl.textContent = String(message || '').slice(0, 220);
+    activityLiveEl.parentElement?.classList.toggle('is-streaming', streaming);
   };
-  const updateActivityClock = (completed = false) => {
+  const updateActivityClock = (completed = false, finalDurationMs = null) => {
     if (!activityTitleEl) return;
-    const duration = formatActivityDuration(Date.now() - activityStartedAt);
+    const measuredMs = completed && finalDurationMs != null && Number.isFinite(Number(finalDurationMs))
+      ? Number(finalDurationMs) : Date.now() - activityStartedAt;
+    const duration = formatActivityDuration(measuredMs);
     const label = completed ? 'Memproses selama ' : hasAnswerToken ? 'Menjawab... '
       : waitingForModel ? 'Menunggu jawaban model... ' : 'Memproses... ';
     activityTitleEl.textContent = label + duration;
-    if (!completed) updateActivityJson();
   };
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
@@ -2159,6 +2145,9 @@ async function processStream(response, streamId, onDone) {
       clearStreamingRenderSchedule();
       fullText = '';
       firstToken = true;
+      hasAnswerToken = false;
+      waitingForModel = false;
+      updateActivityLive('Mencari informasi tambahan sebelum menjawab...');
       streamingNode = null;
       streamingCommittedLength = 0;
       if (bubbleEl) {
@@ -2201,7 +2190,9 @@ async function processStream(response, streamId, onDone) {
         wireSourcePreviewImages(activityListEl);
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
-        updateActivityJson();
+        updateActivityLive(parsed.step === 'tavily' ? 'Mencari sumber dari web...'
+          : parsed.step === 'exa' ? 'Memeriksa sumber tambahan...'
+          : parsed.message);
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
         updateActivityClock();
         scrollBottom();
@@ -2248,7 +2239,7 @@ async function processStream(response, streamId, onDone) {
         hasAnswerToken = true;
         waitingForModel = false;
         firstVisibleTokenMs = Date.now() - activityStartedAt;
-        updateActivityJson();
+        updateActivityLive('Jawaban sedang ditulis, sedikit demi sedikit...', true);
         updateActivityClock();
         streamingNode = null;
         streamingCommittedLength = 0;
@@ -2294,8 +2285,8 @@ async function processStream(response, streamId, onDone) {
       if (activityEl && !activityEl.hidden) {
         activityEl.open = false;
         activityEl.classList.add('is-complete');
-        updateActivityClock(true);
-        updateActivityJson(true, parsed.timings || null);
+        updateActivityLive('Jawaban siap.');
+        updateActivityClock(true, parsed.timings?.duration_ms);
         saveActivityTrace(parsed.message_id, parsed.timings?.duration_ms ?? Date.now() - activityStartedAt,
           activityTimeline, prefaceEl?.textContent || '', parsed.timings?.first_token_ms ?? firstVisibleTokenMs);
       }
