@@ -1210,6 +1210,29 @@ function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
   </details>`;
 }
 
+const pendingActivityClocks = new Map();
+function stopPendingActivityClock(streamId) {
+  const timer = pendingActivityClocks.get(streamId);
+  if (timer) clearInterval(timer);
+  pendingActivityClocks.delete(streamId);
+}
+function startPendingActivityClock(streamId) {
+  stopPendingActivityClock(streamId);
+  const update = () => {
+    const panel = document.getElementById(`activity_${streamId}`);
+    if (!panel || panel.dataset.streamConnected === '1' || panel.classList.contains('is-complete')) {
+      stopPendingActivityClock(streamId);
+      return;
+    }
+    const startedAt = Number(panel.dataset.startedAt) || Date.now();
+    const title = panel.querySelector('.aai-activity-title');
+    if (title) title.textContent = 'Memproses... ' + formatActivityDuration(Date.now() - startedAt);
+    if (Date.now() - startedAt > 240000) stopPendingActivityClock(streamId);
+  };
+  update();
+  pendingActivityClocks.set(streamId, setInterval(update, 1000));
+}
+
 function buildStreamBubbleHTML(streamId, timeStr) {
   const previewPanelHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-preview" id="preview_${streamId}" style="display:none;">
@@ -1223,10 +1246,10 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const teaserHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
     : '';
-  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" hidden>
+  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" open>
     <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     <p class="aai-preface" id="preface_${streamId}" hidden></p>
-    <ul class="aai-activity-list" id="activity_list_${streamId}"></ul>
+    <ul class="aai-activity-list" id="activity_list_${streamId}"><li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></span><span class="aai-activity-step-text">Menghubungkan ke AAi dan menyiapkan konteks...</span></li></ul>
   </details>`;
 
   return `
@@ -1762,11 +1785,13 @@ async function processStream(response, streamId, onDone) {
   const previewBodyEl = document.getElementById(`preview_body_${streamId}`);
   const previewStreamEl = document.getElementById(`preview_stream_${streamId}`);
   const activityEl = document.getElementById(`activity_${streamId}`);
+  if (activityEl) activityEl.dataset.streamConnected = '1';
+  stopPendingActivityClock(streamId);
   const activityListEl = document.getElementById(`activity_list_${streamId}`);
   const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
   const prefaceEl = document.getElementById(`preface_${streamId}`);
   const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
-  const activityTimeline = [];
+  const activityTimeline = [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...' }];
   let activityTimer = null;
   const updateActivityClock = (completed = false) => {
     if (!activityTitleEl) return;
@@ -2280,6 +2305,7 @@ async function sendMessage(text, files = []) {
   const streamId = 'stream_' + Date.now();
   const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+  startPendingActivityClock(streamId);
   scrollBottom();
 
   setSendBtn('stop');
@@ -2437,6 +2463,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
     else if (userRow) userRow.insertAdjacentHTML('afterend', html);
     else area.insertAdjacentHTML('beforeend', html);
   }
+  startPendingActivityClock(streamId);
 
   const streamRow = document.getElementById(streamId);
   if (streamRow) {
@@ -2608,6 +2635,7 @@ async function sendMessageBranched(text, parentId = null, editedMessageId = null
   const streamHtml = buildStreamBubbleHTML(streamId, timeStr);
   if (editedRow) editedRow.insertAdjacentHTML('afterend', streamHtml);
   else area.insertAdjacentHTML('beforeend', streamHtml);
+  startPendingActivityClock(streamId);
 
   setSendBtn('stop');
   abortController = new AbortController();

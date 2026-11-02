@@ -834,6 +834,10 @@ async function consumeProviderSSE(response: Response, onPayload: (payload: JsonO
 export async function POST(request: Request, env: RuntimeEnv): Promise<Response> {
   const requestStartedAt = Date.now();
   const traceId = getTraceId(request);
+  // Timing only: never log prompts, queries, response text or credentials.
+  const logTiming = (stage: string, details: Record<string, string | number | boolean> = {}): void => {
+    console.info('[AAi timing]', JSON.stringify({ trace_id: traceId, stage, elapsed_ms: Date.now() - requestStartedAt, ...details }));
+  };
   try {
     const requestBody = parseRequestBody(await request.text());
 
@@ -858,6 +862,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // A session ID must always correspond to a real Supabase row.
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
+    logTiming('session_ready');
     const { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } = prepared.value;
     const personaName = requestBody.value.personaName;
     // Rute gratis otomatis hanya dipakai setelah dipilih eksplisit di pengaturan.
@@ -867,6 +872,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
+    logTiming('context_ready');
     context.systemMessages.push({ role: 'system', content: buildAAiClockContext(requestBody.value.timeZone, history.length === 0) });
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
     const webSearchOptedOut = hasWebSearchOptOut(message);
@@ -904,6 +910,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         let streamClosed = false;
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
+        let firstVisibleTokenLogged = false;
         const replyParts: string[] = [];
         let displayFilter = createAAiMemoryStreamFilter();
 
@@ -928,6 +935,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             activityPreface = event.message.slice(0, 240);
           }
 
+          if ('token' in event && typeof event.token === 'string' && !firstVisibleTokenLogged) {
+            firstVisibleTokenLogged = true;
+            logTiming('first_visible_token');
+          }
           controller.enqueue(encoder.encode(serializeEvent(event)));
         };
 
@@ -1015,6 +1026,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             while (!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS
               && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
               const toolChoice = toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto';
+              enqueueEvent({ phase: 'progress', step: 'assess',
+                message: toolRounds === 0 ? 'Memeriksa apakah perlu mencari informasi terbaru...'
+                  : 'Memeriksa apakah sumber yang ada sudah cukup...' });
+              logTiming('tool_decision_start', { round: toolRounds + 1 });
               const result = await fetchProviderStream({
                 apiKey, providerUrl,
                 payload: {
@@ -1026,6 +1041,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 },
                 traceId, abortSignal: upstreamAbortController.signal, env,
               });
+              logTiming('tool_decision_headers', { round: toolRounds + 1, ok: result.ok });
               if (!result.ok) {
                 if (toolRounds === 0 && requestedWebDecision.search) {
                   failUnexecutedSearch('Model tidak berhasil memanggil alat pencarian. Belum ada pencarian web yang dijalankan.');
@@ -1048,6 +1064,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               const nativeCalls = new Map<number, NativeToolCall>();
               await receiveProviderResponse(result.response, nativeCalls, true);
               const calls = completedNativeToolCalls(nativeCalls);
+              logTiming('tool_decision_complete', { round: toolRounds + 1, tool_calls: calls.length });
               if (!calls.length) {
                 const candidate = replyParts.join('');
                 if (toolRounds === 0 && (toolChoice === 'required'
@@ -1111,6 +1128,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                       : 'Mencari lagi untuk mengecek detail yang belum jelas...',
                   });
                   const decision = { search: true, query, explicit: requestedWebDecision.explicit };
+                  logTiming('web_search_start');
                   const outcome = await collectWebSources(decision, env, (step, count) => {
                     const messages: Record<string, string> = {
                       tavily: 'Mencari sumber dari web...',
@@ -1123,6 +1141,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                       ...(count !== undefined ? { source_count: count } : {}),
                     });
                   }, upstreamAbortController.signal);
+                  logTiming('web_search_complete', { source_count: outcome.sources.length });
                   // Surface only real, normalized search results; never invent sources.
                   if (outcome.sources.length) {
                     enqueueEvent({
@@ -1192,10 +1211,12 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 ? 'Merangkum temuan dan menyusun jawaban...'
                 : 'Menyusun jawaban dari konteks yang tersedia...',
             });
+            logTiming('final_answer_start');
             const final = await fetchProviderStream({
               apiKey, providerUrl, payload: finalPayload, traceId,
               abortSignal: upstreamAbortController.signal, env,
             });
+            logTiming('final_answer_headers', { ok: final.ok });
             if (!final.ok) {
               if (!streamCanceled) emitStreamError(final.message);
               return;
@@ -1287,6 +1308,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               console.warn('[AAi session title]', normalizeErrorMessage(error));
             }
           }
+          logTiming('answer_saved');
           enqueueEvent({
             done: true,
             session_id: sessionId,
