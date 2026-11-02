@@ -1,5 +1,7 @@
 import { POST as chatPost } from './chat';
 import { handleSessionApi } from './session-api';
+import { authRequired, loginWithPassword, verifyIdentity, sameOriginMutation,
+  stripAndAuthorizeClientIdentity, verifiedJobAccess, withSession, logout, unauthorized } from './aai-auth';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
 // Only /api/* and the /login alias run through this Worker.
@@ -122,17 +124,8 @@ async function runLegacy(request: Request, route: { key: string; id?: string }, 
   }
 }
 
-export default {
-  async fetch(request: Request, env: WorkerBindings): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
-
-    if (path === '/api/status' && request.method === 'GET') {
-      return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
-        headers: { 'cache-control': 'no-store' },
-      });
-    }
-
+async function dispatchRequest(request: Request, env: WorkerBindings): Promise<Response> {
+  const path = new URL(request.url).pathname;
     if (path === '/api/chat' || path === '/api/chat/') {
       if (request.method !== 'POST') return jsonError(405, 'Method not allowed');
       return chatPost(request, env);
@@ -153,5 +146,64 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
+}
+
+export default {
+  async fetch(request: Request, env: WorkerBindings): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    if (path === '/api/status' && request.method === 'GET') {
+      return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
+        headers: { 'cache-control': 'no-store' },
+      });
+    }
+    if (path === '/api/auth-config' && request.method === 'GET') {
+      return Response.json({ required: authRequired(env) }, { headers: { 'cache-control': 'no-store' } });
+    }
+
+    // Legacy mode remains unchanged until accounts have been enrolled. Never
+    // enable recall in this mode; the user_id is not yet cryptographically proven.
+    if (!authRequired(env)) {
+      if (path === '/api/logout') return logout();
+      return dispatchRequest(request, env);
+    }
+
+    if (!path.startsWith('/api/')) return env.ASSETS.fetch(request);
+    if (!sameOriginMutation(request)) return jsonError(403, 'Permintaan lintas situs ditolak.');
+    if (path === '/api/login') {
+      if (request.method !== 'POST') return jsonError(405, 'Method not allowed');
+      return loginWithPassword(request, env);
+    }
+    if (path === '/api/logout') {
+      if (request.method !== 'POST') return jsonError(405, 'Method not allowed');
+      return logout();
+    }
+
+    const identity = await verifyIdentity(request, env);
+    if (!identity) return unauthorized();
+    if (path === '/api/me' && request.method === 'GET') {
+      const response = Response.json({ user: {
+        id: identity.userId, username: identity.username, person_id: identity.personId,
+      } }, { headers: { 'cache-control': 'private, no-store' } });
+      return identity.session ? withSession(response, identity.session) : response;
+    }
+    let authorized: Request;
+    try {
+      authorized = await stripAndAuthorizeClientIdentity(request, identity.userId);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '';
+      return reason === 'IDOR'
+        ? jsonError(403, 'Identitas akun tidak cocok dengan sesi login.')
+        : jsonError(415, 'Permintaan harus menggunakan JSON.');
+    }
+    // Legacy file-job handlers used to trust arbitrary job_id. Check ownership
+    // *before* importing any job processing or reading its contents.
+    if (path.replace(/\\/$/, '') === '/api/file-jobs' &&
+        !(await verifiedJobAccess(authorized, env, identity.userId))) {
+      return jsonError(404, 'Tugas file tidak ditemukan.');
+    }
+    const response = await dispatchRequest(authorized, env);
+    return identity.session ? withSession(response, identity.session) : response;
   },
 };
