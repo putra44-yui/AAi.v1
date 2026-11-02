@@ -32,6 +32,7 @@ test('web permission and providers gate actual searches even for fresh questions
   assert.equal(shouldRunWebToolDecision(decision, 'allow', false), false);
   assert.equal(shouldRunWebToolDecision(decision, 'allow', true), true);
   assert.equal(shouldRunWebToolDecision(decideWebSearch('Cari sumber resmi, tapi jangan cari web.'), 'allow', true), false);
+  assert.equal(shouldRunWebToolDecision(decideWebSearch('Cari dokumentasi resmi Cloudflare tentang streaming response di Workers.'), 'allow', true), true);
 });
 
 test('a tool-decision response never becomes a single buffered public answer', () => {

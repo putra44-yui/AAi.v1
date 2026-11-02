@@ -40,6 +40,10 @@ test('the user restriction survives long prompts with a prohibition at the end',
 test('real search requests and time-sensitive questions still use auto search', () => {
   for (const request of [
     'Cari sumber resmi kapan Node.js 24 dirilis.',
+    'UJI TOOL WEB: Cari dokumentasi resmi Cloudflare tentang streaming response di Workers. Sebutkan tautan resminya dan ringkaskan dua poin utama.',
+    'Tolong cari dokumentasi resmi Cloudflare Workers untuk streaming Response.',
+    'Temukan dokumentasi resmi Cloudflare tentang ReadableStream.',
+    'Carikan artikel ilmiah tentang model bahasa kecil.',
     'Apa kurs rupiah hari ini?',
     'Tolong cek berita terbaru tentang JavaScript.',
     'Coba jawab dari bobot dulu, kemudian cari sumber resmi kapan Node.js 24 dirilis.',
