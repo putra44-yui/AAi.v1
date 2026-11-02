@@ -1,6 +1,6 @@
 # ADR 2026-11-03 — Recall memori bertahap dan aktivitas percakapan
 
-Status: **diusulkan; belum diaktifkan di produksi**
+Status: **pencarian memori dan gerbang autentikasi di branch eksperimen; belum diaktifkan di produksi**
 Dataset label: `aai_recall_conversational_activity_gated_v1`
 Repo: `putra44-yui/AAi.v1`
 Perubahan terkait: `src/aai-context.ts`, `src/chat.ts`, `tests/aai-memory.test.mjs`, `tests/session-flow.test.mjs`
@@ -44,3 +44,26 @@ Syarat aktivasi:
 ## Rollback
 
 Biarkan flag OFF untuk mematikan pencarian tambahan tanpa mengubah gaya aktivitas lain. Jika observability atau latensi memburuk, revert PR; sistem memori awal tetap dipakai seperti sebelumnya.
+
+## Implementasi autentikasi terverifikasi (lanjutan, 3 Nov 2026)
+
+- `src/aai-auth.ts` memverifikasi JWT dengan Supabase Auth `auth.getUser(jwt)` (atau refresh sesi), kemudian mengambil `aai_user_id` dari **app_metadata** yang hanya dapat disetel administrator, bukan `user_metadata` atau `user_id` dari browser.
+- Cookie `__Host-aai_access` dan `__Host-aai_refresh` memakai `HttpOnly; Secure; SameSite=Strict`. Permintaan mutasi harus memiliki header `Origin` yang sama. ID yang diklaim oleh klien tetapi tidak cocok dengan sesi ditolak dengan 403.
+- Di `src/worker.ts`, semua endpoint `/api/*` selain status, konfigurasi dan login wajib memakai sesi terverifikasi ketika `AAI_AUTH_REQUIRED=true`. Jalur lama menerima identitas yang telah disanitasi; akses `file-jobs` mengecek kepemilikan job/session sebelum konten dibaca atau diproses.
+- `public/login.html` punya mode email + kata sandi (aktif setelah flag dihidupkan); localStorage tetap hanya cache tampilan, bukan bukti autentikasi. `public/assets/js/app.js` memeriksa `/api/me` serta menjalankan `/api/logout` saat keluar.
+- Mode transisi `AAI_AUTH_REQUIRED` default **OFF** agar 4 akun lama tidak terkunci mendadak. Saat OFF, Worker memaksa `AAI_RECALL_SEARCH_ENABLED='false'` meskipun variabel recall salah konfigurasi. **Mode transisi tetap tidak aman untuk data pribadi; jangan klaim terlindungi atau perluas pengguna.**
+- Pada audit basis data: ada **4 akun legacy**, **37 sesi**, dan **0 akun di `auth.users`**. Pendaftaran akun Auth harus dituntaskan sebelum cutover. Tidak ada password baru dibuat dalam commit/chat.
+- RLS tabel utama sudah aktif, tetapi sebagian besar belum mempunyai kebijakan, sedangkan backend menggunakan service role yang melewati RLS; karena itu server authorization wajib konsisten. Supabase advisor juga menunjukkan peringatan mutable search_path pada beberapa fungsi, dicatat sebagai audit terpisah tanpa mengubah schema saat ini.
+
+### Prosedur cutover yang wajib
+
+1. Administrator menyiapkan 4 akun Supabase Auth dengan alamat email yang sah dan password unik melalui kanal privat; **nonaktifkan self-registration publik** agar pengguna baru tidak otomatis terhubung ke akun keluarga lama.
+2. Administrator mencocokkan identitas setiap akun Auth dengan akun legacy secara terpisah dan memasang `app_metadata.aai_user_id` memakai Admin API (`updateUserById`), bukan field metadata yang boleh diedit pengguna. Lakukan verifikasi satu per satu; jangan menebak berdasarkan nama depan.
+3. Validasi per akun: login aman, `/api/me` mengembalikan ID legacy yang benar, semua sesi lama dapat diakses, akun A tidak bisa membaca/mengubah akun B, file-job lintas akun 404, dan logout memutus cookie lokal.
+4. Baru set `AAI_AUTH_REQUIRED=true` di Cloudflare, deploy dan tes PWA/HP. Setelah semua pengujian keamanan lulus, baru set `AAI_RECALL_SEARCH_ENABLED=true` dan uji alur recall tambahan. Pada rollback, **jangan** mengaktifkan legacy tanpa sadar karena akan membuka lagi celah akses.
+
+### Catatan tes
+
+- `tests/aai-auth.test.mjs` membuktikan permintaan tanpa sesi ditolak, Origin lintas situs ditolak, body/query user_id palsu tidak menggantikan owner, serta request token akun A tidak boleh dipakai untuk sesi B.
+- Secara sengaja belum ada pengujian dengan kredensial keluarga asli; fixture tes memakai identitas sintetis.
+- Verifikasi CI terbaru wajib dibaca sebelum merge; status hijau di branch awal bukan jaminan kode autentikasi tambahan sudah lulus.
