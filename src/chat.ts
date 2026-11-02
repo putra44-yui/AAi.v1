@@ -1291,6 +1291,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           const parsedReply = extractAAiMemoryTags(rawReply);
           // Internal tags never enter the stored assistant chat history.
           const cleanReply = parsedReply.cleanText;
+          // The public response duration stops when the answer is ready. Use
+          // this same measurement for live SSE and persisted activity traces;
+          // otherwise a reload changes the number after database writes.
+          const answerDurationMs = Math.max(0, Date.now() - activityStartedAt);
 
           // Do not report "done" until the assistant answer is durable.
           const { data: saved, error: saveError } = await supabase.from('messages')
@@ -1300,7 +1304,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               content: cleanReply,
               parent_id: userMessageId,
               activity_trace: {
-                durationMs: Math.max(0, Date.now() - activityStartedAt),
+                durationMs: answerDurationMs,
                 firstTokenMs: firstVisibleTokenMs,
                 steps: activitySteps.slice(-18),
                 preface: activityPreface,
@@ -1348,7 +1352,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             persona_used: context.personaUsed,
             model_used: resolvedModelUsed,
             session_title: sessionTitle,
-            timings: { duration_ms: Math.max(0, Date.now() - activityStartedAt), first_token_ms: firstVisibleTokenMs },
+            timings: { duration_ms: answerDurationMs, first_token_ms: firstVisibleTokenMs },
             ...(cleanReply !== rawReply ? { final_text: cleanReply, replace_stream_text: true } : {}),
           });
           closeStream();
