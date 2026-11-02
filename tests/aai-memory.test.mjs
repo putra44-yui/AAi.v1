@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   resolveAAiPersona, selectRelevantAAiMemories, extractAAiMemoryTags, createAAiMemoryStreamFilter, readableAAiMemoryValue,
+  isAAiRecallQuestion, searchAAiRecallMemories,
 } from '../src/aai-context.ts';
 
 test('legacy persona choices always resolve to one adaptive AAi voice', () => {
@@ -67,4 +68,60 @@ test('self-assessment requests retrieve work patterns without unrelated family s
   ];
   const result = selectRelevantAAiMemories(rows, 'Apa kelemahanku sebagai pembuat aplikasi?', 10);
   assert.deepEqual(result.map(row => row.key), ['ritme_eksekusi']);
+});
+
+test('historical recall is explicit and does not confuse requests to remember new facts', () => {
+  assert.equal(isAAiRecallQuestion('Kita kan pernah berjanji, masih ingat?'), true);
+  assert.equal(isAAiRecallQuestion('Kamu masih inget waktu kita bahas Benih AAi?'), true);
+  assert.equal(isAAiRecallQuestion('Dulu kita pernah bahas notula, kan?'), true);
+  assert.equal(isAAiRecallQuestion('Ingatkan aku besok jam delapan'), false);
+  assert.equal(isAAiRecallQuestion('Ingat, aku suka bahasa santai. Simpan ya.'), false);
+  assert.equal(isAAiRecallQuestion('Apa kabar hari ini?'), false);
+});
+
+test('deeper recall stays in the authenticated person, excludes existing and secret rows, and caps eight', async () => {
+  const calls = [];
+  const rows = [
+    { id: 'already-present', key: 'benih_aai_target', value: 'Target Benih AAi 30M', priority_score: 0.9 },
+    { id: 'sensitive', key: 'benih_aai_api_token', value: 'Token API untuk Benih AAi', priority_score: 1 },
+    { id: 'other', key: 'favorit_makanan', value: 'Nasi goreng', priority_score: 1 },
+    ...Array.from({ length: 13 }, (_, i) => ({
+      id: `item-${i}`, key: `benih_aai_keputusan_${i}`, value: `Keputusan Benih AAi tahap ${i}`,
+      priority_score: 0.8 - i / 100,
+    })),
+  ];
+  const query = {
+    select(fields) { calls.push(['select', fields]); return this; },
+    eq(field, value) { calls.push(['eq', field, value]); return this; },
+    order(field, direction) { calls.push(['order', field, direction]); return this; },
+    async limit(n) { calls.push(['limit', n]); return { data: rows, error: null }; },
+  };
+  const supabase = {
+    from(table) { calls.push(['from', table]); return query; },
+  };
+  const result = await searchAAiRecallMemories(
+    supabase, 'owner-verified-by-auth', 'Kamu ingat Benih AAi yang pernah kita bahas?', ['already-present'],
+  );
+  assert.deepEqual(calls.find(item => item[0] === 'eq' && item[1] === 'person_id'),
+    ['eq', 'person_id', 'owner-verified-by-auth']);
+  assert.deepEqual(calls.find(item => item[0] === 'eq' && item[1] === 'status'),
+    ['eq', 'status', 'active']);
+  assert.equal(calls.find(item => item[0] === 'limit')[1], 420);
+  assert.equal(result.matchCount, 8);
+  assert.match(result.contextMessage.content, /Benih AAi/);
+  assert.doesNotMatch(result.contextMessage.content, /Token API/);
+  assert.doesNotMatch(result.contextMessage.content, /favorit makanan/);
+  assert.doesNotMatch(result.contextMessage.content, /target \(fakta\)/);
+});
+
+test('deeper recall with no lexical match sends no additional private context', async () => {
+  const query = {
+    select() { return this; }, eq() { return this; }, order() { return this; },
+    async limit() { return { data: [{ id:'unrelated', key:'warna_rumah', value:'Warna biru' }], error:null }; },
+  };
+  const result = await searchAAiRecallMemories(
+    { from: () => query }, 'same-owner', 'Kamu ingat janji kita tentang notula?', [],
+  );
+  assert.equal(result.matchCount, 0);
+  assert.equal(result.contextMessage, null);
 });
