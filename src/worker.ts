@@ -166,7 +166,7 @@ export default {
     // enable recall in this mode; the user_id is not yet cryptographically proven.
     if (!authRequired(env)) {
       if (path === '/api/logout') return logout();
-      return dispatchRequest(request, env);
+      return dispatchRequest(request, { ...env, AAI_RECALL_SEARCH_ENABLED: 'false' });
     }
 
     if (!path.startsWith('/api/')) return env.ASSETS.fetch(request);
@@ -199,7 +199,7 @@ export default {
     }
     // Legacy file-job handlers used to trust arbitrary job_id. Check ownership
     // *before* importing any job processing or reading its contents.
-    if (path.replace(/\\/$/, '') === '/api/file-jobs' &&
+    if (path.replace(/\/$/, '') === '/api/file-jobs' &&
         !(await verifiedJobAccess(authorized, env, identity.userId))) {
       return jsonError(404, 'Tugas file tidak ditemukan.');
     }
