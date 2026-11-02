@@ -3,6 +3,15 @@ export type WebSource = { url: string; title: string; snippet: string; image?: s
 export type WebSearchDecision = { search: boolean; query: string; explicit: boolean };
 export type WebToolPermission = 'allow' | 'deny';
 
+// A cheap intent gate keeps stable, everyday requests on the direct streaming
+// path. For requests needing fresh/public evidence, the model still decides
+// whether to call search_web. Permission and credentials remain separate gates.
+export function shouldRunWebToolDecision(
+  decision: WebSearchDecision, permission: WebToolPermission, providerAvailable: boolean,
+): boolean {
+  return permission === 'allow' && providerAvailable && decision.search;
+}
+
 // The model and keyword router never grant their own permission to call external tools.
 export function applyWebToolPermission(decision: WebSearchDecision, permission: WebToolPermission): WebSearchDecision {
   return permission === 'allow' ? decision : { search: false, query: '', explicit: false };
