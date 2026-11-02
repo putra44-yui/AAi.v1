@@ -1,7 +1,7 @@
-import { POST as chatPost } from './chat';
-import { handleSessionApi } from './session-api';
+import { POST as chatPost } from './chat.ts';
+import { handleSessionApi } from './session-api.ts';
 import { authRequired, loginWithPassword, verifyIdentity, sameOriginMutation,
-  stripAndAuthorizeClientIdentity, verifiedJobAccess, withSession, logout, unauthorized } from './aai-auth';
+  stripAndAuthorizeClientIdentity, verifiedJobAccess, withSession, logout, unauthorized } from './aai-auth.ts';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
 // Only /api/* and the /login alias run through this Worker.
