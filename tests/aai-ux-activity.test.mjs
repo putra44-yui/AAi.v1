@@ -22,10 +22,10 @@ test('session title focuses on substantive subject instead of UX test instructio
   assert.match(getTitle('Jelaskan kerja kompas secara sederhana.'), /kompas/i);
 });
 
-test('public activity JSON contains timings but omits memory, prompt, snippets and tool credentials', () => {
+test('internal public activity report remains safe for audits without appearing in the chat UI', () => {
   const getReport = runInNewContext(
     snippet('function parsePublicSourceUrl(', 'function collectActivitySources(')
-      + snippet('function createPublicActivityReport(', 'async function copyActivityJson(')
+      + snippet('function createPublicActivityReport(', 'function buildActivityLiveHTML(')
       + '\ncreatePublicActivityReport;',
     { URL },
   );
@@ -46,6 +46,23 @@ test('public activity JSON contains timings but omits memory, prompt, snippets a
   assert.equal(report.steps[1].at_ms, 6400);
   assert.equal(report.steps[1].sources[0].title, 'Streams');
   assert.doesNotMatch(JSON.stringify(report), /private opening|secret-in-snippet|secret-thumbnail/);
+});
+
+test('activity shows factual streaming milestones, not the raw JSON log', () => {
+  const getLiveHTML = runInNewContext(
+    snippet('function buildActivityLiveHTML(', 'const AAI_ACTIVITY_STEP_ICONS')
+      + '\nbuildActivityLiveHTML;',
+    { escHtml: text => String(text).replaceAll('&', '&amp;').replaceAll('"', '&quot;') },
+  );
+  const html = getLiveHTML('trace_test');
+  assert.match(html, /role="status" aria-live="polite"/);
+  assert.match(html, /activity_live_trace_test/);
+  assert.match(html, /Menghubungkan ke AAi/);
+  assert.doesNotMatch(app, /JSON aktivitas|aai-activity-json|activity_json_/);
+  assert.match(app, /Jawaban sedang ditulis, sedikit demi sedikit/);
+  assert.match(app, /updateActivityLive\(parsed\.step === 'tavily'/);
+  assert.match(css, /aai-activity-live-dot/);
+  assert.match(css, /prefers-reduced-motion/);
 });
 
 test('documentation cards use a restrained icon while visual articles retain thumbnails', () => {
@@ -73,5 +90,5 @@ test('mobile text avoids justification and controls have accessible names', () =
   assert.match(app, /aria-label="Salin jawaban"/);
   assert.match(app, /aria-label="Ulangi jawaban"/);
   assert.match(app, /aria-label="Dengarkan jawaban"/);
-  assert.match(app, /JSON aktivitas/);
+  assert.match(app, /buildActivityLiveHTML\(streamId\)/);
 });
