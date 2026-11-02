@@ -89,3 +89,45 @@ test('cross-site mutation is blocked before authenticating cookie credentials', 
   }), env);
   assert.equal(response.status, 403);
 });
+
+test('verified sign-in issues HttpOnly cookies and /api/me returns the linked legacy account', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/auth/v1/token') {
+        return Response.json({
+          access_token:'fixture-jwt', refresh_token:'fixture-refresh',
+          token_type:'bearer', expires_in:3600, expires_at:1900000000,
+          user: { id:authId, aud:'authenticated', email:'owner@example.com',
+            app_metadata: { aai_user_id:owner }, created_at:'2026-11-03T00:00:00Z' },
+        });
+      }
+      if (url.pathname === '/auth/v1/user') {
+        return Response.json({ id:authId, email:'owner@example.com', aud:'authenticated',
+          app_metadata:{ aai_user_id:owner }, created_at:'2026-11-03T00:00:00Z' });
+      }
+      if (url.pathname === '/rest/v1/users') {
+        return Response.json({ id:owner, username:'teguh', person_id:null });
+      }
+      throw new Error('Unexpected fixture: ' + url);
+    };
+    const login = await worker.fetch(new Request(origin + '/api/login', {
+      method:'POST', headers:{ origin, 'content-type':'application/json' },
+      body: JSON.stringify({ email:'owner@example.com', password:'test-only-not-real' }),
+    }), env);
+    assert.equal(login.status, 200);
+    assert.equal((await login.json()).user.id, owner);
+    const cookies = login.headers.getSetCookie();
+    assert.equal(cookies.length, 2);
+    assert.ok(cookies.every(x => x.includes('HttpOnly') && x.includes('Secure') && x.includes('SameSite=Strict')));
+    assert.ok(cookies.some(x => x.includes('__Host-aai_access=')));
+    const me = await worker.fetch(new Request(origin + '/api/me', {
+      headers: { cookie:'__Host-aai_access=fixture-jwt' },
+    }), env);
+    assert.equal(me.status, 200);
+    assert.equal((await me.json()).user.id, owner);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
