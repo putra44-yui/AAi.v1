@@ -1970,47 +1970,39 @@ body:not(.aai-login-page) .bubble .aai-table-hint {
   body:not(.aai-login-page) .bubble .aai-data-table :is(th,td) {min-width:112px;max-width:260px;padding:10px 12px}
 }
 
-/* UX audit 2026-11-02: visible timing, portable JSON, and readable source cards. */
-body:not(.aai-login-page) .aai-activity .aai-activity-json {
-  margin-top: 9px;
-  padding: 8px 0 2px;
-  border-top: 1px solid rgba(120, 105, 174, .16);
-}
-body:not(.aai-login-page) .aai-activity .aai-activity-json > summary {
+/* The live status reflects actual server events and real answer streaming. */
+body:not(.aai-login-page) .aai-activity .aai-activity-live {
   display: flex;
-  width: max-content;
   align-items: center;
-  gap: 7px;
-  padding: 5px 0;
-  color: #7563a8;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
+  gap: 10px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(128, 111, 187, .16);
+  border-radius: 12px;
+  background: linear-gradient(110deg, rgba(242, 236, 254, .9), rgba(235, 245, 255, .73));
+  color: #594684;
+  font: 600 13px/1.55 'Plus Jakarta Sans', sans-serif;
 }
-body:not(.aai-login-page) .aai-activity-json > summary i {font-size: 11px;}
-body:not(.aai-login-page) .aai-activity-json-copy {
-  min-height: 34px;
-  margin: 7px 0;
-  padding: 6px 12px;
-  border: 1px solid #d7cdea;
-  border-radius: 9px;
-  color: #5a4694;
-  background: #fff;
-  font: 700 12px/1.3 'Plus Jakarta Sans', sans-serif;
-  cursor: pointer;
+body:not(.aai-login-page) .aai-activity-live-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #8b73cf;
+  box-shadow: 0 0 0 4px rgba(139, 115, 207, .13);
+  animation: aai-live-activity-pulse 1.5s ease-in-out infinite;
 }
-body:not(.aai-login-page) .aai-activity-json pre {
-  max-height: 300px;
-  margin: 0 0 8px;
-  padding: 11px;
-  overflow: auto;
-  border: 1px solid #e0dce9;
-  border-radius: 10px;
-  background: #f7f5fc;
-  color: #483c68;
-  font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
-  text-align: left;
-  white-space: pre;
+body:not(.aai-login-page) .aai-activity-live.is-streaming {color:#3e608e;}
+body:not(.aai-login-page) .aai-activity-live.is-streaming .aai-activity-live-dot {
+  background: #5294d8;
+  box-shadow: 0 0 0 4px rgba(82, 148, 216, .14);
+}
+body:not(.aai-login-page) .aai-activity.is-complete .aai-activity-live {display:none;}
+@keyframes aai-live-activity-pulse {
+  50% {opacity:.5; transform:scale(.8);}
+}
+@media (prefers-reduced-motion:reduce) {
+  body:not(.aai-login-page) .aai-activity-live-dot {animation:none;}
 }
 body:not(.aai-login-page) .aai-source-card.is-documentation {
   min-height: 200px;
@@ -2044,6 +2036,6 @@ body:not(.aai-login-page) .msg-actions button {
   }
   body:not(.aai-login-page) .aai-activity summary .aai-activity-title {font-size: 14px;}
   body:not(.aai-login-page) .aai-activity-list {font-size: 14px;}
-  body:not(.aai-login-page) .aai-activity .aai-activity-json > summary {font-size: 13px;}
+  body:not(.aai-login-page) .aai-activity .aai-activity-live {font-size:14px;}
   body:not(.aai-login-page) .session-title {font-size: 13.5px;}
 }
