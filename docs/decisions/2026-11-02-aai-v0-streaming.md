@@ -63,3 +63,15 @@ Ulangi T2, T3, T4 dengan polling DOM sepanjang respons (bukan hanya screenshot a
 ## Pelajaran untuk dataset perubahan
 
 Pisahkan **observasi → hipotesis → perubahan → hasil uji → keterbatasan**. Jangan menandai hipotesis sebagai bukti. Commit dan PR harus menyebut mengapa trade-off dipilih, bukan hanya “fix streaming”. Saat eksperimen gagal pun simpan pembelajarannya tanpa menyimpan teks rahasia pengguna.
+
+## Addendum 2026-11-02 — bukti produksi dan regresi T4
+
+**Lingkungan:** GitHub PR #3 merged ke `design/aai-crystal-refresh`; Actions push run #21 sukses untuk `test-and-build` serta deploy; Worker 100% pada versi `61e69fd3-bb35-47fc-abc0-8445a7cfd70a`. Pengamatan dilakukan melalui ekstensi browser pada origin AAi yang ter-deploy.
+
+1. **T3 streaming lolos.** Permintaan menjelaskan kompas enam paragraf tanpa niat web mengirim jawaban bertahap. DOM utama bertambah kira-kira 416 → 560 → 699 → 840 → 1000 → 1094 → 1243 → 1387 → 1536 karakter ketika tombol Hentikan masih aktif (sekitar detik 10,5–14,5). Artinya teks respons memang mengalir, meskipun TTFT ~10 detik belum optimal.
+2. **T4 web-search regresi.** Kalimat persis: `UJI TOOL WEB: Cari dokumentasi resmi Cloudflare tentang streaming response di Workers. Sebutkan tautan resminya dan ringkaskan dua poin utama.` Tidak membuka alat web. AAi menjawab dari pengetahuan sendiri dan mengaku tidak menjalankan pencarian. **Kegagalan alat bukan karena token kosong:** penyebabnya dapat direproduksi pada `decideWebSearch`; pola `EXPLICIT_SEARCH` mencakup `cari sumber` tetapi tidak `cari dokumentasi resmi`. P0 membuat hasil gate ini menentukan apakah alat ditawarkan ke model.
+3. **Perbaikan susulan:** perluas intent eksplisit untuk dokumentasi resmi, jurnal/paper, dan permintaan tautan/situs resmi; pertahankan larangan web eksplisit dan filter privasi. Tambahkan regresi unit dengan kalimat T4 aktual serta variasi pencarian dokumentasi.
+4. **Verifikasi sebelum deploy susulan:** `npm test` **71/71 lulus**, `tsc --noEmit --allowImportingTsExtensions` lulus, termasuk assert bahwa T4 wajib menuju jalur keputusan alat, sementara obrolan biasa tetap jalur langsung.
+5. **Keputusan dataset:** pertahankan bukti T4 gagal walaupun T3 berhasil. Satu label `streaming fixed` tidak mewakili dua properti berbeda: *streaming final answer* dan *routing tool sesuai kebutuhan*. Keduanya wajib diuji terpisah setiap kali gate diubah.
+
+**Status uji setelah deploy susulan:** menunggu smoke test dengan prompt T4 yang sama. Catatan ini tidak mengklaim pencarian sudah sukses di produksi.
