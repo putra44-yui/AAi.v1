@@ -900,7 +900,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     } else if (!shouldRunToolDecision) {
       providerPayload.messages.splice(context.systemMessages.length, 0, {
         role: 'system',
-        content: '[RUTE LANGSUNG] Pertanyaan ini tidak membutuhkan pencarian web. Jawab dari pengetahuan dan konteks tersedia; jangan mengklaim telah memanggil tool atau mengecek sumber terbaru.',
+        content: requestedWebDecision.search
+          ? '[PENCARIAN TIDAK TERSEDIA] Pertanyaan ini dapat membutuhkan sumber terbaru, tetapi tool pencarian tidak tersedia. Jawab hanya yang dapat dipastikan dari konteks dan jelaskan jika informasi terkini belum diverifikasi. Jangan mengaku telah mencari web.'
+          : '[RUTE LANGSUNG] Pertanyaan ini tidak membutuhkan pencarian web. Jawab dari pengetahuan dan konteks tersedia; jangan mengklaim telah memanggil tool atau mengecek sumber terbaru.',
       });
     }
     const titleState: { promise: Promise<string | null> | null } = { promise: null };

@@ -51,4 +51,5 @@ test('tool failure never silently turns an explicit search into an unverified an
   assert.match(chatSource, /failUnexecutedSearch\('Model mengirim teks tanpa memanggil alat pencarian/);
   assert.match(chatSource, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(chatSource, /upstreamAbortController\.abort\(\)/);
+  assert.match(chatSource, /\[PENCARIAN TIDAK TERSEDIA\]/);
 });
