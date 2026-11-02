@@ -218,10 +218,22 @@
       <p>Lanjutkan percakapan, temukan ide baru, dan selesaikan apa yang sedang kamu kerjakan.</p>
     </div>
 
-    <div class="field">
+    <div class="field" id="legacyUsernameField">
       <label>Username</label>
-      <input type="text" id="usernameInput" autocomplete="username" autofocus
+      <input type="text" id="usernameInput" autocomplete="username"
              onkeydown="if(event.key==='Enter') handleLogin()" />
+    </div>
+    <div id="verifiedLoginFields" hidden>
+      <div class="field">
+        <label for="emailInput">Email</label>
+        <input type="email" id="emailInput" autocomplete="username"
+               onkeydown="if(event.key==='Enter') handleLogin()" />
+      </div>
+      <div class="field">
+        <label for="passwordInput">Kata sandi</label>
+        <input type="password" id="passwordInput" autocomplete="current-password"
+               onkeydown="if(event.key==='Enter') handleLogin()" />
+      </div>
     </div>
 
     <button class="login-btn" id="loginBtn" onclick="handleLogin()">
@@ -238,46 +250,62 @@
   </div>
 
 <script>
-  // Kalau sudah login, langsung redirect
-  if (localStorage.getItem('aai_user')) {
-    window.location.href = '/';
-  }
+  let useVerifiedLogin = false;
+  (async function prepareLogin() {
+    try {
+      const config = await fetch('/api/auth-config', { cache: 'no-store' }).then(r => r.json());
+      useVerifiedLogin = config.required === true;
+      if (useVerifiedLogin) {
+        document.getElementById('legacyUsernameField').hidden = true;
+        document.getElementById('verifiedLoginFields').hidden = false;
+        const response = await fetch('/api/me', { cache: 'no-store' });
+        if (response.ok) {
+          const data = await response.json();
+          localStorage.setItem('aai_user', JSON.stringify(data.user));
+          window.location.href = '/';
+          return;
+        }
+        localStorage.removeItem('aai_user');
+        document.getElementById('emailInput').focus();
+      } else if (localStorage.getItem('aai_user')) {
+        window.location.href = '/';
+      } else {
+        document.getElementById('usernameInput').focus();
+      }
+    } catch {
+      showError('Tidak dapat memeriksa status login. Periksa koneksimu lalu muat ulang.');
+      document.getElementById('loginBtn').disabled = true;
+    }
+  })();
 
   async function handleLogin() {
-    const input = document.getElementById('usernameInput');
-    const btn   = document.getElementById('loginBtn');
-    const err   = document.getElementById('errorMsg');
-    const username = input.value.trim().toLowerCase();
-
-    if (!username) {
-      showError('Username tidak boleh kosong.');
+    const err = document.getElementById('errorMsg');
+    const username = document.getElementById('usernameInput').value.trim().toLowerCase();
+    const email = document.getElementById('emailInput').value.trim().toLowerCase();
+    const password = document.getElementById('passwordInput').value;
+    if (useVerifiedLogin ? (!email || !password) : !username) {
+      showError(useVerifiedLogin ? 'Email dan kata sandi wajib diisi.' : 'Username tidak boleh kosong.');
       return;
     }
-
     setLoading(true);
     err.classList.remove('show');
-
     try {
-      const res  = await fetch('/api/login', {
+      const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username })
+        body: JSON.stringify(useVerifiedLogin ? { email, password } : { username }),
       });
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error || 'Login gagal.');
-
-      // Simpan ke localStorage
       localStorage.setItem('aai_user', JSON.stringify({
         id: data.user.id,
         username: data.user.username,
         family_role: data.user.family_role || null,
-        person_name: data.user.person_name || data.user.username
+        person_name: data.user.person_name || data.user.username,
       }));
       window.location.href = '/';
-
-    } catch (e) {
-      showError(e.message);
+    } catch (error) {
+      showError(error.message || 'Login gagal.');
     } finally {
       setLoading(false);
     }
