@@ -1088,6 +1088,7 @@ function buildActivityLiveHTML(streamId) {
 
 const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   memory: 'fa-brain',
+  vision: 'fa-image',
   assess: 'fa-lightbulb',
   strategy: 'fa-compass',
   tavily: 'fa-search',
@@ -1220,6 +1221,7 @@ function publicActivityStep(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const step = String(entry.step || '');
   const raw = String(entry.message || '').slice(0, 220).trim();
+  if (step === 'vision') return { step, message: 'Aku sedang melihat gambar yang kamu kirim...' };
   if (step === 'tavily') return { step, message: 'Menelusuri web...' };
   if (step === 'exa') return { step, message: 'Aku coba sumber pencarian lain, ya.' };
   if (step === 'report') return { step, message: raw || 'Aku coba cari pembandingnya dulu.' };
@@ -2440,7 +2442,7 @@ async function sendMessage(text, files = []) {
         time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentMessageId,
-        files: files
+        files: files.map(f => ({ name: f.name, type: f.type, base64: f.base64 }))
       })
     });
 
@@ -3342,9 +3344,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       filesHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">`;
       metadata.files.forEach(f => {
         const isImage = f.type && f.type.startsWith('image/');
-        const name = f.name || 'file';
-        if (isImage && f.base64) {
-          const safeSrc = f.base64.replace(/"/g, '&quot;');
+        const name = escHtml(f.name || 'file');
+        if (isImage && (f.preview || f.base64)) {
+          const safeSrc = (f.preview || f.base64).replace(/"/g, '&quot;');
           filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
         } else {
           const icon = f.type?.includes('word') ? '📝' : f.type?.includes('sheet') ? '📊' : f.type?.includes('pdf') ? '📕' : '📄';
@@ -3892,7 +3894,7 @@ function renderFilePreview() {
         ? `<img src="${URL.createObjectURL(file)}" alt="preview">`
         : `<i class="fas fa-file-alt file-icon"></i>`
       }
-      <div class="file-name">${file.name}</div>
+      <div class="file-name">${escHtml(file.name)}</div>
       <span class="remove-file" onclick="removeFile(${index})">×</span>
     `;
     container.appendChild(div);
@@ -3919,6 +3921,54 @@ function fileToBase64(file) {
   });
 }
 
+const AAI_SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const AAI_MAX_IMAGES = 3;
+const AAI_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const AAI_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+// Preserve full resolution when small: tiny UI text is easier to read.
+async function prepareAAiImage(file) {
+  const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+  if (!AAI_SUPPORTED_IMAGE_TYPES.has(mime)) {
+    throw new Error('Saat ini AAi bisa membaca gambar JPG, PNG, atau WebP. PDF/HEIC menyusul, ya.');
+  }
+  let processed = file;
+  if (file.size > AAI_MAX_IMAGE_BYTES) {
+    const src = URL.createObjectURL(file);
+    const img = new Image();
+    try {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Gambar tidak bisa dibaca browser.'));
+        img.src = src;
+      });
+    } finally {
+      URL.revokeObjectURL(src);
+    }
+    for (const limit of [2600, 2200, 1800]) {
+      const scale = Math.min(1, limit / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Browser tidak dapat mengecilkan gambar.');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      processed = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+      canvas.width = 0; canvas.height = 0;
+      if (processed && processed.size <= AAI_MAX_IMAGE_BYTES) break;
+    }
+    if (!processed || processed.size > AAI_MAX_IMAGE_BYTES) {
+      throw new Error('Gambar terlalu besar. Coba crop bagian yang ingin dibaca.');
+    }
+  }
+  return {
+    name: file.name.slice(0, 100),
+    type: processed.type || mime,
+    base64: await fileToBase64(processed),
+    preview: URL.createObjectURL(file)
+  };
+}
+
 async function handleSend() {
   const inp = document.getElementById('messageInput');
   const text = inp.value.trim();
@@ -3940,18 +3990,22 @@ async function handleSend() {
       }
     }
 
-    const oversized = selectedFiles.find(f => f.size > 2 * 1024 * 1024);
-    if (oversized) throw new Error(`File "${oversized.name}" >2MB. Kompres dulu ya.`);
-
-    const filesPayload = await Promise.all(selectedFiles.map(async f => ({
-      name: f.name, type: f.type, base64: await fileToBase64(f)
-    })));
+    if (selectedFiles.length > AAI_MAX_IMAGES) throw new Error('Maksimal tiga gambar untuk satu pesan.');
+    const filesPayload = await Promise.all(selectedFiles.map(prepareAAiImage));
+    const bytes = filesPayload.reduce((sum, file) => {
+      const value = String(file.base64).split(',')[1] || '';
+      return sum + Math.floor(value.length * 3 / 4);
+    }, 0);
+    if (bytes > AAI_MAX_TOTAL_BYTES) {
+      filesPayload.forEach(file => URL.revokeObjectURL(file.preview));
+      throw new Error('Total gambar maksimal 8 MB. Kurangi jumlahnya dulu, ya.');
+    }
 
     inp.value = ''; autoResize(inp); updateMobileSendVisibility();
     const previewContainer = document.getElementById('filePreview');
     previewContainer.classList.add('fading-out');
 
-    sendMessage(text, filesPayload);
+    void sendMessage(text || 'Tolong jelaskan gambar yang kulampirkan.', filesPayload);
 
     setTimeout(() => {
       selectedFiles = [];
