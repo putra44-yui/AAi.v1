@@ -1,0 +1,55 @@
+name: AAi Companion Android Debug APK
+
+on:
+  pull_request:
+    branches: [design/aai-crystal-refresh]
+    paths:
+      - 'android/**'
+      - 'public/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/aai-companion-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-debug-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Android SDK platform 36 (GitHub runner already provides sdkmanager)
+        run: |
+          echo "SDK root: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unknown}}"
+          SDK_MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDK_MANAGER"
+          "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
+      - name: Install JS deps
+        run: npm ci
+      - name: Sync Capacitor Android using current Cloudflare website
+        run: npx cap sync android
+      - name: Build debug APK (never requires release signing secrets)
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon :app:assembleDebug
+      - name: Save unsigned-in-production, debug-signed test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AAi-Companion-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

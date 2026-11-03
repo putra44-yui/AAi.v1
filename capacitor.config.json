@@ -1,12 +1,12 @@
 {
   "appId": "id.aai.personal",
   "appName": "AAi",
-  "webDir": "www",
+  "webDir": "public",
   "server": {
-    "url": "https://a-ai-rust.vercel.app",
+    "url": "https://aai-v0.aai-agents-yuiputra44.workers.dev",
     "cleartext": false,
     "allowNavigation": [
-      "a-ai-rust.vercel.app"
+      "aai-v0.aai-agents-yuiputra44.workers.dev"
     ]
   }
 }

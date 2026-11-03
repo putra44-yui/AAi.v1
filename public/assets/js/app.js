@@ -1924,6 +1924,18 @@ async function processStream(response, streamId, onDone) {
   }
   let previewStepTimer = null;
   let streamError = null;
+  // Companion reads the SAME verified SSE lifecycle; no duplicate model calls.
+  const companionLoadSerial = sessionLoadSerial;
+  const companionEvent = (kind, data = {}) => {
+    if (companionLoadSerial !== sessionLoadSerial) return;
+    try {
+      window.AAiCompanionBridge?.handleChatEvent(kind, { streamId, ...data });
+    } catch (error) {
+      // Visual mode must never break the active chatbot stream.
+      console.warn('[AAi companion] UI bridge failed:', error?.message || error);
+    }
+  };
+  companionEvent('begin', { userMessage: getLastUserPromptText() });
   let firstToken = true;
   let gotDone   = false;
   let renderScheduled = false;
@@ -2158,6 +2170,9 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.phase === 'preface') {
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        companionEvent('status', { message: parsed.message.slice(0, 200) });
+      }
       if (prefaceEl && typeof parsed.message === 'string' && parsed.message.trim()) {
         prefaceEl.textContent = parsed.message.slice(0, 240);
         prefaceEl.hidden = false;
@@ -2170,6 +2185,7 @@ async function processStream(response, streamId, onDone) {
     // Move its public opening into the compact process panel, then start a
     // clean final reply after the tool result arrives.
     if (parsed.phase === 'tool_switch') {
+      companionEvent('reset');
       clearStreamingRenderSchedule();
       fullText = '';
       firstToken = true;
@@ -2217,6 +2233,7 @@ async function processStream(response, streamId, onDone) {
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
         const publicStep = publicActivityStep(step);
+        if (publicStep?.message) companionEvent('status', { message: publicStep.message });
         if (publicStep && activityEl && activityListEl) {
           activityEl.hidden = false;
           const html = renderActivityStepHTML(step);
@@ -2282,6 +2299,7 @@ async function processStream(response, streamId, onDone) {
         stopPreviewTicker('', true);
       }
       fullText += parsed.token;
+      companionEvent('token', { token: parsed.token });
       scheduleStreamingRender();
     }
 
@@ -2347,6 +2365,7 @@ async function processStream(response, streamId, onDone) {
       }
       streamRow.setAttribute('data-preview', finalPreview ? encodeURIComponent(JSON.stringify(finalPreview)) : '');
       onDone(parsed, fullText, finalPreview);
+      companionEvent('done', { text: fullText });
       if (parsed.file_job?.id) {
         startFileJobLifecycle(parsed.file_job, parsed.message_id || null);
       }
@@ -2383,6 +2402,7 @@ async function processStream(response, streamId, onDone) {
 
   if (activityTimer) clearInterval(activityTimer);
   if (streamError) {
+    companionEvent('error');
     stopPreviewTicker('', true);
     throw streamError;
   }
@@ -2390,6 +2410,7 @@ async function processStream(response, streamId, onDone) {
   // A response is durable only after the server sends the done event with both IDs.
   // A partial stream must remain retryable, never enter the message tree as a phantom answer.
   if (!gotDone) {
+    companionEvent('error');
     const error = new Error('Koneksi terputus sebelum jawaban tersimpan. Silakan coba lagi.');
     error.streamMeta = {
       session_id: streamSessionId || currentSessionId || null,

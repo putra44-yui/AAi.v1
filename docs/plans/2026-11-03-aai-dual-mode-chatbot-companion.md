@@ -38,7 +38,7 @@
 
 **Larangan keras:** tidak mengambil karakter anime/chibi generik dari internet, tidak menggambar ulang dengan wajah, palet, atau atribut berbeda, tidak mengganti kristal, dan tidak menghapus tulisan **AAi**. Tidak memakai foto anak/pengguna sebagai maskot.
 
-**Pekerjaan visual F0 yang belum dikerjakan:** periksa byte PNG, dimensi, channel alpha, area latar yang mungkin masih terbakar ke gambar, ruang transparan, dan keterbacaan kristal secara **visual** pada ukuran overlay. Keberadaan ekstensi PNG bukan bukti latar transparan. Dokumentasi sumber file dan alt HTML **bukan** pemeriksaan pixel-level.
+**Audit visual F0 — terverifikasi sebagian (3 November 2026):** gambar kanonis telah diekstrak dari APK debug yang dibangun GitHub Actions, **1230 × 1278 px, RGBA, alpha minimum 0 dan maksimum 255, keempat sudut transparan**, dengan rambut putih serta kristal bertuliskan **AAi** terlihat pada hasil inspeksi. Git blob SHA telah dicocokkan secara independen dan dikunci pada tes. **Belum lulus:** evaluasi tangan/pose menutupi kepala dan area pribadi, pengujian visual di beberapa HP nyata, serta frame animasi terpisah. Jangan mengklaim pose tangan sudah ada hanya karena sprite sekarang bisa digerakkan.
 
 Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan lakukan background removal **tanpa mengubah rambut, wajah, ornamen, kristal, atau huruf AAi**. File sumber jangan ditimpa. Setiap frame animasi harus lulus pembandingan visual dengan maskot kanonis. Simpan manifest turunan yang mencatat hash sumber, ukuran sprite, pivot kepala dan titik sentuh.
 
@@ -244,8 +244,8 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 
 ## 10. Checkpoint 3 November 2026
 
-**Sudah:** kesepakatan dua mode dan interaksi balon komik; identifikasi maskot produksi, path dan hash; konfirmasi Android/Capacitor sudah ada; **larangan mengikuti APK Vercel/Next lawas**; spesifikasi gesture sopan, animasi lembut, dan micro-LLM non-reasoning (sebagai keputusan desain, bukan implementasi); kerangka kerja ini.
+**Sudah:** kerangka dua mode; inspeksi visual dan alpha maskot kanonis di dalam APK; lock Git SHA; prototype web Chatbot/Pendamping dengan satu SSE, satu balon berpage, gesture/drag dan input bawah; service overlay Android native, izin opt-in, tombol berhenti, navigasi dan draf sementara per-akun; jalur micro-LLM yang **OFF secara default**; build APK debug pertama berhasil. Next/Vercel lama dilarang sebagai acuan. Bukti implementasi adalah PR #15, sedangkan tahap desain masih dicatat di dokumen ini.
 
-**Belum:** inspeksi visual/pixel PNG, turunan transparan, state/animasi sprite, zona hitbox, micro-LLM, komponen mode Pendamping, Android overlay, build APK, uji lintas perangkat, perbaikan Auth. Semua itu adalah pekerjaan fase berikutnya, **bukan hasil yang telah dicapai**.
+**Belum:** pose animasi tangan yang benar-benar melindungi kepala/bagian pribadi (sprite saat ini hanya gerak lembut, bukan animasi tulang), uji overlay/IME pada HP fisik, uji sejumlah merek Android, autentikasi global produksi, aktifkan micro-LLM, dan pengiriman pesan langsung dari overlay (sementara hanya mengirim draf ke Chatbot). APK masih debug dan belum lulus gate F4/F5. Kredensial penandatanganan lama yang pernah masuk riwayat Git publik harus dirotasi sebelum rilis.
 
-**Langkah pertama nanti:** F0 — **pastikan aset maskot benar secara visual**, terutama rambut putih, kristal, dan tulisan **AAi**, baru membuat sprite/animasi apa pun.
+**Langkah pertama berikutnya:** tuntaskan uji nyata F3 (tap alpha, rotasi, keyboard, izin overlay, perbedaan vendor), validasi pose turunan maskot **tanpa mengubah tulisan AAi**, lalu selesaikan pengamanan login F4 sebelum mengaktifkan model reaksi cepat atau mendistribusikan APK pribadi.
