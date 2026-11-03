@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 const require = createRequire(import.meta.url);
 const core = require('../public/assets/js/aai-companion-core.js');
 const read = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
@@ -107,4 +108,16 @@ test('Android Gradle does not retain passwords, signing keys, or developer Windo
   const cap = JSON.parse(read('capacitor.config.json'));
   assert.equal(cap.server.url, 'https://aai-v0.aai-agents-yuiputra44.workers.dev');
   assert.doesNotMatch(JSON.stringify(cap), /a-ai-rust\.vercel\.app/);
+});
+
+test('actual canonical PNG remains pixel-identity-locked and uses RGBA (not a stock replacement)', () => {
+  const png=readFileSync(new URL('../public/aai-mascot-studio.png',import.meta.url));
+  assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16),1230);
+  assert.equal(png.readUInt32BE(20),1278);
+  assert.equal(png[25],6,'PNG must have RGBA color type for transparent mascot');
+  const blob=createHash('sha1')
+    .update(Buffer.from('blob '+png.length+'\\0'))
+    .update(png).digest('hex');
+  assert.equal(blob,'03ecbf99299936270dfdd465ade49e84500fe777');
 });
