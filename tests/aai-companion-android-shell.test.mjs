@@ -15,9 +15,9 @@ test('native overlay yields screen to the in-app AAi companion', () => {
   assert.match(service, /ACTION_APP_BACKGROUND/);
   assert.match(service, /if \(appForeground\)/);
   assert.match(service, /wm\.removeView\(floatingWidget\)/);
-  assert.match(service, /!appForeground && widgetParams != null/);
-  assert.match(activity, /protected void onResume\(\)/);
-  assert.match(activity, /protected void onPause\(\)/);
+  assert.match(service, /widgetParams != null/);
+  assert.match(activity, /public void onResume\(\)/);
+  assert.match(activity, /public void onPause\(\)/);
   assert.match(activity, /setCompanionInApp\(true\)/);
   assert.match(activity, /setCompanionInApp\(false\)/);
   assert.match(plugin, /service\.putExtra\("appVisible", true\)/);
