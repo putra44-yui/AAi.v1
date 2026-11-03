@@ -8,6 +8,7 @@ export const maxDuration = 300;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODEL = 'qwen/qwen3.6-plus';
+const DEFAULT_TEST_MODEL = 'openai/gpt-oss-20b:free';
 const DEFAULT_PERSONA = 'Auto';
 const DEFAULT_REFERER = 'https://aai.family';
 const DEFAULT_TITLE = 'AAi Keluarga';
@@ -93,6 +94,7 @@ interface ParsedChatRequest {
   userId: string | null;
   userMessageId: string | null;
   personaName: string;
+  modelPreference: 'main' | 'oss-test';
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -245,6 +247,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   const userId = readTrimmedString(parsedValue.user_id);
   const userMessageId = readTrimmedString(parsedValue.user_message_id);
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
+  const modelPreference = readTrimmedString(parsedValue.model_preference) === 'oss-test' ? 'oss-test' : 'main';
 
   return {
     ok: true,
@@ -255,6 +258,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       userId,
       userMessageId,
       personaName,
+      modelPreference,
     },
   };
 }
@@ -538,7 +542,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     const sessionId = requestBody.value.sessionId || randomUUID();
     const userMessageId = requestBody.value.userMessageId || randomUUID();
     const personaName = requestBody.value.personaName;
-    const modelName = readEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MODEL;
+    // Model gratis hanya dipakai atas pilihan eksplisit dari antarmuka untuk uji coba.
+    const modelName = requestBody.value.modelPreference === 'oss-test'
+      ? DEFAULT_TEST_MODEL
+      : (readEnv('OPENROUTER_MAIN_MODEL') || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL') || DEFAULT_PROVIDER_URL;
     const providerPayload = buildProviderPayload(requestBody.value.message, personaName, modelName, traceId);
     const encoder = new TextEncoder();

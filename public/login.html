@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AAi — Masuk</title>
-<meta name="theme-color" content="#2a7a9e" />
+<title>Masuk — AAi</title>
+<meta name="description" content="Masuk ke AAi untuk melanjutkan obrolan bersama Ayaka & Ayato AI." />
+<link rel="icon" type="image/png" href="/icons/aai-192.png" />
+<meta name="theme-color" content="#f8f5ff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/icons/aai-512.png" />
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -186,16 +188,24 @@
     75%     { transform:translateX(6px); }
   }
 </style>
+<link rel="stylesheet" href="/assets/css/aai-studio.css" />
 </head>
-<body>
+<body class="aai-login-page">
   <div class="orb orb1"></div>
   <div class="orb orb2"></div>
   <div class="orb orb3"></div>
 
+  <div class="aai-login-scene">
+    <section class="aai-login-hero" aria-label="Ilustrasi AAi">
+      <div class="aai-login-art"><img src="/aai-mascot-studio.png" alt="Maskot AAi berambut putih dengan kristal bertuliskan AAi" /></div>
+      <h2>Ide besar dimulai dari obrolan kecil.</h2>
+      <p>AAi menemanimu berpikir, belajar, dan menciptakan hal baru.</p>
+      
+    </section>
   <div class="card">
     <div class="logo">
       <div class="logo-icon">
-        <img src="/icons/icon-512.png" srcset="/icons/icon-192.png 192w, /icons/icon-512.png 512w" sizes="52px" alt="Logo AAi" />
+        <img src="/aai-mascot-studio.png" alt="Maskot AAi" />
       </div>
       <div class="logo-text">
         <span class="logo-name">AAi</span>
@@ -204,8 +214,8 @@
     </div>
 
     <div class="welcome">
-      <h1>Selamat Datang 👋</h1>
-      <p>Masukkan username kamu untuk<br/>mulai mengobrol dengan AAi.</p>
+      <h1>Selamat datang kembali.</h1>
+      <p>Lanjutkan percakapan, temukan ide baru, dan selesaikan apa yang sedang kamu kerjakan.</p>
     </div>
 
     <div class="field">
@@ -217,12 +227,14 @@
     <button class="login-btn" id="loginBtn" onclick="handleLogin()">
       Masuk ke AAi
     </button>
+    <button class="login-pwa-install" type="button" data-aai-install onclick="installAAi()"><i class="fas fa-download"></i> Pasang aplikasi AAi</button>
 
     <div class="error-msg" id="errorMsg"></div>
 
     <div class="footer-note">
-      Dibuat dengan 💙 untuk<br/><span>Ayaka &amp; Ayato</span>
+      Dibuat dengan 💜 untuk<br/><span>Ayaka &amp; Ayato</span>
     </div>
+  </div>
   </div>
 
 <script>
@@ -287,14 +299,8 @@
     el.classList.add('show');
   }
 
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then(registration => registration.update())
-        .catch(() => {});
-    });
-  }
+  // PWA registration is handled by /assets/js/pwa.js.
 </script>
+<script src="/assets/js/pwa.js"></script>
 </body>
 </html>

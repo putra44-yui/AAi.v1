@@ -16,6 +16,7 @@ let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
 let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
+let currentModelPreference = 'main'; // mode uji sementara, kembali ke utama setelah refresh
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
@@ -41,7 +42,7 @@ function getPreferredDisplayName() {
 }
 
 function getWelcomeIllustrationSrc() {
-  return isMobileViewport() ? '/ayaka.webp' : '/ayaka1.gif';
+  return '/aai-mascot.jpg';
 }
 
 function clearStoredSessionOnUserMismatch() {
@@ -709,7 +710,9 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = currentPersona || 'Auto';
+  modeLabel.textContent = currentModelPreference === 'oss-test'
+    ? `🧪 OSS · ${currentPersona || 'Auto'}`
+    : (currentPersona || 'Auto');
 }
 
 function updateCompactStatus(forceValue = null) {
@@ -965,7 +968,7 @@ function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') 
   return `
     <div style="display:flex;align-items:center;gap:10px;">
       <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-        <img src="/ayaka.gif" alt="Ayaka">
+        <img src="/aai-mascot.jpg" alt="AAi" >
       </div>
       <div style="display:flex;flex-direction:column;gap:3px;">
         <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
@@ -1924,7 +1927,7 @@ async function sendMessage(text, files = []) {
   setSendBtn('stop');
   abortController = new AbortController();
 
-  // Beri ruang lebih panjang agar primary model dan fallback sempat selesai.
+  // Beri waktu untuk respons streaming, termasuk saat model uji sedang sibuk.
   const timeoutId = setTimeout(() => abortController.abort(), 240000);
 
   try {
@@ -1937,6 +1940,7 @@ async function sendMessage(text, files = []) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
         files: files
       })
@@ -2290,6 +2294,7 @@ async function sendMessageBranched(text, parentId = null) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
         memory_experiment_mode: currentMemoryExperimentMode,
         parent_id: parentId
       })
@@ -2470,28 +2475,47 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
   } catch (e) { console.error("Gagal hapus:", e); }
 });
 
+function useWelcomePrompt(promptText) {
+  const input = document.getElementById('messageInput');
+  if (!input) return;
+  input.value = promptText;
+  autoResize(input);
+  updateMobileSendVisibility();
+  input.focus();
+}
+
 function newChat(options = {}) {
   const { preserveStoredSession = false } = options;
   currentSessionId = null;
   currentSessionMeta = null;
   activeRenderJob += 1;
   if (!preserveStoredSession) clearStoredSessionState();
-  currentMessages  = [];
+  currentMessages = [];
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
-      <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite;background:transparent;">
-        <img src="${getWelcomeIllustrationSrc()}" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
+    <section class="aai-welcome" aria-label="Selamat datang di AAi">
+      <div class="aai-welcome-copy">
+        <span class="aai-kicker"><i class="fas fa-gem"></i> YOUR LITTLE AI COMPANION</span>
+        <h1>Hai, <span>${escHtml(getPreferredDisplayName())}!</span><br>Siap menjelajah ide? ✨</h1>
+        <p>Dari pertanyaan sederhana sampai ide yang luar biasa, AAi siap menemani setiap ceritamu. Mau mulai dari mana?</p>
+        <div class="aai-prompt-heading">COBA TANYAKAN</div>
+        <div class="aai-prompt-grid">
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku membuat ide kreatif untuk hari ini')"><i class="fas fa-lightbulb"></i> Cari ide kreatif</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Jelaskan sesuatu yang baru dengan cara sederhana')"><i class="fas fa-book-open"></i> Belajar hal baru</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun rencana dan prioritas')"><i class="fas fa-list-check"></i> Susun rencana</button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Temani aku ngobrol santai yuk')"><i class="fas fa-heart"></i> Ngobrol santai</button>
+        </div>
       </div>
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${getPreferredDisplayName()}! 👋</h2>
-      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
-    </div>`;
-  document.getElementById('topbarTitle').textContent = 'AAi';
+      <div class="aai-welcome-art">
+        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot kristal AAi" />
+        <span class="aai-art-caption">developed by Teyzura</span>
+      </div>
+    </section>`;
+  document.getElementById('topbarTitle').textContent = 'AAi · Ayaka & Ayato';
   updateCompactStatus(false);
   updateMobileSendVisibility(false);
   renderSidebar();
 }
-
 // ══════════════════════════════════════════
 // MESSAGE TREE
 // ══════════════════════════════════════════
@@ -2870,7 +2894,24 @@ function renderSettingsMenu() {
     </button>`;
   });
 
+  html += '<div class="settings-header">Model AI · pilih manual</div>';
+  const models = [
+    { val: 'main', label: '⚡ Qwen · utama' },
+    { val: 'oss-test', label: '🧪 GPT-OSS 20B · gratis (uji)' }
+  ];
+  models.forEach(m => {
+    html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
+      <span>${m.label}</span><i class="fas fa-check check"></i>
+    </button>`;
+  });
+  html += '<p class="model-test-note">Model OSS hanya untuk uji manual. Saat halaman dimuat ulang, kembali ke Qwen.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
+}
+function selectModelUI(val) {
+  if (val !== 'main' && val !== 'oss-test') return;
+  currentModelPreference = val;
+  updateModeLabel();
+  renderSettingsMenu();
 }
 function selectPersonaUI(val) {
   currentPersona = val;

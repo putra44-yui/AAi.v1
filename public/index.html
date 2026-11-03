@@ -3,14 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AAi</title>
-<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
-<meta name="theme-color" content="#2a7a9e" />
+<title>AAi ✦ Ruang Kreatifmu</title>
+<meta name="description" content="AAi — ruang ngobrol, belajar, dan berkarya bersama Ayaka & Ayato AI." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="AAi — Ayaka & Ayato AI" />
+<meta property="og:description" content="Teman ngobrol untuk ide, karya, dan hal-hal yang ingin kamu pahami." />
+<meta property="og:url" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
+<meta property="og:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-mascot-studio.png?v=studio-girl-20261031" />
+<meta property="og:image:alt" content="Maskot perempuan AAi dengan batu kristal bertuliskan AAi" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="AAi — Ayaka & Ayato AI" />
+<meta name="twitter:image" content="https://aai-v0.aai-agents-yuiputra44.workers.dev/aai-mascot-studio.png?v=studio-girl-20261031" />
+<link rel="canonical" href="https://aai-v0.aai-agents-yuiputra44.workers.dev/" />
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/aai-192.png">
+<meta name="theme-color" content="#f8f5ff" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="AAi" />
 <link rel="manifest" href="/manifest.webmanifest" />
-<link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+<link rel="apple-touch-icon" sizes="512x512" href="/icons/aai-512.png" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
 <!-- Highlight.js: syntax highlighting untuk code box -->
@@ -1305,6 +1316,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>
+<link rel="stylesheet" href="/assets/css/aai-studio.css?v=20261101-tables" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
@@ -1367,86 +1379,119 @@ body.desktop-sidebar-hidden #topbarTitle {
   </div>
 </div>
 
-<div class="modal-overlay" id="clarifyModal">
-  <div class="clarify-modal-box">
-    <div class="clarify-title" id="clarifyTitle">Perlu Detail Tambahan</div>
-    <div class="clarify-desc" id="clarifyDesc">Pilih opsi yang paling sesuai atau isi lainnya agar hasilnya lebih tepat.</div>
-    <div class="clarify-top-actions">
-      <button class="clarify-btn ghost" id="clarifyPresetBtn" onclick="applyPreviousClarifyPreset()">Gunakan Preset Sebelumnya</button>
-    </div>
-    <div class="clarify-grid" id="clarifyQuestions"></div>
-    <div class="clarify-actions">
-      <button class="clarify-btn cancel" onclick="closeClarifyModal()">Nanti Saja</button>
-      <button class="clarify-btn confirm" id="clarifyConfirmBtn" onclick="confirmClarifyAndSend()">Lanjutkan Dengan Jawaban Ini</button>
-    </div>
-  </div>
-</div>
 
-<aside class="sidebar" id="sidebar">
+<nav class="aai-rail" aria-label="Navigasi utama">
+  <a class="aai-rail-brand" href="/" aria-label="AAi, beranda">
+    <img src="/aai-mascot-studio.png" alt="Maskot perempuan AAi" />
+    <span>AAi</span>
+  </a>
+  <div class="aai-rail-divider"></div>
+  <button class="aai-rail-action aai-rail-new" type="button" onclick="newChat()" aria-label="Mulai obrolan baru" title="Obrolan baru"><i class="fas fa-plus"></i><span>Baru</span></button>
+  <button class="aai-rail-action hamburger" type="button" onclick="toggleSidebar()" aria-label="Buka riwayat percakapan" aria-expanded="false" title="Riwayat chat"><i class="far fa-comments"></i><span>Riwayat</span></button>
+  <button class="aai-rail-action aai-rail-install" type="button" data-aai-install onclick="installAAi()" aria-label="Pasang AAi di perangkat" title="Pasang aplikasi"><i class="fas fa-download"></i><span>Pasang</span></button>
+  <div class="aai-rail-spacer"></div>
+  <div class="aai-rail-footer" title="Ruang kreatif AAi"><i class="fas fa-gem"></i><span>Ruangmu</span></div>
+</nav>
+
+<aside class="sidebar" id="sidebar" aria-label="Laci riwayat percakapan">
   <div class="sidebar-header">
-    <a class="logo" href="/">
-      <div class="logo-icon">
-        <img src="/ayaka.webp" alt="AAi Logo" style="width:100%;height:100%;object-fit:contain;border-radius:16px;">
-      </div>
-      <div class="logo-text-stack">
-        <span class="logo-name">AAi</span>
-        <span class="logo-subtitle">Ayaka &amp; Ayato AI</span>
-      </div>
-    </a>
-    <button class="new-chat-btn" onclick="newChat()">
-      <span style="font-size:18px;">&#10022;</span> Obrolan Baru
-    </button>
+    <div class="aai-drawer-heading">
+      <div><span class="aai-drawer-overline">RUANG CERITA</span><h2>Percakapanmu <span>✦</span></h2></div>
+      <button class="aai-drawer-close" type="button" onclick="toggleSidebar()" aria-label="Tutup riwayat"><i class="fas fa-times"></i></button>
+    </div>
+    <button class="new-chat-btn" type="button" onclick="newChat()"><i class="fas fa-plus"></i><span>Mulai obrolan baru</span></button>
   </div>
-  <div id="sessionList"></div>
+  <div class="sidebar-library">
+    <div class="sidebar-section-row">
+      <span class="sidebar-section-label">Obrolan sebelumnya</span>
+      <span class="sidebar-section-hint">RIWAYAT</span>
+    </div>
+    <div id="sessionList" aria-label="Daftar percakapan"></div>
+  </div>
   <div class="user-card">
     <div class="user-info">
-      <div class="user-avatar-mini"><i class="fas fa-user"></i></div>
-      <div style="display:flex;flex-direction:column;">
-        <span id="cardUsername" style="font-weight:600;font-size:14px;color:var(--text);">Person</span>
+      <div class="user-avatar-mini"><i class="far fa-user"></i></div>
+      <div style="display:flex;flex-direction:column;min-width:0;">
+        <span id="cardUsername" style="font-weight:700;font-size:13px;">Person</span>
         <span id="cardFamilyRole" class="user-role-badge">Anggota Keluarga</span>
       </div>
     </div>
-    <button class="logout-btn" onclick="logout()" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+    <button class="logout-btn" onclick="logout()" type="button" title="Keluar akun" aria-label="Keluar"><i class="fas fa-sign-out-alt"></i></button>
   </div>
 </aside>
+<div class="aai-drawer-backdrop" id="drawerBackdrop" onclick="toggleSidebar()" aria-hidden="true"></div>
 
 <main class="main">
-  <div class="topbar">
-    <span class="hamburger" onclick="toggleSidebar()">&#9776;</span>
-    <span id="topbarTitle" style="font-size:22px;font-weight:600;">AAi - Ayaka dan Ayato</span>
+  <header class="topbar">
+    <div class="topbar-brandline">
+      <span class="topbar-eyebrow"><i class="fas fa-sparkles" aria-hidden="true"></i> AAi · CREATIVE SPACE</span>
+      <span id="topbarTitle">Ruang baru untuk ide-ide besar</span>
+    </div>
     <span class="topbar-spacer"></span>
+    <span class="topbar-status"><span class="topbar-status-dot"></span> Teman ide harian</span>
+    <div class="settings-wrapper aai-top-settings">
+      <button class="settings-btn" type="button" onclick="toggleSettingsMenu()" title="Pengaturan model" aria-label="Pengaturan model">
+        <i class="fas fa-sliders-h"></i>
+        <span class="mode-label" id="modeLabel"></span>
+      </button>
+      <div class="settings-menu" id="settingsMenu"></div>
+    </div>
+  </header>
+  <div class="aai-pwa-notice" id="aaiNetworkNotice" role="status" hidden><i class="fas fa-wifi"></i> AAi sedang offline. Pesan baru butuh koneksi internet.</div>
+  <div class="aai-update-notice" id="aaiUpdateNotice" role="status" hidden>
+    <span><i class="fas fa-gem"></i> Versi AAi terbaru siap digunakan.</span>
+    <button type="button" id="aaiReloadForUpdate">Muat ulang</button>
   </div>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
-  <div id="filePreview" class="file-preview-container"></div>
-
-  <div class="input-wrap" id="inputWrap">
-    <textarea id="messageInput" rows="1" placeholder="Ketik pesan..." onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
-    <button class="mobile-floating-send" id="mobileSendBtn" onclick="handleSend()" title="Kirim">&#9654;</button>
-    <div class="input-controls-row">
-      <div class="upload-container">
-        <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" style="display:none;">
-        <button class="upload-btn" onclick="document.getElementById('fileInput').click()" title="Lampirkan File/Gambar">
-          <i class="fas fa-paperclip"></i>
+    <div id="filePreview" class="file-preview-container"></div>
+    <div class="input-wrap" id="inputWrap">
+      <div class="composer-plus-wrap">
+        <button type="button" class="composer-plus-btn" id="composerPlusBtn"
+                onclick="toggleComposerMenu()" title="Lampiran, izin web, dan Compact"
+                aria-label="Opsi tambahan: lampiran, izin web, dan Compact"
+                aria-haspopup="menu" aria-expanded="false" aria-controls="composerActionMenu">
+          <i class="fas fa-plus" aria-hidden="true"></i>
         </button>
+        <div class="composer-action-menu" id="composerActionMenu" role="menu"
+             aria-label="Opsi tambahan" hidden>
+          <button type="button" role="menuitem" class="composer-menu-action"
+                  onclick="runComposerAction('upload')">
+            <span class="composer-action-icon"><i class="fas fa-paperclip" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Kirim gambar</strong><small>Foto, screenshot · JPG, PNG, WebP</small></span>
+          </button>
+          <button type="button" role="menuitemcheckbox" aria-checked="false"
+                  class="composer-menu-action composer-web-permission" id="webPermissionBtn"
+                  onclick="runComposerAction('web-permission')"
+                  aria-label="Izinkan atau nonaktifkan pencarian web">
+            <span class="composer-action-icon"><i class="fas fa-globe" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Izin pencarian web</strong><small id="webPermissionStatus">Nonaktif · hanya pengetahuan model</small></span>
+            <span class="composer-web-switch" aria-hidden="true"><i class="fas fa-toggle-off"></i></span>
+          </button>
+          <button type="button" role="menuitem" class="composer-menu-action"
+                  id="compactBtn" onclick="runComposerAction('compact')">
+            <span class="composer-action-icon"><i class="fas fa-compress-alt" aria-hidden="true"></i></span>
+            <span class="composer-action-text"><strong>Compact</strong><small>Ringkas konteks percakapan</small></span>
+          </button>
+          <p class="composer-menu-note">AAi bisa keliru — periksa kembali informasi penting.</p>
+        </div>
       </div>
-      <div class="settings-wrapper">
-        <button class="settings-btn" onclick="toggleSettingsMenu()" title="Mode AI">
-          <i class="fas fa-rocket"></i>
-          <span class="mode-label" id="modeLabel">Auto</span>
-        </button>
-        <div class="settings-menu" id="settingsMenu"></div>
-      </div>
-      <button class="quick-compact-btn" id="compactBtn" onclick="sendCompactCheckpoint()" title="Ringkas konteks + checkpoint">
-        <i class="fas fa-compress-alt"></i><span class="compact-label">Compact</span>
+      <textarea id="messageInput" rows="1" aria-label="Pesan untuk AAi"
+                placeholder="Tanya, cerita, atau mulai dari sebuah ide..."
+                onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
+      <input type="file" id="fileInput" multiple
+             accept="image/jpeg,image/png,image/webp" hidden>
+      <button type="button" class="send-btn" id="sendBtn" onclick="handleSend()"
+              title="Kirim pesan" aria-label="Kirim pesan">
+        <i class="fas fa-arrow-up" aria-hidden="true"></i>
       </button>
-      <button class="send-btn" id="sendBtn" onclick="handleSend()">&#9654;</button>
     </div>
+    <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
+    <p class="composer-note">AAi bisa keliru — periksa kembali informasi penting.</p>
   </div>
-  <div id="compactStatus" class="compact-status-pill"><i class="fas fa-compress-alt"></i> Compact aktif</div>
-</div>
 </main>
 
-<script src="/assets/js/app.js"></script>
+<script src="/assets/js/app.js?v=20261102-activity"></script>
+<script src="/assets/js/pwa.js"></script>
 </body>
 </html>

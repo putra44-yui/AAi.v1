@@ -15,13 +15,18 @@ if (currentUser.family_role) {
 let sessions         = [];
 let currentSessionId = null;
 let currentSessionMeta = null;
-let currentPersona   = localStorage.getItem('aai_persona') || 'Auto';
+let sessionLoadSerial = 0;
+const currentPersona = 'Auto'; // Single adaptive AAi voice; legacy persona preferences ignored.
+let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
+// External search requires an affirmative, persisted user choice (off by default).
+let currentWebPermission = localStorage.getItem('aai_web_tool_permission') === 'allow' ? 'allow' : 'deny';
 const currentMemoryExperimentMode = 'context-heavy';
 let currentMessages  = [];
 let activeVersionMap = {};
 let currentUtterance = null;
 let isSpeaking       = false;
 let abortController  = null;
+let chatMutationRunning = false;
 let selectedFiles    = [];
 let msgboxState = null;
 let pendingFriendSuggestion = null;
@@ -32,6 +37,11 @@ let stickyCodeHeaderTimer = null;
 let suppressAutoScroll = false;
 let activeRenderJob = 0;
 
+function getAAiDeviceTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; }
+  catch { return null; }
+}
+
 function isMobileViewport() {
   return window.innerWidth <= 768 || navigator.maxTouchPoints > 0;
 }
@@ -41,7 +51,7 @@ function getPreferredDisplayName() {
 }
 
 function getWelcomeIllustrationSrc() {
-  return isMobileViewport() ? '/ayaka.webp' : '/ayaka1.gif';
+  return '/aai-mascot-studio.png';
 }
 
 function clearStoredSessionOnUserMismatch() {
@@ -62,6 +72,34 @@ function buildSessionFallbackTitle(rawTitle = '') {
   return normalized.length > 42 ? `${normalized.slice(0, 39).trim()}...` : normalized;
 }
 
+function buildTopicSessionTitle(rawMessage = '') {
+  const stopwords = new Set([
+    'aku', 'saya', 'kamu', 'kau', 'dia', 'kami', 'kita', 'mereka', 'yang', 'dan',
+    'atau', 'dari', 'untuk', 'dengan', 'pada', 'dalam', 'jadi', 'bukan', 'tidak',
+    'gak', 'nggak', 'enggak', 'ada', 'ini', 'itu', 'tadi', 'sekarang', 'sudah',
+    'belum', 'bisa', 'mau', 'ingin', 'perlu', 'kalau', 'karena', 'tapi', 'namun',
+    'apakah', 'bagaimana', 'kenapa', 'mengapa', 'apa', 'sih', 'dong', 'deh',
+    'ya', 'nih', 'lah', 'loh', 'dulu', 'baru', 'lagi', 'saja', 'aja',
+    'tolong', 'coba', 'buat', 'bikin', 'kasih', 'minta', 'bantu',
+    'di', 'ke', 'punya', 'jelaskan', 'menjelaskan', 'dijelaskan',
+    'membahas', 'bersama', 'sedang', 'sebuah',
+    'the', 'a', 'an', 'is', 'are', 'i', 'you', 'we', 'and', 'for', 'with', 'to', 'of', 'in'
+  ]);
+  // A test label or a tool prohibition is not the topic of the conversation.
+  const meaningfulMessage = String(rawMessage)
+    .replace(/^\s*uji\s+(?:ux|ui|tool|streaming|web)\b\s*[:,.-]?\s*/i, '')
+    .replace(/\b(?:jangan|tanpa)\s+(?:cari|mencari|gunakan)\s+(?:web|internet)\b[.,;:]?/gi, '');
+  const subject = meaningfulMessage.match(/\b(?:tentang|mengenai|soal)\s+([^.!?\n]{4,140})/i);
+  const words = ((subject?.[1] || meaningfulMessage).match(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu) || [])
+    .filter(word => word.length > 1 && !stopwords.has(word.toLowerCase()) &&
+      !/^a?(?:wk){2,}w?k?$/i.test(word) && !/^ak(?:wk){2,}$/i.test(word)).slice(0, 5);
+  if (!words.length) return 'Obrolan Bersama AAi';
+  if (words.length === 1) words.unshift('Tentang');
+  while (words.join(' ').length > 42 && words.length > 2) words.pop();
+  const title = words.join(' ');
+  return buildSessionFallbackTitle(title.charAt(0).toUpperCase() + title.slice(1));
+}
+
 function isProvisionalSessionTitle(rawTitle = '') {
   const normalized = String(rawTitle || '').replace(/\s+/g, ' ').trim();
   return !normalized || normalized === 'Memuat sesi...' || normalized === 'Obrolan baru';
@@ -69,7 +107,7 @@ function isProvisionalSessionTitle(rawTitle = '') {
 
 function buildSessionTitleFromMessages(messages = []) {
   const firstUserMessage = messages.find(message => message.role === 'user' && String(message.content || '').trim());
-  return buildSessionFallbackTitle(firstUserMessage?.content || '');
+  return buildTopicSessionTitle(firstUserMessage?.content || '');
 }
 
 function upsertSessionSnapshot(nextSession, { makeFirst = false } = {}) {
@@ -716,7 +754,7 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = currentPersona || 'Auto';
+  modeLabel.textContent = ''; // Model selection remains in Settings, never on the chat header.
 }
 
 function updateCompactStatus(forceValue = null) {
@@ -754,8 +792,9 @@ function setSendBtn(mode) {
 
   if (mode === 'stop') {
     buttons.forEach(btn => {
-      btn.innerHTML = '⏹';
-      btn.title = 'Hentikan';
+      btn.innerHTML = '<i class="fas fa-stop" aria-hidden="true"></i>';
+      btn.title = 'Hentikan respons';
+      btn.setAttribute('aria-label', 'Hentikan respons');
       btn.classList.add('stop-mode');
       btn.onclick = () => {
         if (abortController) abortController.abort();
@@ -764,8 +803,9 @@ function setSendBtn(mode) {
     updateMobileSendVisibility(true);
   } else {
     buttons.forEach(btn => {
-      btn.innerHTML = '▶';
-      btn.title = 'Kirim';
+      btn.innerHTML = '<i class="fas fa-arrow-up" aria-hidden="true"></i>';
+      btn.title = 'Kirim pesan';
+      btn.setAttribute('aria-label', 'Kirim pesan');
       btn.classList.remove('stop-mode');
       btn.onclick = handleSend;
     });
@@ -967,37 +1007,305 @@ function normalizeAssistantModelLabel(modelName = '', explicitLabel = '') {
     .join(' ');
 }
 
-function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') {
-  const displayLabel = normalizeAssistantModelLabel(modelName, modelLabel);
+function buildAssistantHeaderHTML(versionHtml) {
   return `
     <div style="display:flex;align-items:center;gap:10px;">
-      <div class="avatar" style="animation:stickerFloat 3.5s ease-in-out infinite;">
-        <img src="/ayaka.gif" alt="Ayaka">
-      </div>
-      <div style="display:flex;flex-direction:column;gap:3px;">
-        <div style="font-weight:700;font-size:15px;color:var(--blue-dark);font-family:'Cormorant Garamond',serif;">
-          AAi ${versionHtml}
-        </div>
-        <div class="assistant-model-label" style="font-size:11px;line-height:1.1;color:var(--text-muted);opacity:${displayLabel ? '0.78' : '0'};min-height:12px;">
-          ${escHtml(displayLabel)}
-        </div>
+      <div class="avatar"><img src="/aai-mascot-studio.png" alt="AAi"></div>
+      <div style="font-weight:800;font-size:15px;color:var(--blue-dark);font-family:'Plus Jakarta Sans',sans-serif;">
+        AAi ${versionHtml}
       </div>
     </div>`;
 }
-
+// Internal model metadata stays available for diagnostics, never shown as a chat byline.
 function applyAssistantModelMeta(row, modelName = '', modelLabel = '') {
   if (!row) return;
+  row.setAttribute('data-model', String(modelName || '').trim());
+  row.setAttribute('data-model-label', String(modelLabel || '').trim());
+}
 
-  const normalizedModel = String(modelName || '').trim();
-  const displayLabel = normalizeAssistantModelLabel(normalizedModel, modelLabel);
-  row.setAttribute('data-model', normalizedModel);
-  row.setAttribute('data-model-label', displayLabel);
+const AAI_ACTIVITY_STORE_KEY = 'aai_activity_trails_v1';
 
-  const labelEl = row.querySelector('.assistant-model-label');
-  if (!labelEl) return;
+function getStoredActivityTraces() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AAI_ACTIVITY_STORE_KEY) || '{}');
+    return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  } catch { return {}; }
+}
 
-  labelEl.textContent = displayLabel;
-  labelEl.style.opacity = displayLabel ? '0.78' : '0';
+function formatActivityDuration(ms) {
+  const seconds = Math.max(1, Math.round(Number(ms || 0) / 1000));
+  return seconds < 60 ? seconds + 's' : Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+}
+
+function saveActivityTrace(messageId, durationMs, steps, preface = '', firstTokenMs = null) {
+  if (!messageId || !Array.isArray(steps) || !steps.length) return;
+  try {
+    const traces = getStoredActivityTraces();
+    traces[messageId] = { durationMs: Math.max(0, Number(durationMs) || 0), firstTokenMs, steps: steps.slice(-18), preface: String(preface).slice(0, 240), savedAt: Date.now() };
+    const latest = Object.entries(traces).sort((left, right) => (right[1]?.savedAt || 0) - (left[1]?.savedAt || 0)).slice(0, 80);
+    localStorage.setItem(AAI_ACTIVITY_STORE_KEY, JSON.stringify(Object.fromEntries(latest)));
+  } catch { /* Storage may be disabled; live activity still works. */ }
+}
+
+// A public, bounded activity report: timing and tool milestones, never prompt,
+// private memory text, model chain of thought, API credentials, or tool snippets.
+function createPublicActivityReport(trace = {}) {
+  const seconds = value => Number.isFinite(Number(value)) && value != null
+    ? Math.max(0, Math.round(Number(value))) : null;
+  const steps = (Array.isArray(trace.steps) ? trace.steps : []).slice(-18).map(entry => {
+    const step = String(entry?.step || '').slice(0, 32);
+    const item = {
+      step,
+      at_ms: seconds(entry?.atMs),
+      message: step === 'strategy' ? 'Model memberikan pembuka publik.' : String(entry?.message || '').slice(0, 220),
+    };
+    if (step === 'sources' && Array.isArray(entry.sources)) {
+      item.sources = entry.sources.slice(0, 5).flatMap(source => {
+        const url = parsePublicSourceUrl(source?.url);
+        return url ? [{ url: url.href, title: String(source?.title || '').slice(0, 100) }] : [];
+      });
+    }
+    return item;
+  });
+  return {
+    schema: 'aai.public_activity.v1',
+    status: trace.completed ? 'completed' : 'running',
+    duration_ms: seconds(trace.durationMs),
+    first_token_ms: seconds(trace.firstTokenMs),
+    steps,
+  };
+}
+
+// The activity trail remains structured in Supabase for audits and datasets.
+// The family-facing conversation displays real milestones and streamed answer
+// text, never the raw JSON envelope or simulated model reasoning tokens.
+function buildActivityLiveHTML(streamId) {
+  return '<div class="aai-activity-live" role="status" aria-live="polite" aria-atomic="true">'
+    + '<span class="aai-activity-live-dot" aria-hidden="true"></span>'
+    + '<span class="aai-activity-live-text" id="activity_live_' + escHtml(streamId) + '">Sedang bekerja...</span>'
+    + '</div>';
+}
+
+const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
+  memory: 'fa-brain',
+  vision: 'fa-image',
+  recall: 'fa-brain',
+  assess: 'fa-lightbulb',
+  strategy: 'fa-compass',
+  tavily: 'fa-search',
+  exa: 'fa-globe',
+  found: 'fa-book-open',
+  unavailable: 'fa-exclamation-circle',
+  compose: 'fa-feather-alt',
+  provider: 'fa-hourglass-half'
+});
+
+function renderActivitySourceHTML(source) {
+  const parsed = parsePublicSourceUrl(source?.url);
+  if (!parsed) return '';
+  const hostname = parsed.hostname.replace(/^www\./i, '');
+  const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 100);
+  // Only the public source hostname is sent to the favicon service.
+  const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+  return '<a class="aai-activity-source-link" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
+    + '<span class="aai-activity-source-icon" aria-hidden="true"><i class="fas fa-globe"></i>'
+    + '<img class="aai-activity-source-favicon" data-aai-favicon src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer"></span>'
+    + '<span class="aai-activity-source-title">' + escHtml(title) + '</span>'
+    + '<span class="aai-activity-source-arrow" aria-hidden="true">↗</span></a>';
+}
+
+function parsePublicSourceUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim());
+    const hostname = parsed.hostname.toLowerCase();
+    if (!['http:', 'https:'].includes(parsed.protocol)
+      || !hostname
+      || hostname === 'localhost'
+      || hostname.endsWith('.localhost')
+      || hostname.endsWith('.local')
+      || /^(?:127\.|10\.|192\.168\.|169\.254\.|0\.)/i.test(hostname)) return null;
+    return parsed;
+  } catch { return null; }
+}
+
+function collectActivitySources(activityTrace) {
+  const steps = Array.isArray(activityTrace?.steps) ? activityTrace.steps : [];
+  const seen = new Set();
+  const sources = [];
+  for (const step of steps) {
+    if (step?.step !== 'sources' || !Array.isArray(step.sources)) continue;
+    for (const source of step.sources) {
+      const parsed = parsePublicSourceUrl(source?.url);
+      if (!parsed || seen.has(parsed.href)) continue;
+      seen.add(parsed.href);
+      sources.push({ ...source, url: parsed.href });
+      if (sources.length >= 5) return sources;
+    }
+  }
+  return sources;
+}
+
+function renderMessageSourceCardHTML(source) {
+  const parsed = parsePublicSourceUrl(source?.url);
+  if (!parsed) return '';
+  const hostname = parsed.hostname.replace(/^www\./i, '');
+  const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 140);
+  const rawSnippet = String(source?.snippet || '').replace(/\s+/g, ' ').trim();
+  // Search extracts sometimes return code or repeated markup, not a useful summary.
+  const snippet = /(?:=>|for await|\b(?:stream\.write|stream\.close)\(|[{};].*[{};])/.test(rawSnippet)
+    ? '' : rawSnippet.slice(0, 180);
+  const image = parsePublicSourceUrl(source?.image);
+  const isDocumentation = /^(?:developers|community|docs)\./i.test(hostname)
+    || /\b(?:documentation|docs)\b/i.test(title);
+  const showThumbnail = !!image && !isDocumentation;
+  const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+  const thumbnailHtml = showThumbnail
+    ? '<img class="aai-source-thumb" data-source-image src="' + escHtml(image.href) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+    : '<span class="aai-source-thumb-placeholder" aria-hidden="true"><i class="fas ' + (isDocumentation ? 'fa-book-open' : 'fa-newspaper') + '"></i>'
+      + (isDocumentation ? '<span class="aai-source-kind">Dokumentasi</span>' : '') + '</span>';
+  const cardState = (showThumbnail ? 'has-thumbnail' : 'has-placeholder') + (isDocumentation ? ' is-documentation' : '');
+  return '<a class="aai-source-card ' + cardState + '" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
+    + thumbnailHtml
+    + '<span class="aai-source-card-content">'
+    + '<span class="aai-source-card-heading">'
+    + '<span class="aai-source-favicon-wrap" aria-hidden="true"><i class="fas fa-globe"></i>'
+    + '<img class="aai-source-favicon" data-aai-favicon src="' + escHtml(favicon) + '" alt="" width="18" height="18" loading="lazy" referrerpolicy="no-referrer"></span>'
+    + '<span class="aai-source-card-title">' + escHtml(title) + '</span>'
+    + '<i class="fas fa-arrow-up-right-from-square aai-source-card-arrow" aria-hidden="true"></i>'
+    + '</span>'
+    + (snippet ? '<span class="aai-source-card-snippet">' + escHtml(snippet) + '</span>' : '')
+    + '<span class="aai-source-card-domain">' + escHtml(hostname) + '</span>'
+    + '</span></a>';
+}
+
+function buildMessageSourcePreviewHTML(activityTrace) {
+  const cards = collectActivitySources(activityTrace)
+    .map(renderMessageSourceCardHTML).filter(Boolean).join('');
+  if (!cards) return '';
+  return '<section class="aai-source-preview" aria-label="Sumber yang ditemukan">'
+    + '<div class="aai-source-preview-heading">Sumber yang ditemukan</div>'
+    + '<div class="aai-source-preview-list">' + cards + '</div>'
+    + '</section>';
+}
+
+function wireSourcePreviewImages(root = document) {
+  root.querySelectorAll('.aai-source-thumb[data-source-image]').forEach(image => {
+    if (image.dataset.fallbackBound) return;
+    image.dataset.fallbackBound = '1';
+    const showPlaceholder = () => {
+      const card = image.closest('.aai-source-card');
+      const placeholder = document.createElement('span');
+      placeholder.className = 'aai-source-thumb-placeholder';
+      placeholder.setAttribute('aria-hidden', 'true');
+      const icon = document.createElement('i');
+      icon.className = 'fas fa-newspaper';
+      placeholder.appendChild(icon);
+      image.replaceWith(placeholder);
+      card?.classList.remove('has-thumbnail');
+      card?.classList.add('has-placeholder');
+    };
+    image.addEventListener('error', showPlaceholder, { once: true });
+    if (image.complete && image.naturalWidth === 0) showPlaceholder();
+  });
+  root.querySelectorAll('img[data-aai-favicon]').forEach(image => {
+    if (image.dataset.fallbackBound) return;
+    image.dataset.fallbackBound = '1';
+    const hideBrokenFavicon = () => { image.hidden = true; };
+    image.addEventListener('error', hideBrokenFavicon, { once: true });
+    if (image.complete && image.naturalWidth === 0) hideBrokenFavicon();
+  });
+}
+
+// Router internals stay in the saved trace for diagnostics, but do not belong
+// in a family conversation. Apply this mapping to live AND historical events.
+function publicActivityStep(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const step = String(entry.step || '');
+  const raw = String(entry.message || '').slice(0, 220).trim();
+  if (step === 'recall') return { step, message: raw || 'Aku memeriksa bagian percakapan ini dulu...' };
+  if (step === 'vision') return { step, message: 'Aku sedang melihat gambar yang kamu kirim...' };
+  if (step === 'tavily') return { step, message: 'Menelusuri web...' };
+  if (step === 'exa') return { step, message: 'Aku coba sumber pencarian lain, ya.' };
+  if (step === 'report') return { step, message: raw || 'Aku coba cari pembandingnya dulu.' };
+  if (step === 'found') {
+    const match = /(?:Menemukan|Ketemu)\s+(\d+)\s+sumber/i.exec(raw);
+    return { step, message: match
+      ? 'Ketemu ' + match[1] + ' sumber. Aku cek isinya dulu...'
+      : 'Ada sumber yang ditemukan. Aku cek isinya dulu...' };
+  }
+  if (step === 'sources') return { step, message: 'Sumber yang ditemukan:' };
+  if (step === 'unavailable') return { step, message:
+    /(?:model|tool\s*calling|provider)/i.test(raw)
+      ? 'Aku belum bisa melanjutkan pencarian. Aku akan jujur soal batas informasinya.'
+      : raw || 'Pencariannya belum berhasil, ya.' };
+  // Ignore provider, memory count, tool decision, compose and model strategy.
+  return null;
+}
+
+function renderActivityStepHTML(entry) {
+  const publicStep = publicActivityStep(entry);
+  if (!publicStep) return '';
+  const { step, message } = publicStep;
+  const safeText = escHtml(message);
+  const sourceLinks = Array.isArray(entry?.sources)
+    ? entry.sources.slice(0, 5).map(renderActivitySourceHTML).filter(Boolean).join('')
+    : '';
+  if (step === 'sources') {
+    const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-book-open';
+    const milestone = '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
+      + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
+    const links = sourceLinks
+      ? '<li class="aai-activity-sources"><div class="aai-activity-source-links">' + sourceLinks + '</div></li>'
+      : '';
+    return milestone + links;
+  }
+  const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-circle';
+  return '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
+    + '<span class="aai-activity-step-text">' + safeText + '</span></li>';
+}
+
+function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
+  if (!messageId) return '';
+  // Server-saved steps travel with the session across browsers and phones.
+  // Older conversations can still use their device-local traces.
+  const trace = persistedTrace && typeof persistedTrace === 'object'
+    && Array.isArray(persistedTrace.steps) && persistedTrace.steps.length
+    ? persistedTrace : getStoredActivityTraces()[messageId];
+  if (!trace || !Array.isArray(trace.steps) || !trace.steps.length) return '';
+  const rows = trace.steps.map(renderActivityStepHTML).filter(Boolean).join('');
+  const intro = typeof trace.preface === 'string' && trace.preface.trim()
+    ? '<p class="aai-preface">' + escHtml(trace.preface) + '</p>'
+    : '';
+  if (!rows) return intro; // Hide legacy router-only traces even after reload.
+  const searched = trace.steps.some(item => ['tavily', 'exa', 'found', 'sources'].includes(item?.step));
+  const label = (searched ? 'Penelusuran selesai · ' : 'Aktivitas selesai · ') + formatActivityDuration(trace.durationMs);
+  return `${intro}<details class="aai-activity is-complete aai-saved-activity">
+    <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    <ul class="aai-activity-list">${rows}</ul>
+  </details>`;
+}
+
+const pendingActivityClocks = new Map();
+function stopPendingActivityClock(streamId) {
+  const timer = pendingActivityClocks.get(streamId);
+  if (timer) clearInterval(timer);
+  pendingActivityClocks.delete(streamId);
+}
+function startPendingActivityClock(streamId) {
+  stopPendingActivityClock(streamId);
+  const update = () => {
+    const panel = document.getElementById(`activity_${streamId}`);
+    if (!panel || panel.dataset.streamConnected === '1' || panel.classList.contains('is-complete')) {
+      stopPendingActivityClock(streamId);
+      return;
+    }
+    const startedAt = Number(panel.dataset.startedAt) || Date.now();
+    const title = panel.querySelector('.aai-activity-title');
+    if (title) title.textContent = 'Memproses... ' + formatActivityDuration(Date.now() - startedAt);
+    if (Date.now() - startedAt > 240000) stopPendingActivityClock(streamId);
+  };
+  update();
+  pendingActivityClocks.set(streamId, setInterval(update, 1000));
 }
 
 function buildStreamBubbleHTML(streamId, timeStr) {
@@ -1013,12 +1321,19 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const teaserHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
     : '';
+  const activityHtml = `<p class="aai-preface" id="preface_${streamId}" hidden></p>
+  <details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" hidden>
+    <summary><span class="aai-activity-title">Menelusuri web...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+    ${buildActivityLiveHTML(streamId)}
+    <ul class="aai-activity-list" id="activity_list_${streamId}"></ul>
+  </details>`;
 
   return `
-    <div class="msg-row assistant" id="${streamId}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
-      ${buildAssistantHeaderHTML('<span class="version-tag">V.1</span>')}
+    <div class="msg-row assistant" id="${streamId}" data-chat-date="${getChatMessageDate().key}" data-id="" data-plain-text="" data-persona="" data-model="" data-model-label="">
+      ${buildAssistantHeaderHTML('')}
       ${previewPanelHtml}
       ${teaserHtml}
+      ${activityHtml}
       <div class="bubble stream-cursor" id="bubble_${streamId}">
         <div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">
           <div class="typing-dot"></div>
@@ -1027,9 +1342,9 @@ function buildStreamBubbleHTML(streamId, timeStr) {
         </div>
       </div>
       <div class="msg-actions" id="actions_${streamId}" style="display:none;">
-        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan"
+        <button type="button" aria-label="Salin jawaban" title="Salin jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button type="button" aria-label="Ulangi jawaban" title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button type="button" class="tts-btn" aria-label="Dengarkan jawaban" title="Dengarkan"
           onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
@@ -1139,18 +1454,46 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
   return { bubbleEl, actionsEl };
 }
 
-function ensureStreamingPlainNode(bubbleEl) {
+function ensureStreamingMarkdownNode(bubbleEl) {
   if (!bubbleEl) return null;
 
-  let streamingNode = bubbleEl.querySelector('.streaming-plain[data-stream-live="true"]');
-  if (streamingNode) return streamingNode;
+  let root = bubbleEl.querySelector('.aai-streaming-markdown[data-stream-live="true"]');
+  if (root) return root;
 
+  // Keep completed blocks mounted. Only the unfinished tail is re-rendered.
   bubbleEl.textContent = '';
-  streamingNode = document.createElement('div');
-  streamingNode.className = 'streaming-plain';
-  streamingNode.setAttribute('data-stream-live', 'true');
-  bubbleEl.appendChild(streamingNode);
-  return streamingNode;
+  root = document.createElement('div');
+  root.className = 'aai-streaming-markdown';
+  root.setAttribute('data-stream-live', 'true');
+  root.innerHTML = '<div class="aai-streaming-committed"></div><div class="aai-streaming-live"></div>';
+  bubbleEl.appendChild(root);
+  return root;
+}
+
+// Blank lines end stable Markdown blocks; never split an open fenced code block.
+function findStableStreamMarkdownBoundary(text) {
+  let boundary = 0;
+  let fence = '';
+  let fenceWidth = 0;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    const newline = text.indexOf('\n', lineStart);
+    if (newline < 0) break;
+    const line = text.slice(lineStart, newline).replace(/\r$/, '');
+    const marker = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/.exec(line);
+    if (marker) {
+      const kind = marker[1][0];
+      if (!fence) {
+        fence = kind;
+        fenceWidth = marker[1].length;
+      } else if (kind === fence && marker[1].length >= fenceWidth && !marker[2].trim()) {
+        fence = '';
+      }
+    }
+    if (!fence && !line.trim()) boundary = newline + 1;
+    lineStart = newline + 1;
+  }
+  return boundary;
 }
 
 function safeDecodeURIComponent(input = '') {
@@ -1237,9 +1580,9 @@ function renderStreamErrorUI(streamId, errorMessage, retryMeta = null) {
   if (sessionId) {
     aiRow.setAttribute('data-retry-session-id', sessionId);
     persistCurrentSession(sessionId, {
-      title: buildSessionFallbackTitle(getLastUserPromptText()),
-      makeFirst: true,
-      refreshSidebar: true
+      title: sessions.find(session => session.id === sessionId)?.title || buildTopicSessionTitle(getLastUserPromptText()),
+      makeFirst: !sessions.some(session => session.id === sessionId),
+      refreshSidebar: !sessions.some(session => session.id === sessionId)
     });
   }
 
@@ -1280,6 +1623,7 @@ function updateAssistantMessageContent(messageId, content) {
   if (bubble) {
     bubble.classList.remove('stream-cursor');
     bubble.innerHTML = formatContent(normalizedContent);
+    wireSourcePreviewImages(row);
   }
 
   row.setAttribute('data-plain-text', encodeURIComponent(normalizedContent));
@@ -1490,7 +1834,7 @@ async function ensureSessionVisibleInSidebar(sessionId) {
 
   const optimistic = upsertSessionSnapshot({
     id: normalizedId,
-    title: buildSessionFallbackTitle(getLastUserPromptText()),
+    title: buildTopicSessionTitle(getLastUserPromptText()),
     updated_at: new Date().toISOString()
   }, { makeFirst: true });
 
@@ -1516,6 +1860,38 @@ async function processStream(response, streamId, onDone) {
   const previewEl = document.getElementById(`preview_${streamId}`);
   const previewBodyEl = document.getElementById(`preview_body_${streamId}`);
   const previewStreamEl = document.getElementById(`preview_stream_${streamId}`);
+  const activityEl = document.getElementById(`activity_${streamId}`);
+  if (activityEl) activityEl.dataset.streamConnected = '1';
+  stopPendingActivityClock(streamId);
+  const activityListEl = document.getElementById(`activity_list_${streamId}`);
+  const activityTitleEl = activityEl?.querySelector('.aai-activity-title');
+  const activityLiveEl = document.getElementById(`activity_live_${streamId}`);
+  const prefaceEl = document.getElementById(`preface_${streamId}`);
+  const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
+  const activityTimeline = [];
+  let activityTimer = null;
+  let firstVisibleTokenMs = null;
+  let waitingForModel = false;
+  let hasAnswerToken = false;
+  const updateActivityLive = (message, streaming = false) => {
+    if (!activityLiveEl) return;
+    activityLiveEl.textContent = String(message || '').slice(0, 220);
+    activityLiveEl.parentElement?.classList.toggle('is-streaming', streaming);
+  };
+  const updateActivityClock = (completed = false, finalDurationMs = null) => {
+    if (!activityTitleEl) return;
+    const measuredMs = completed && finalDurationMs != null && Number.isFinite(Number(finalDurationMs))
+      ? Number(finalDurationMs) : Date.now() - activityStartedAt;
+    const duration = formatActivityDuration(measuredMs);
+    const publicTitle = activityEl?.dataset.publicTitle || '';
+    if (!publicTitle) return;
+    if (completed) {
+      const searched = activityEl?.dataset.hadSearch === '1';
+      activityTitleEl.textContent = (searched ? 'Penelusuran selesai · ' : 'Aktivitas selesai · ') + duration;
+    } else {
+      activityTitleEl.textContent = publicTitle;
+    }
+  };
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
   let fullText  = '';
@@ -1533,7 +1909,7 @@ async function processStream(response, streamId, onDone) {
     const knownSession = sessions.find(item => item.id === parsed.session_id) || null;
     const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
     const synced = persistCurrentSession(parsed.session_id, {
-      title: shouldRefreshTitle ? buildSessionFallbackTitle(getLastUserPromptText()) : null,
+      title: parsed.session_title || (shouldRefreshTitle ? buildTopicSessionTitle(getLastUserPromptText()) : null),
       makeFirst: !knownSession,
       refreshSidebar: shouldRefreshTitle || !knownSession
     });
@@ -1552,11 +1928,11 @@ async function processStream(response, streamId, onDone) {
   let gotDone   = false;
   let renderScheduled = false;
   let streamingNode = null;
-  let renderedTextLength = 0;
+  let streamingCommittedLength = 0;
   let renderTimer = null;
   let renderFrame = null;
   let lastRenderAt = 0;
-  const STREAM_RENDER_INTERVAL_MS = 34;
+  const STREAM_RENDER_INTERVAL_MS = 105;
   let streamScrollFrame = null;
   let lastStreamScrollAt = 0;
   const STREAM_SCROLL_INTERVAL_MS = 90;
@@ -1699,17 +2075,28 @@ async function processStream(response, streamId, onDone) {
       bubbleEl.innerHTML = formatContent(fullText);
       bubbleEl.classList.remove('stream-cursor');
       streamingNode = null;
-      renderedTextLength = 0;
+      streamingCommittedLength = 0;
     } else {
-      streamingNode = streamingNode || ensureStreamingPlainNode(bubbleEl);
+      streamingNode = streamingNode || ensureStreamingMarkdownNode(bubbleEl);
       if (streamingNode) {
-        const nextChunk = fullText.slice(renderedTextLength);
-        if (nextChunk) {
-          streamingNode.textContent += nextChunk;
-          renderedTextLength = fullText.length;
-        } else if (renderedTextLength !== fullText.length) {
-          streamingNode.textContent = fullText;
-          renderedTextLength = fullText.length;
+        const committedEl = streamingNode.querySelector('.aai-streaming-committed');
+        const liveEl = streamingNode.querySelector('.aai-streaming-live');
+        const pending = fullText.slice(streamingCommittedLength);
+        const boundary = findStableStreamMarkdownBoundary(pending);
+        if (boundary > 0 && committedEl) {
+          committedEl.insertAdjacentHTML('beforeend', formatContent(pending.slice(0, boundary)));
+          streamingCommittedLength += boundary;
+        }
+        if (liveEl) {
+          const tailText = fullText.slice(streamingCommittedLength);
+          // Lightweight, sanitized Markdown. No syntax highlighting per token.
+          // Failure must never stop the SSE reader or lose the accumulated reply.
+          try {
+            liveEl.innerHTML = tailText ? formatContent(tailText, { streaming: true }) : '';
+          } catch (error) {
+            console.warn('[AAi stream] Markdown preview failed:', error);
+            liveEl.textContent = tailText;
+          }
         }
       }
       bubbleEl.classList.add('stream-cursor');
@@ -1760,6 +2147,89 @@ async function processStream(response, streamId, onDone) {
     // Init event hanya untuk sinkronisasi session, skip processing
     if (parsed.phase === 'init') {
       if (parsed.session_id) syncSessionFromStream(parsed);
+      if (parsed.user_message_id) {
+        streamUserMessageId = parsed.user_message_id;
+        const unsavedUserRows = Array.from(document.querySelectorAll('#chatArea .msg-row.user'))
+          .filter(row => !(row.getAttribute('data-id') || '').trim());
+        const pendingUserRow = unsavedUserRows[unsavedUserRows.length - 1];
+        if (pendingUserRow) pendingUserRow.setAttribute('data-id', parsed.user_message_id);
+      }
+      return;
+    }
+
+    if (parsed.phase === 'preface') {
+      if (prefaceEl && typeof parsed.message === 'string' && parsed.message.trim()) {
+        prefaceEl.textContent = parsed.message.slice(0, 240);
+        prefaceEl.hidden = false;
+        scrollBottom();
+      }
+      return;
+    }
+
+    // A streamed first-pass answer can turn into a real tool request.
+    // Move its public opening into the compact process panel, then start a
+    // clean final reply after the tool result arrives.
+    if (parsed.phase === 'tool_switch') {
+      clearStreamingRenderSchedule();
+      fullText = '';
+      firstToken = true;
+      hasAnswerToken = false;
+      waitingForModel = false;
+      updateActivityLive('Aku cek sumbernya dulu...');
+      streamingNode = null;
+      streamingCommittedLength = 0;
+      if (bubbleEl) {
+        bubbleEl.classList.add('stream-cursor');
+        bubbleEl.innerHTML = '<div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">'
+          + '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+      }
+      if (activityEl) {
+        activityEl.hidden = false;
+        activityEl.dataset.publicTitle = 'Menelusuri web...';
+        if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
+        updateActivityClock();
+      }
+      if (prefaceEl && prefaceEl.hidden) {
+        prefaceEl.textContent = (typeof parsed.message === 'string' && parsed.message.trim())
+          ? parsed.message.slice(0, 240)
+          : 'Bentar, aku coba cek sumber yang lebih pasti dulu.';
+        prefaceEl.hidden = false;
+      }
+      scrollBottom();
+      return;
+    }
+
+    if (parsed.phase === 'progress') {
+      if (typeof parsed.message === 'string') {
+        const step = {
+          step: String(parsed.step || ''),
+          message: parsed.message.slice(0, 220),
+          atMs: Number.isFinite(Number(parsed.at_ms)) ? Math.max(0, Number(parsed.at_ms)) : Date.now() - activityStartedAt,
+          ...(Array.isArray(parsed.sources)
+            ? { sources: parsed.sources.slice(0, 5).map(source => ({
+                url: String(source?.url || '').slice(0, 600),
+                title: String(source?.title || '').slice(0, 140),
+                ...(typeof source?.snippet === 'string' ? { snippet: source.snippet.slice(0, 420) } : {}),
+                ...(typeof source?.image === 'string' ? { image: source.image.slice(0, 1200) } : {})
+              })) } : {})
+        };
+        // Keep full bounded trace in storage for audit, never print router state.
+        activityTimeline.push(step);
+        if (activityTimeline.length > 18) activityTimeline.shift();
+        const publicStep = publicActivityStep(step);
+        if (publicStep && activityEl && activityListEl) {
+          activityEl.hidden = false;
+          const html = renderActivityStepHTML(step);
+          if (html) activityListEl.insertAdjacentHTML('beforeend', html);
+          wireSourcePreviewImages(activityListEl);
+          if (['tavily', 'exa', 'found', 'sources'].includes(step.step)) activityEl.dataset.hadSearch = '1';
+          activityEl.dataset.publicTitle = publicStep.message;
+          updateActivityLive(publicStep.message);
+          if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
+          updateActivityClock();
+          scrollBottom();
+        }
+      }
       return;
     }
 
@@ -1799,8 +2269,15 @@ async function processStream(response, streamId, onDone) {
 
     if (parsed.token) {
       if (firstToken) {
+        hasAnswerToken = true;
+        waitingForModel = false;
+        firstVisibleTokenMs = Date.now() - activityStartedAt;
+        // The answer itself is streaming; do not replace the search report
+        // with a mechanical "preparing the answer" router status.
+        if (activityEl && !activityEl.hidden) activityEl.open = false;
+        updateActivityClock();
         streamingNode = null;
-        renderedTextLength = 0;
+        streamingCommittedLength = 0;
         firstToken = false;
         stopPreviewTicker('', true);
       }
@@ -1819,6 +2296,9 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.done) {
+      if (!parsed.message_id || !parsed.user_message_id) {
+        throw new Error('Server tidak mengirim ID jawaban yang tersimpan. Coba lagi.');
+      }
       if (parsed.final_text && (!fullText.trim() || parsed.replace_stream_text || parsed.file_job)) {
         fullText = String(parsed.final_text || '').trim();
         firstToken = false;
@@ -1836,7 +2316,20 @@ async function processStream(response, streamId, onDone) {
       }
 
       gotDone = true;
+      if (activityTimer) clearInterval(activityTimer);
+      if (activityEl && !activityEl.hidden) {
+        activityEl.open = false;
+        activityEl.classList.add('is-complete');
+        updateActivityClock(true, parsed.timings?.duration_ms);
+        saveActivityTrace(parsed.message_id, parsed.timings?.duration_ms ?? Date.now() - activityStartedAt,
+          activityTimeline, prefaceEl?.textContent || '', parsed.timings?.first_token_ms ?? firstVisibleTokenMs);
+      }
       flushStreamingRender(true);
+      const liveSourcePreviewHtml = buildMessageSourcePreviewHTML({ steps: activityTimeline });
+      if (liveSourcePreviewHtml && bubbleEl && !streamRow.querySelector('.aai-source-preview')) {
+        bubbleEl.insertAdjacentHTML('afterend', liveSourcePreviewHtml);
+      }
+      wireSourcePreviewImages(streamRow);
       stopPreviewTicker('', true);
       actionsEl.style.display = 'flex';
       streamRow.setAttribute('data-id', parsed.message_id || '');
@@ -1888,26 +2381,21 @@ async function processStream(response, streamId, onDone) {
     streamError = e;
   }
 
+  if (activityTimer) clearInterval(activityTimer);
   if (streamError) {
     stopPreviewTicker('', true);
     throw streamError;
   }
 
-  // FALLBACK: jika stream terputus tanpa event `done` tapi sudah ada teks
-  if (!gotDone && fullText.trim()) {
-    console.warn('[processStream] Stream ended without done event. Fallback triggered.');
-    flushStreamingRender(true);
-    stopPreviewTicker('', true);
-    actionsEl.style.display = 'flex';
-    streamRow.setAttribute('data-plain-text', encodeURIComponent(fullText));
-    streamRow.setAttribute('data-preview', previewData ? encodeURIComponent(JSON.stringify(previewData)) : '');
-    onDone({
-      done: true,
+  // A response is durable only after the server sends the done event with both IDs.
+  // A partial stream must remain retryable, never enter the message tree as a phantom answer.
+  if (!gotDone) {
+    const error = new Error('Koneksi terputus sebelum jawaban tersimpan. Silakan coba lagi.');
+    error.streamMeta = {
       session_id: streamSessionId || currentSessionId || null,
-      message_id: null,
       user_message_id: streamUserMessageId || null
-    }, fullText, previewData);
-    scrollBottom();
+    };
+    throw error;
   }
 
   setTimeout(scheduleStickyCodeHeadersUpdate, 180);
@@ -1917,22 +2405,28 @@ async function processStream(response, streamId, onDone) {
 // KIRIM PESAN BARU
 // ══════════════════════════════════════════
 async function sendMessage(text, files = []) {
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
   const area = document.getElementById('chatArea');
   const isCompactRequest = /\[COMPACT_CHECKPOINT_REQUEST\]/i.test(text);
   if (!area.querySelector('.msg-row')) area.innerHTML = '';
 
+  const selectedBranch = buildActiveBranch();
+  const parentMessageId = selectedBranch.length ? selectedBranch[selectedBranch.length - 1].id : null;
+  const requestLoadSerial = sessionLoadSerial;
   appendMessage('user', text, null, { files: files });
   scrollBottom();
 
   const streamId = 'stream_' + Date.now();
   const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
   area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
+  startPendingActivityClock(streamId);
   scrollBottom();
 
   setSendBtn('stop');
   abortController = new AbortController();
 
-  // Beri ruang lebih panjang agar primary model dan fallback sempat selesai.
+  // Beri waktu untuk respons streaming, termasuk saat model uji sedang sibuk.
   const timeoutId = setTimeout(() => abortController.abort(), 240000);
 
   try {
@@ -1945,8 +2439,12 @@ async function sendMessage(text, files = []) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
-        files: files
+        parent_id: parentMessageId,
+        files: files.map(f => ({ name: f.name, type: f.type, base64: f.base64 }))
       })
     });
 
@@ -1961,11 +2459,12 @@ async function sendMessage(text, files = []) {
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
+      if (requestLoadSerial !== sessionLoadSerial) return; // User has opened another session.
       if (resolvedSessionId) {
         const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
         const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
         persistCurrentSession(resolvedSessionId, {
-          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
+          title: parsed.session_title || (shouldRefreshTitle ? buildTopicSessionTitle(text) : null),
           makeFirst: !knownSession,
           refreshSidebar: shouldRefreshTitle || !knownSession
         });
@@ -1974,10 +2473,9 @@ async function sendMessage(text, files = []) {
       const userRows = document.getElementById('chatArea').querySelectorAll('.msg-row.user');
       if (userRows.length > 0)
         userRows[userRows.length - 1].setAttribute('data-id', parsed.user_message_id || '');
-      const lastAI = [...currentMessages].reverse().find(m => m.role === 'assistant');
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
-        parent_id: lastAI?.id || null, created_at: new Date().toISOString()
+        parent_id: parentMessageId, created_at: new Date().toISOString()
       });
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
@@ -1988,6 +2486,15 @@ async function sendMessage(text, files = []) {
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
+      if (parentMessageId) {
+        const hasSibling = currentMessages.some(message =>
+          message.role === 'user' && message.parent_id === parentMessageId &&
+          message.id !== parsed.user_message_id
+        );
+        activeVersionMap[parentMessageId] = parsed.user_message_id;
+        saveActiveVersions();
+        if (hasSibling) renderMessageTree();
+      }
 
       if (isCompactRequest) {
         currentSessionMeta = {
@@ -2004,6 +2511,7 @@ async function sendMessage(text, files = []) {
     clearTimeout(timeoutId);
     renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -2011,81 +2519,75 @@ async function sendMessage(text, files = []) {
 // ══════════════════════════════════════════
 // REGENERATE
 // ══════════════════════════════════════════
-function regenerateAI(btn) {
-  const aiRow   = btn.closest('.msg-row.assistant');
-  const aiMsgId = aiRow.getAttribute('data-id');
-  let rawUser = '', userMsgId = null;
+function getRegenerationTarget(aiRow) {
+  if (!aiRow) return null;
+  const assistantId = aiRow.getAttribute('data-id') || null;
+  const assistant = currentMessages.find(message => message.id === assistantId);
+  const userMessageId = aiRow.getAttribute('data-retry-user-message-id') ||
+    assistant?.parent_id || null;
+  const userMessage = currentMessages.find(message => message.id === userMessageId);
+  const userRow = Array.from(document.querySelectorAll('#chatArea .msg-row.user'))
+    .find(row => row.getAttribute('data-id') === userMessageId);
+  const rawUser = userMessage?.content ||
+    (userRow ? safeDecodeURIComponent(userRow.getAttribute('data-raw') || '') : '');
 
-  let el = aiRow.previousElementSibling;
-  while (el) {
-    if (el.classList.contains('user')) {
-      rawUser   = decodeURIComponent(el.getAttribute('data-raw') || '');
-      userMsgId = el.getAttribute('data-id') || null;
-      break;
-    }
-    el = el.previousElementSibling;
+  // Only an ID tied to the persisted user message is safe for regeneration.
+  if (!userMessageId || !rawUser) return null;
+  return { text: rawUser, userMessageId, assistantId };
+}
+
+function regenerateAI(btn) {
+  const aiRow = btn.closest('.msg-row.assistant');
+  const target = getRegenerationTarget(aiRow);
+  if (!target) {
+    void showAlertMessage('Pesan asli belum tersinkron. Muat ulang sesi dan coba lagi.', 'Tidak Bisa Mengulang');
+    return;
   }
-  if (!userMsgId && aiMsgId) {
-    const aiMsg = currentMessages.find(m => m.id === aiMsgId);
-    userMsgId = aiMsg?.parent_id || null;
-    if (!rawUser) rawUser = currentMessages.find(m => m.id === userMsgId)?.content || '';
-  }
-  if (rawUser) executeRegenerate(rawUser, userMsgId, aiMsgId, aiRow);
+  void executeRegenerate(target.text, target.userMessageId, target.assistantId, aiRow);
 }
 
 async function executeRegenerate(text, userMessageId = null, assistantMessageId = null, aiRow = null) {
+  if (!userMessageId || !currentSessionId) {
+    await showAlertMessage('Sesi atau pesan induk belum tersimpan. Muat ulang sesi.', 'Tidak Bisa Mengulang');
+    return;
+  }
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
+
   const area = document.getElementById('chatArea');
   const streamId = 'regen_' + Date.now();
-
-  // Reuse existing assistant row for smooth UX during streaming
-  if (aiRow) {
-    prepareAssistantRowForStreaming(aiRow, streamId);
-  } else if (assistantMessageId) {
-    const rows = area.querySelectorAll('.msg-row.assistant');
-    let found = false;
-    for (let r of rows) {
-      if (r.getAttribute('data-id') === assistantMessageId) {
-        prepareAssistantRowForStreaming(r, streamId);
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      if (userMessageId) {
-        const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
-        if (userRow) {
-          userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
-        } else {
-          area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-        }
-      } else {
-        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-      }
-    }
-  } else {
-    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    if (userMessageId) {
-      const userRow = document.querySelector(`.msg-row.user[data-id="${userMessageId}"]`);
-      if (userRow) {
-        userRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(streamId, timeStr));
-      } else {
-        area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-      }
-    } else {
-      area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-    }
-  }
-  scrollBottom();
-
-  setSendBtn('stop');
-  abortController = new AbortController();
+  const requestLoadSerial = sessionLoadSerial;
   const pinnedSessionId = aiRow?.getAttribute('data-retry-session-id') || null;
   const effectiveSessionId = pinnedSessionId || currentSessionId;
   const frozenPersona =
     aiRow?.getAttribute('data-persona') ||
     (assistantMessageId ? currentMessages.find(m => m.id === assistantMessageId)?.persona : null) ||
     currentPersona;
+
+  // Keep the saved response visible while the next version is generated.
+  // Only an unsaved error bubble may be reused.
+  const reuseFailedBubble = Boolean(aiRow && !aiRow.getAttribute('data-id'));
+  if (reuseFailedBubble) {
+    prepareAssistantRowForStreaming(aiRow, streamId);
+  } else {
+    const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    const html = buildStreamBubbleHTML(streamId, timeStr);
+    const userRow = Array.from(area.querySelectorAll('.msg-row.user'))
+      .find(row => row.getAttribute('data-id') === userMessageId);
+    if (aiRow) aiRow.insertAdjacentHTML('afterend', html);
+    else if (userRow) userRow.insertAdjacentHTML('afterend', html);
+    else area.insertAdjacentHTML('beforeend', html);
+  }
+  startPendingActivityClock(streamId);
+
+  const streamRow = document.getElementById(streamId);
+  if (streamRow) {
+    streamRow.setAttribute('data-retry-session-id', effectiveSessionId);
+    streamRow.setAttribute('data-retry-user-message-id', userMessageId);
+  }
+  scrollBottom();
+  setSendBtn('stop');
+  abortController = new AbortController();
 
   try {
     const res = await fetch('/api/chat', {
@@ -2097,34 +2599,39 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         session_id: effectiveSessionId,
         user_id: currentUser.id,
         persona_name: frozenPersona,
+        model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
-        consistency_mode: true,
         user_message_id: userMessageId
-        // NO assistant_message_id — creates a new sibling for version navigation
       })
     });
 
     if (!res.ok) {
-      let errMsg = `Server error ${res.status}`;
-      try { const d = await res.json(); errMsg = d.error || errMsg; }
-      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      let errMsg = 'Server error ' + res.status;
+      try { const body = await res.json(); errMsg = body.error || errMsg; } catch {}
       throw new Error(errMsg);
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
-      const resolvedSessionId = parsed.session_id || effectiveSessionId || currentSessionId;
-      if (resolvedSessionId) {
-        const knownSession = sessions.find(session => session.id === resolvedSessionId) || null;
-        const shouldRefreshTitle = !knownSession || isProvisionalSessionTitle(knownSession.title);
-        persistCurrentSession(resolvedSessionId, {
-          title: shouldRefreshTitle ? buildSessionFallbackTitle(text) : null,
-          makeFirst: !knownSession,
-          refreshSidebar: shouldRefreshTitle || !knownSession
+      if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== effectiveSessionId) return;
+      if (!currentMessages.some(m => m.id === userMessageId)) {
+        const branch = buildActiveBranch();
+        const parent = branch.length ? branch[branch.length - 1].id : null;
+        currentMessages.push({
+          id: userMessageId, role: 'user', content: text,
+          parent_id: parent, created_at: new Date().toISOString()
         });
-        void ensureSessionVisibleInSidebar(resolvedSessionId);
+      }
+      const knownSession = sessions.find(session => session.id === effectiveSessionId) || null;
+      if (parsed.session_title || !knownSession || isProvisionalSessionTitle(knownSession.title)) {
+        persistCurrentSession(effectiveSessionId, {
+          title: parsed.session_title || buildTopicSessionTitle(text),
+          makeFirst: !knownSession,
+          refreshSidebar: true
+        });
       }
 
-      // Push as new sibling message (not update existing)
       currentMessages.push({
         id: parsed.message_id, role: 'assistant', content: fullText,
         parent_id: userMessageId, created_at: new Date().toISOString(),
@@ -2134,15 +2641,20 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
-      // Select the new version
-      if (userMessageId) activeVersionMap[userMessageId] = parsed.message_id;
+      activeVersionMap[userMessageId] = parsed.message_id;
+      saveActiveVersions();
       renderMessageTree();
     });
-
-    } catch (e) {
-    console.error('❌ Regenerate Error:', e);
-    renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
+  } catch (error) {
+    console.error('❌ Regenerate Error:', error);
+    if (requestLoadSerial === sessionLoadSerial) {
+      renderStreamErrorUI(streamId, error.message, {
+        session_id: effectiveSessionId,
+        user_message_id: userMessageId
+      });
+    }
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -2151,34 +2663,7 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
 // TOMBOL "COBA LAGI"
 // ══════════════════════════════════════════
 function retryLastMessage(btn) {
-  const aiRow = btn.closest('.msg-row.assistant');
-  const aiMsgId = aiRow.getAttribute('data-id') || null;
-  const forcedSessionId = aiRow.getAttribute('data-retry-session-id') || null;
-  const fallbackUserMsgId = aiRow.getAttribute('data-retry-user-message-id') || null;
-
-  if (forcedSessionId && currentSessionId !== forcedSessionId) {
-    persistCurrentSession(forcedSessionId, {
-      force: true,
-      title: buildSessionFallbackTitle(getLastUserPromptText()),
-      makeFirst: true,
-      refreshSidebar: true
-    });
-  }
-
-  let el = aiRow.previousElementSibling;
-  while (el) {
-    if (el.classList.contains('user')) {
-      const raw       = decodeURIComponent(el.getAttribute('data-raw') || '');
-      const userMsgId = el.getAttribute('data-id') || fallbackUserMsgId || null;
-      if (raw) {
-        // PENTING: Jangan remove aiRow jika aiMsgId null, agar bisa tetap di sesi yang sama
-        // Hanya perbarui eksisting bubble untuk retry
-        executeRegenerate(raw, userMsgId, aiMsgId, aiRow);
-      }
-      return;
-    }
-    el = el.previousElementSibling;
-  }
+  regenerateAI(btn);
 }
 
 // ══════════════════════════════════════════
@@ -2224,68 +2709,48 @@ function cancelEdit(btn) {
 
 async function saveEdit(btn, msgId) {
   const bubble = btn.closest('.bubble');
-  const row    = btn.closest('.msg-row.user');
-  if (!row || !bubble) return;
+  const row = btn.closest('.msg-row.user');
+  if (!row || !bubble || chatMutationRunning) return;
 
-  const newText = bubble.querySelector('textarea').value.trim();
+  const newText = bubble.querySelector('textarea')?.value.trim() || '';
+  const originalMessage = currentMessages.find(message => message.id === msgId && message.role === 'user');
+  if (!originalMessage) {
+    await showAlertMessage('Pesan asli belum ditemukan. Muat ulang sesi lalu coba lagi.', 'Edit Gagal');
+    return;
+  }
   if (!newText) return;
+  if (newText === originalMessage.content.trim()) {
+    cancelEdit(btn);
+    return;
+  }
 
-  bubble.innerHTML = formatContent(newText);
+  // The edit becomes another user-message version, preserving the original
+  // prompt and all its following answers in the history tree.
+  bubble.innerHTML = buildUserMessageBodyHTML(newText);
   bubble.classList.remove('is-editing');
   row.classList.remove('editing');
   row.setAttribute('data-raw', encodeURIComponent(newText));
+  refreshUserMessageCollapse(row);
 
-  try {
-    const res = await fetch(`/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        edit_message_id: msgId,
-        update_only: true,
-        message: newText,
-        session_id: currentSessionId,
-        user_id: currentUser.id,
-        memory_experiment_mode: currentMemoryExperimentMode,
-        persona_name: currentPersona
-      })
-    });
-    if (!res.ok) throw new Error('Gagal update');
-    const msg = currentMessages.find(m => m.id === msgId);
-    if (msg) msg.content = newText;
-    const refreshedUserRow = row;
-    let refreshedAssistantRow = null;
-    let assistantMsgId = null;
-    if (refreshedUserRow) {
-      let sibling = refreshedUserRow.nextElementSibling;
-      while (sibling) {
-        if (sibling.classList.contains('assistant')) {
-          refreshedAssistantRow = sibling;
-          assistantMsgId = sibling.getAttribute('data-id') || null;
-          break;
-        }
-        if (sibling.classList.contains('user')) break;
-        sibling = sibling.nextElementSibling;
-      }
-    }
-    executeRegenerate(newText, msgId, assistantMsgId, refreshedAssistantRow);
-  } catch (e) {
-    await showAlertMessage(`Gagal menyimpan perubahan: ${e.message}`, 'Edit Gagal');
-    renderMessageTree();
-  }
+  await sendMessageBranched(newText, originalMessage.parent_id, msgId, row);
 }
 
 // ══════════════════════════════════════════
 // KIRIM PESAN DARI EDIT (branched)
 // ══════════════════════════════════════════
-async function sendMessageBranched(text, parentId = null) {
-  const area     = document.getElementById('chatArea');
-  appendMessage('user', text);
-  scrollBottom();
+async function sendMessageBranched(text, parentId = null, editedMessageId = null, editedRow = null) {
+  if (chatMutationRunning) return;
+  chatMutationRunning = true;
 
   const streamId = 'branch_' + Date.now();
-  const timeStr  = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-  area.insertAdjacentHTML('beforeend', buildStreamBubbleHTML(streamId, timeStr));
-  scrollBottom();
+  const area = document.getElementById('chatArea');
+  const editedSessionId = currentSessionId;
+  const requestLoadSerial = sessionLoadSerial;
+  const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  const streamHtml = buildStreamBubbleHTML(streamId, timeStr);
+  if (editedRow) editedRow.insertAdjacentHTML('afterend', streamHtml);
+  else area.insertAdjacentHTML('beforeend', streamHtml);
+  startPendingActivityClock(streamId);
 
   setSendBtn('stop');
   abortController = new AbortController();
@@ -2297,22 +2762,26 @@ async function sendMessageBranched(text, parentId = null) {
       signal: abortController.signal,
       body: JSON.stringify({
         message: text,
-        session_id: currentSessionId,
+        session_id: editedSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
+        model_preference: currentModelPreference,
+        web_permission: currentWebPermission,
+        time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
-        parent_id: parentId
+        parent_id: parentId,
+        branch_root: parentId === null
       })
     });
 
     if (!res.ok) {
-      let errMsg = `Server error ${res.status}`;
-      try { const d = await res.json(); errMsg = d.error || errMsg; }
-      catch { try { errMsg = (await res.text()) || errMsg; } catch {} }
+      let errMsg = 'Server error ' + res.status;
+      try { const body = await res.json(); errMsg = body.error || errMsg; } catch {}
       throw new Error(errMsg);
     }
 
     await processStream(res, streamId, (parsed, fullText, preview) => {
+      if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== editedSessionId) return;
       currentMessages.push({
         id: parsed.user_message_id, role: 'user', content: text,
         parent_id: parentId, created_at: new Date().toISOString()
@@ -2326,13 +2795,50 @@ async function sendMessageBranched(text, parentId = null) {
         model_label: parsed.model_label || '',
         fallback_used: !!parsed.fallback_used
       });
-      if (parentId) activeVersionMap[parentId] = parsed.user_message_id;
+      activeVersionMap[parentId || '__root__'] = parsed.user_message_id;
+      activeVersionMap[parsed.user_message_id] = parsed.message_id;
+      saveActiveVersions();
+      renderMessageTree();
     });
+  } catch (error) {
+    console.error('❌ Branched Message Error:', error);
+    if (requestLoadSerial !== sessionLoadSerial || currentSessionId !== editedSessionId) return;
 
-    } catch (e) {
-    console.error('❌ Branched Message Error:', e);
-    renderStreamErrorUI(streamId, e.message);
+    const pendingId = error.streamMeta?.user_message_id || null;
+    if (pendingId) {
+      // The Worker already saved the edited user version. Keep it available
+      // for retry instead of sending another duplicate user message.
+      if (!currentMessages.some(message => message.id === pendingId)) {
+        currentMessages.push({
+          id: pendingId, role: 'user', content: text,
+          parent_id: parentId, created_at: new Date().toISOString()
+        });
+      }
+      activeVersionMap[parentId || '__root__'] = pendingId;
+      saveActiveVersions();
+      renderMessageTree();
+      const errorRowId = 'edit_retry_' + Date.now();
+      const renderJob = activeRenderJob;
+      const showRetryAfterRender = () => {
+        if (renderJob !== activeRenderJob) return;
+        const editedUserRow = Array.from(area.querySelectorAll('.msg-row.user'))
+          .find(item => item.getAttribute('data-id') === pendingId);
+        if (!editedUserRow) {
+          requestAnimationFrame(showRetryAfterRender);
+          return;
+        }
+        editedUserRow.insertAdjacentHTML('afterend', buildStreamBubbleHTML(errorRowId, timeStr));
+        renderStreamErrorUI(errorRowId, error.message, {
+          session_id: editedSessionId, user_message_id: pendingId
+        });
+      };
+      requestAnimationFrame(showRetryAfterRender);
+    } else {
+      renderMessageTree();
+      await showAlertMessage('Edit belum tersimpan: ' + error.message, 'Edit Gagal');
+    }
   } finally {
+    chatMutationRunning = false;
     setSendBtn('send');
   }
 }
@@ -2367,6 +2873,7 @@ async function loadSession(id, options = {}) {
   } = options;
   const normalizedId = String(id || '').trim();
   if (!normalizedId) return false;
+  const thisLoad = ++sessionLoadSerial;
 
   const existingSession = sessions.find(s => s.id === normalizedId) || null;
   persistCurrentSession(normalizedId, {
@@ -2381,7 +2888,7 @@ async function loadSession(id, options = {}) {
   updateCompactStatus();
   document.getElementById('topbarTitle').textContent = session?.title || 'AAi';
   currentMessages  = [];
-  activeVersionMap = {};
+  activeVersionMap = restoreActiveVersions(normalizedId);
   document.getElementById('chatArea').innerHTML = `
     <div style="padding:60px;text-align:center;color:var(--text-muted);">
       <i class="fas fa-spinner fa-spin" style="font-size:28px;"></i>
@@ -2399,13 +2906,22 @@ async function loadSession(id, options = {}) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // A slower response from a previously selected session must not replace
+    // the messages of the session the user has already switched to.
+    if (thisLoad !== sessionLoadSerial || currentSessionId !== normalizedId) return false;
     if (Array.isArray(data.messages) && (!data.status || data.status === 'active')) {
       currentMessages = data.messages;
+      // loadSessions() may have finished while this request was in flight.
+      // Never let an optimistic 'Memuat sesi...' title override the DB title
+      // or the actual first user message after a reload.
+      const latestSession = sessions.find(item => item.id === normalizedId) || session || null;
+      const actualTitle = [latestSession?.title, session?.title, titleHint]
+        .find(value => !isProvisionalSessionTitle(value)) || buildSessionTitleFromMessages(data.messages);
       const syncedSession = upsertSessionSnapshot({
-        ...(session || {}),
+        ...(latestSession || {}),
         id: normalizedId,
-        title: session?.title || titleHint || buildSessionTitleFromMessages(data.messages),
-        compact_checkpoint_at: session?.compact_checkpoint_at || null,
+        title: actualTitle,
+        compact_checkpoint_at: latestSession?.compact_checkpoint_at || null,
         updated_at: new Date().toISOString()
       }, { makeFirst: allowMissingSidebar && !existingSession });
       if (syncedSession) {
@@ -2420,6 +2936,7 @@ async function loadSession(id, options = {}) {
     renderSidebar();
     return true;
   } catch (e) {
+    if (thisLoad !== sessionLoadSerial) return false;
     logDebug(`Error load session: ${e.message}`, '#e74c3c');
     if (!suppressErrorState) {
       document.getElementById('chatArea').innerHTML =
@@ -2433,25 +2950,34 @@ function renderSidebar() {
   const container = document.getElementById('sessionList');
   container.innerHTML = '';
   if (!sessions.length) {
-    container.innerHTML = `<p style="padding:24px;text-align:center;color:var(--text-muted);font-size:14px;">Belum ada obrolan.<br>Mulai yang baru di atas 👆</p>`;
+    container.innerHTML = '<p class="session-empty">Belum ada percakapan.<br>Mulai dengan tombol di atas.</p>';
     return;
   }
   sessions.forEach(s => {
     const item = document.createElement('div');
     item.className = `session-item ${s.id === currentSessionId ? 'active' : ''}`;
+    item.setAttribute('tabindex', '0');
+    item.setAttribute('role', 'button');
+    item.setAttribute('aria-label', 'Buka percakapan: ' + (s.title || 'Obrolan'));
     item.innerHTML = `
-      <div style="flex:1;display:flex;align-items:center;gap:12px;overflow:hidden;">
-        <div style="width:9px;height:9px;background:#5ab4d4;border-radius:50%;flex-shrink:0;"></div>
-        <span style="flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(s.title || 'Obrolan')}</span>
+      <div class="session-leading">
+        <span class="session-mark" aria-hidden="true"><i class="far fa-comment-dots"></i></span>
+        <span class="session-title">${escHtml(s.title || 'Obrolan')}</span>
       </div>
       <div class="session-actions">
-        <button class="action-btn" title="Edit"
+        <button type="button" class="action-btn" aria-label="Ubah judul percakapan" title="Ubah judul"
           data-sid="${s.id}" data-title="${escHtml(s.title || '')}"
-          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)">✏️</button>
-        <button class="action-btn" title="Hapus"
-          onclick="event.stopImmediatePropagation();deleteSession('${s.id}')">🗑️</button>
+          onclick="event.stopImmediatePropagation();renameSession(this.dataset.sid, this.dataset.title)"><i class="fas fa-pen"></i></button>
+        <button type="button" class="action-btn danger" aria-label="Hapus percakapan" title="Hapus"
+          onclick="event.stopImmediatePropagation();deleteSession('${s.id}')"><i class="far fa-trash-alt"></i></button>
       </div>`;
-    item.onclick = (e) => { if (e.target.tagName !== 'BUTTON') loadSession(s.id); };
+    item.onclick = (e) => { if (!e.target.closest('button')) loadSession(s.id); };
+    item.onkeydown = (e) => {
+      if (e.target === item && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        loadSession(s.id);
+      }
+    };
     container.appendChild(item);
   });
 }
@@ -2469,11 +2995,12 @@ async function renameSession(id, oldTitle) {
   if (idx !== -1) { sessions[idx].title = newTitle.trim(); renderSidebar(); }
   if (currentSessionId === id) document.getElementById('topbarTitle').textContent = newTitle.trim();
   try {
-    await fetch(`/api/sessions/${id}`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newTitle.trim() })
+      body: JSON.stringify({ title: newTitle.trim(), user_id: currentUser.id })
     });
-  } catch { loadSessions(); }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch { await loadSessions(); }
 }
 
 let sessionToDelete = null;
@@ -2483,41 +3010,95 @@ document.getElementById('confirmDeleteBtn').addEventListener('click', async () =
   if (!sessionToDelete) return;
   const id = sessionToDelete; closeDeleteModal();
   try {
-    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    if (res.ok) { if (currentSessionId === id) newChat(); loadSessions(); }
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}?user_id=${encodeURIComponent(currentUser.id)}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (currentSessionId === id) newChat();
+    await loadSessions();
   } catch (e) { console.error("Gagal hapus:", e); }
 });
+
+function useWelcomePrompt(promptText) {
+  const input = document.getElementById('messageInput');
+  if (!input) return;
+  input.value = promptText;
+  autoResize(input);
+  updateMobileSendVisibility();
+  input.focus();
+}
 
 function newChat(options = {}) {
   const { preserveStoredSession = false } = options;
   currentSessionId = null;
+  setHistoryDrawerOpen(false);
+  sessionLoadSerial += 1;
   currentSessionMeta = null;
   activeRenderJob += 1;
   if (!preserveStoredSession) clearStoredSessionState();
-  currentMessages  = [];
+  currentMessages = [];
   activeVersionMap = {};
   document.getElementById('chatArea').innerHTML = `
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;text-align:center;padding:0 40px;">
-      <div class="avatar" style="width:280px;height:280px;margin-bottom:24px;animation:stickerFloat 2.5s ease-in-out infinite;background:transparent;">
-        <img src="${getWelcomeIllustrationSrc()}" alt="Ayaka" style="width:100%;height:100%;object-fit:contain;">
+    <section class="aai-welcome" aria-label="Selamat datang di AAi">
+      <div class="aai-welcome-art">
+        <div class="aai-crystal-halo"></div>
+        <span class="aai-floating-star star-a">✦</span><span class="aai-floating-star star-b">✧</span>
+        <img src="${getWelcomeIllustrationSrc()}" alt="Maskot cewek AAi dengan kristal bertuliskan AAi di dadanya" />
+        <span class="aai-art-signature"><i class="fas fa-gem"></i> Meet your creative companion</span>
       </div>
-      <h2 style="font-family:'Cormorant Garamond',serif;font-size:36px;color:var(--text);">Halo, ${getPreferredDisplayName()}! 👋</h2>
-      <p style="max-width:320px;color:var(--text-muted);font-size:16px;">AAi siap bantu kamu hari ini.</p>
-    </div>`;
-  document.getElementById('topbarTitle').textContent = 'AAi';
+      <div class="aai-welcome-copy">
+        <span class="aai-kicker"><i class="fas fa-sun"></i> HI, WELCOME TO AAi WORLD</span>
+        <h1>Halo, <span>${escHtml(getPreferredDisplayName())}!</span><br>Yuk, bikin hal <em>indah.</em></h1>
+        <p>Ada cerita, pertanyaan, atau ide kecil? AAi siap menemanimu mengubahnya jadi sesuatu yang istimewa. ✨</p>
+        <div class="aai-prompt-heading"><span class="aai-prompt-sparkle">✦</span> MAU MULAI DARI MANA?</div>
+        <div class="aai-prompt-grid">
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku merapikan ide yang sedang kupikirkan')"><i class="far fa-lightbulb"></i><span>Rapikan ide</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Ajari aku topik baru dengan penjelasan sederhana')"><i class="fas fa-book-open"></i><span>Belajar hal baru</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Bantu aku menyusun langkah kerja yang jelas')"><i class="fas fa-list-check"></i><span>Susun rencana</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+          <button class="aai-prompt" type="button" onclick="useWelcomePrompt('Yuk ngobrol santai sebentar')"><i class="far fa-comment-dots"></i><span>Ngobrol santai</span><i class="fas fa-arrow-right aai-prompt-arrow"></i></button>
+        </div>
+      </div>
+    </section>`;
+  document.getElementById('topbarTitle').textContent = 'AAi · Ayaka & Ayato';
   updateCompactStatus(false);
   updateMobileSendVisibility(false);
   renderSidebar();
 }
-
 // ══════════════════════════════════════════
 // MESSAGE TREE
 // ══════════════════════════════════════════
+function activeVersionStorageKey(sessionId) {
+  return 'aai_versions_' + String(currentUser.id) + '_' + String(sessionId || '');
+}
+
+function restoreActiveVersions(sessionId) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(activeVersionStorageKey(sessionId)) || '{}');
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveActiveVersions() {
+  if (!currentSessionId) return;
+  try {
+    localStorage.setItem(activeVersionStorageKey(currentSessionId), JSON.stringify(activeVersionMap));
+  } catch (error) {
+    console.warn('[AAi versions] Penyimpanan pilihan versi dilewati:', error);
+  }
+}
+
 function buildActiveBranch() {
   if (!currentMessages.length) return [];
   const allIds = new Set(currentMessages.map(m => m.id));
-  let current = currentMessages.find(m => !m.parent_id || !allIds.has(m.parent_id));
-  if (!current) current = [...currentMessages].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0];
+  const roots = currentMessages.filter(m => !m.parent_id || !allIds.has(m.parent_id));
+  const chosenRootId = activeVersionMap.__root__;
+  let current = roots.find(m => m.id === chosenRootId) || null;
+  if (!current) {
+    current = roots.reduce((oldest, m) => {
+      if (!oldest) return m;
+      return new Date(m.created_at) < new Date(oldest.created_at) ? m : oldest;
+    }, null);
+  }
   if (!current) return [];
 
   // Pre-compute descendant counts so we can prefer the deepest live branch
@@ -2555,18 +3136,19 @@ function buildActiveBranch() {
 
 function switchVersion(id) {
   const msg = currentMessages.find(m => m.id === id);
-  if (!msg?.parent_id) return;
-  activeVersionMap[msg.parent_id] = id;
+  if (!msg) return;
+  activeVersionMap[msg.parent_id || '__root__'] = id;
+  saveActiveVersions();
   renderMessageTree(); scrollBottom();
 }
 
 function renderEmptySessionState() {
   const area = document.getElementById('chatArea');
   area.innerHTML = `
-    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:40px;color:var(--text-muted);">
-      <div style="font-size:40px;line-height:1;">💬</div>
-      <h3 style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--text);">Sesi ini masih kosong</h3>
-      <p style="max-width:320px;font-size:15px;line-height:1.6;">Kirim pesan pertama untuk mulai percakapan di sesi ini.</p>
+    <div class="empty-session">
+      <div class="empty-session-icon"><i class="far fa-comments"></i></div>
+      <h3>Mulai percakapanmu</h3>
+      <p>Sesi ini belum berisi pesan. Tulis sesuatu di bawah untuk memulai.</p>
     </div>`;
 }
 
@@ -2581,6 +3163,7 @@ function renderMessageTree() {
     logDebug('Branch kosong, render state sesi kosong', '#e67e22');
     return;
   }
+  closeUserMessageMenu();
   area.innerHTML = '';
   suppressAutoScroll = true;
   const renderChunkSize = isMobileViewport() ? 8 : 18;
@@ -2597,7 +3180,8 @@ function renderMessageTree() {
             preview: message.preview || null,
             persona: message.persona || '',
             model: message.model_used || '',
-            modelLabel: message.model_label || ''
+            modelLabel: message.model_label || '',
+            activityTrace: message.activity_trace || null
           }
         : null;
       appendMessage(message.role, message.content, message.created_at, null, message.id, {
@@ -2621,14 +3205,85 @@ function renderMessageTree() {
   requestAnimationFrame(() => renderChunk(0));
 }
 
+
+// Date headers are visual separators inside the active conversation, never new sessions.
+function getChatMessageDate(timestamp = null) {
+  const parsed = timestamp ? new Date(timestamp) : new Date();
+  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date();
+  const key = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+  return {
+    key,
+    label: date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+    time: date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+  };
+}
+
+function ensureChatDateDivider(area, dateMeta) {
+  let previous = area.lastElementChild;
+  while (previous && !previous.classList.contains('msg-row')) {
+    previous = previous.previousElementSibling;
+  }
+  if (previous?.dataset.chatDate === dateMeta.key) return;
+  area.insertAdjacentHTML('beforeend',
+    '<div class="chat-date-divider" role="separator" aria-label="' + dateMeta.label +
+    '" data-chat-date="' + dateMeta.key + '"><time datetime="' + dateMeta.key +
+    '">' + dateMeta.label + '</time></div>');
+}
+
+// Summarize only the visible presentation; the original message is never truncated.
+function buildUserMessageBodyHTML(content) {
+  return '<div class="user-message-content">' + formatContent(content) + '</div>' +
+    '<button type="button" class="user-message-expand" aria-expanded="false" hidden onclick="toggleUserMessageExpansion(this)">' +
+    '<span>Tampilkan lebih banyak</span><i class="fas fa-chevron-down" aria-hidden="true"></i></button>';
+}
+
+function refreshUserMessageCollapse(row) {
+  if (!row || row.classList.contains('editing')) return;
+  const content = row.querySelector('.user-message-content');
+  const toggle = row.querySelector('.user-message-expand');
+  if (!content || !toggle) return;
+  const expanded = content.classList.contains('is-expanded');
+  content.classList.remove('is-collapsed');
+  const lineHeight = parseFloat(getComputedStyle(content).lineHeight) ||
+    parseFloat(getComputedStyle(content).fontSize) * 1.66;
+  const previewHeight = Math.round(lineHeight * 6);
+  content.style.setProperty('--user-message-preview-height', previewHeight + 'px');
+  const overflowing = content.scrollHeight > previewHeight + 3;
+  toggle.hidden = !overflowing;
+  if (!overflowing) {
+    content.classList.remove('is-expanded');
+    toggle.setAttribute('aria-expanded', 'false');
+  } else if (!expanded) {
+    content.classList.add('is-collapsed');
+  }
+}
+
+function toggleUserMessageExpansion(button) {
+  const content = button.closest('.bubble')?.querySelector('.user-message-content');
+  if (!content) return;
+  const expand = !content.classList.contains('is-expanded');
+  content.classList.toggle('is-expanded', expand);
+  content.classList.toggle('is-collapsed', !expand);
+  button.setAttribute('aria-expanded', String(expand));
+  button.querySelector('span').textContent = expand ? 'Tampilkan lebih sedikit' : 'Tampilkan lebih banyak';
+  button.querySelector('i').className = expand ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+}
+
+let userMessageCollapseFrame = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(userMessageCollapseFrame);
+  userMessageCollapseFrame = requestAnimationFrame(() => {
+    document.querySelectorAll('#chatArea > .msg-row.user').forEach(refreshUserMessageCollapse);
+  });
+});
+
 // ══════════════════════════════════════════
 // APPEND MESSAGE
 // ══════════════════════════════════════════
 function appendMessage(role, content, timestamp = null, metadata = null, messageId = null, versionInfo = null, extra = null) {
   const area = document.getElementById('chatArea');
-  const time = timestamp
-    ? new Date(timestamp).toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' })
-    : new Date().toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+  const chatDate = getChatMessageDate(timestamp);
+  const time = chatDate.time;
 
   let html = '';
 
@@ -2636,6 +3291,11 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     const previewBlock = extra?.preview ? buildPreviewPanelHTML(extra.preview) : '';
     const modelName = String(extra?.model || '').trim();
     const modelLabel = normalizeAssistantModelLabel(modelName, extra?.modelLabel || '');
+    const persistedTrace = extra?.activityTrace;
+    const localTrace = messageId ? getStoredActivityTraces()[messageId] : null;
+    const activityTrace = persistedTrace && Array.isArray(persistedTrace.steps) && persistedTrace.steps.length
+      ? persistedTrace : localTrace || persistedTrace || null;
+    const sourcePreviewHtml = buildMessageSourcePreviewHTML(activityTrace);
 
     let sourcesHtml = '';
     if (metadata?.sources?.length) {
@@ -2648,7 +3308,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
           ${metadata.image ? `<img src="${metadata.image}" class="source-img" alt="Referensi">` : ''}
         </div>`;
     }
-    let versionHtml = `<span class="version-tag">V.1</span>`;
+    let versionHtml = ``;
     if (versionInfo?.total > 1) {
       const prev = versionInfo.current > 1 ? versionInfo.siblings[versionInfo.current - 2] : null;
       const next = versionInfo.current < versionInfo.total ? versionInfo.siblings[versionInfo.current] : null;
@@ -2662,15 +3322,17 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
         </span>`;
     }
     html = `
-    <div class="msg-row assistant" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
+    <div class="msg-row assistant" data-chat-date="${chatDate.key}" data-id="${messageId||''}" data-plain-text="${encodeURIComponent(content)}" data-preview="${extra?.preview ? encodeURIComponent(JSON.stringify(extra.preview)) : ''}" data-persona="${escHtml(extra?.persona || '')}" data-model="${escHtml(modelName)}" data-model-label="${escHtml(modelLabel)}">
       ${buildAssistantHeaderHTML(versionHtml, modelName, modelLabel)}
       ${previewBlock}
+      ${buildStoredActivityPanelHTML(messageId, extra?.activityTrace)}
       <div class="bubble">${formatContent(content)}</div>
+      ${sourcePreviewHtml}
       ${sourcesHtml}
       <div class="msg-actions">
-        <button title="Copy" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
-        <button title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
-        <button class="tts-btn" title="Dengarkan"
+        <button type="button" aria-label="Salin jawaban" title="Salin jawaban" onclick="copyFullAI(this)"><i class="far fa-copy"></i></button>
+        <button type="button" aria-label="Ulangi jawaban" title="Ulangi" onclick="regenerateAI(this)"><i class="fas fa-sync-alt"></i></button>
+        <button type="button" class="tts-btn" aria-label="Dengarkan jawaban" title="Dengarkan"
           onclick="speakText(this, decodeURIComponent(this.closest('.msg-row').dataset.plainText))">
           <i class="fas fa-volume-up"></i>
         </button>
@@ -2684,9 +3346,9 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       filesHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">`;
       metadata.files.forEach(f => {
         const isImage = f.type && f.type.startsWith('image/');
-        const name = f.name || 'file';
-        if (isImage && f.base64) {
-          const safeSrc = f.base64.replace(/"/g, '&quot;');
+        const name = escHtml(f.name || 'file');
+        if (isImage && (f.preview || f.base64)) {
+          const safeSrc = (f.preview || f.base64).replace(/"/g, '&quot;');
           filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
         } else {
           const icon = f.type?.includes('word') ? '📝' : f.type?.includes('sheet') ? '📊' : f.type?.includes('pdf') ? '📕' : '📄';
@@ -2700,20 +3362,21 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
     }
 
     html = `
-    <div class="msg-row user" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
+    <div class="msg-row user" data-chat-date="${chatDate.key}" data-raw="${encodeURIComponent(content)}" data-id="${messageId||''}">
       <div class="user-bubble-wrap">
-        <div class="bubble">${formatContent(content)}</div>
+        <div class="bubble" tabindex="0" role="group" aria-haspopup="menu" aria-label="Pesan pengguna. Tekan lama, klik kanan, atau Enter untuk opsi pesan" title="Tekan lama untuk Edit atau Salin">${buildUserMessageBodyHTML(content)}</div>
         ${filesHtml}
-        <div class="user-actions">
-          <span style="font-size:11px;opacity:.65;margin-right:auto;">${time}</span>
-          <button title="Edit" onclick="editUserMsg(this)"><i class="fas fa-pen"></i></button>
-          <button title="Copy" onclick="copyUserMsg(this)"><i class="far fa-copy"></i></button>
+        <div class="user-actions user-message-meta">
+          <span class="user-message-time">${time}</span>
         </div>
       </div>
     </div>`;
   }
 
+  ensureChatDateDivider(area, chatDate);
   area.insertAdjacentHTML('beforeend', html);
+  if (role === 'assistant') wireSourcePreviewImages(area.lastElementChild);
+  if (role === 'user') refreshUserMessageCollapse(area.lastElementChild);
   if (!suppressAutoScroll) {
     scrollBottom();
   }
@@ -2722,16 +3385,172 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
 // ══════════════════════════════════════════
 // COPY
 // ══════════════════════════════════════════
-function copyUserMsg(btn) {
-  navigator.clipboard.writeText(btn.closest('.user').querySelector('.bubble').innerText);
-  const i = btn.querySelector('i'); i.className = 'fas fa-check';
-  setTimeout(() => i.className = 'far fa-copy', 2000);
+async function copyUserMsg(target) {
+  const row = target.closest('.msg-row.user');
+  if (!row) return false;
+  const raw = decodeURIComponent(row.dataset.raw || row.querySelector('.bubble')?.innerText || '');
+  await navigator.clipboard.writeText(raw);
+  const icon = target.matches('button') ? target.querySelector('i') : null;
+  if (icon) {
+    icon.className = 'fas fa-check';
+    setTimeout(() => { icon.className = 'far fa-copy'; }, 2000);
+  }
+  return true;
 }
-function copyFullAI(btn) {
-  navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
-  const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
-  setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
+async function copyFullAI(btn) {
+  try {
+    await navigator.clipboard.writeText(btn.closest('.assistant').querySelector('.bubble').innerText);
+    const i = btn.querySelector('i'); i.className = 'fas fa-check'; i.style.color = '#5ab4d4';
+    showUserCopyFeedback(true, 'Jawaban disalin');
+    setTimeout(() => { i.className = 'far fa-copy'; i.style.color = 'inherit'; }, 2000);
+  } catch { showUserCopyFeedback(false); }
 }
+
+
+/* User messages: long-press on touch, right-click on desktop, Enter via keyboard. */
+let userMessageMenu = null;
+let activeUserMessageRow = null;
+let userMessagePressTimer = null;
+let userMessagePress = null;
+
+function closeUserMessageMenu() {
+  if (userMessageMenu) userMessageMenu.hidden = true;
+  activeUserMessageRow = null;
+}
+
+function showUserCopyFeedback(success, label = 'Pesan disalin') {
+  const feedback = document.createElement('div');
+  feedback.className = 'aai-user-copy-feedback';
+  feedback.setAttribute('role', 'status');
+  feedback.textContent = success ? '✓ ' + label : 'Gagal menyalin';
+  document.body.appendChild(feedback);
+  setTimeout(() => feedback.remove(), 1800);
+}
+
+function ensureUserMessageMenu() {
+  if (userMessageMenu) return userMessageMenu;
+  const menu = document.createElement('div');
+  menu.className = 'aai-user-message-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Opsi pesan pengguna');
+  menu.hidden = true;
+
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.setAttribute('role', 'menuitem');
+  editButton.dataset.action = 'edit';
+  editButton.innerHTML = '<i class="fas fa-pen" aria-hidden="true"></i><span>Edit</span>';
+
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.setAttribute('role', 'menuitem');
+  copyButton.dataset.action = 'copy';
+  copyButton.innerHTML = '<i class="far fa-copy" aria-hidden="true"></i><span>Salin</span>';
+
+  menu.append(editButton, copyButton);
+  document.body.appendChild(menu);
+
+  menu.addEventListener('click', event => {
+    const actionButton = event.target.closest('button[data-action]');
+    if (!actionButton) return;
+    const row = activeUserMessageRow;
+    closeUserMessageMenu();
+    if (!row || !row.isConnected) return;
+    const bubble = row.querySelector('.bubble');
+    if (!bubble) return;
+    if (actionButton.dataset.action === 'edit') {
+      void editUserMsg(bubble);
+    } else if (actionButton.dataset.action === 'copy') {
+      void copyUserMsg(bubble).then(showUserCopyFeedback).catch(() => showUserCopyFeedback(false));
+    }
+  });
+  userMessageMenu = menu;
+  return menu;
+}
+
+function openUserMessageMenu(row, pointX) {
+  if (!row || row.classList.contains('editing')) return;
+  const bubble = row.querySelector('.bubble');
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  const menu = ensureUserMessageMenu();
+  activeUserMessageRow = row;
+  menu.hidden = false;
+
+  const bubbleBounds = bubble.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth;
+  const menuHeight = menu.offsetHeight;
+  const inset = 10;
+  const centerX = Number.isFinite(pointX) ? pointX : bubbleBounds.left + bubbleBounds.width / 2;
+  const left = Math.min(Math.max(centerX - menuWidth / 2, inset), Math.max(inset, innerWidth - menuWidth - inset));
+  let top = bubbleBounds.top - menuHeight - 9;
+  if (top < inset) top = bubbleBounds.bottom + 9;
+  top = Math.min(Math.max(top, inset), Math.max(inset, innerHeight - menuHeight - inset));
+
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(top) + 'px';
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function cancelUserMessagePress() {
+  if (userMessagePressTimer !== null) clearTimeout(userMessagePressTimer);
+  userMessagePressTimer = null;
+  userMessagePress = null;
+}
+
+function getUserMessageBubble(target) {
+  return target instanceof Element ? target.closest('.msg-row.user .bubble') : null;
+}
+
+document.addEventListener('pointerdown', event => {
+  if (userMessageMenu && !userMessageMenu.contains(event.target)) closeUserMessageMenu();
+  cancelUserMessagePress();
+  if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  if (event.target.closest('a, button, input, textarea, select')) return;
+  userMessagePress = { pointerId: event.pointerId, bubble, x: event.clientX, y: event.clientY };
+  userMessagePressTimer = setTimeout(() => {
+    const press = userMessagePress;
+    cancelUserMessagePress();
+    if (press?.bubble.isConnected) openUserMessageMenu(press.bubble.closest('.msg-row.user'), press.x);
+  }, 540);
+});
+
+document.addEventListener('pointermove', event => {
+  if (!userMessagePress || userMessagePress.pointerId !== event.pointerId) return;
+  if (Math.hypot(event.clientX - userMessagePress.x, event.clientY - userMessagePress.y) > 12) {
+    cancelUserMessagePress();
+  }
+}, { passive: true });
+
+document.addEventListener('pointerup', cancelUserMessagePress);
+document.addEventListener('pointercancel', cancelUserMessagePress);
+
+document.addEventListener('contextmenu', event => {
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || bubble.classList.contains('is-editing')) return;
+  event.preventDefault();
+  cancelUserMessagePress();
+  openUserMessageMenu(bubble.closest('.msg-row.user'), event.clientX);
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') {
+    const bubble = activeUserMessageRow?.querySelector('.bubble');
+    closeUserMessageMenu();
+    bubble?.focus({ preventScroll: true });
+    return;
+  }
+  const bubble = getUserMessageBubble(event.target);
+  if (!bubble || event.target !== bubble || bubble.classList.contains('is-editing')) return;
+  if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    event.preventDefault();
+    openUserMessageMenu(bubble.closest('.msg-row.user'));
+  }
+});
+
+document.addEventListener('scroll', () => { if (activeUserMessageRow) closeUserMessageMenu(); }, true);
+window.addEventListener('resize', () => { if (activeUserMessageRow) closeUserMessageMenu(); });
 
 // ══════════════════════════════════════════
 // MARKED RENDERER — dengan hljs + Excel
@@ -2773,6 +3592,13 @@ renderer.code = function(code, language) {
 </div>`;
 };
 
+// In-flight code fences stay lightweight; full syntax highlight runs once after completion.
+const streamingMarkdownRenderer = new marked.Renderer();
+streamingMarkdownRenderer.code = function(code) {
+  const raw = typeof code === 'object' ? (code.text || '') : code;
+  return '<pre class="aai-stream-code"><code>' + escHtml(String(raw || '')) + '</code></pre>';
+};
+
 marked.setOptions({ renderer, breaks: true });
 
 document.addEventListener('click', event => {
@@ -2792,11 +3618,13 @@ document.addEventListener('click', event => {
   }
 });
 
-function copyCodeWindow(btn) {
+async function copyCodeWindow(btn) {
   const pre = btn.closest('.code-window').querySelector('pre');
-  navigator.clipboard.writeText(pre.textContent);
+  try { await navigator.clipboard.writeText(pre.textContent); }
+  catch { showUserCopyFeedback(false); return; }
   const orig = btn.innerHTML;
   btn.innerHTML = '<i class="fas fa-check"></i> Copied!'; btn.style.color = '#a5d6ff';
+  showUserCopyFeedback(true, 'Kode disalin');
   setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 2000);
 }
 
@@ -2825,7 +3653,7 @@ function toggleCodeWindow(btn) {
 
   requestAnimationFrame(scheduleStickyCodeHeadersUpdate);
 }
-function formatContent(text) {
+function formatContent(text, { streaming = false } = {}) {
   if (!text) return "<em style='color:#e74c3c;'>⚠️ Respons kosong.</em>";
   let preppedText = String(text || '')
     .replace(/\[SUGGEST-FRIEND:[\s\S]*?\]/gi,
@@ -2836,7 +3664,7 @@ function formatContent(text) {
       '<span style="display:inline-block;font-size:11px;line-height:1.2;padding:2px 7px;border-radius:999px;background:rgba(46,125,50,.14);color:#2e7d32;font-weight:700;">&lt;memory&gt;</span>')
     .replace(/\[type=pattern;category=[^\]]*;key=[^\]]*;value=[^\]]*\]/gi, '');
 
-  let html = marked.parse(preppedText);
+  let html = marked.parse(preppedText, streaming ? { renderer: streamingMarkdownRenderer, breaks: true } : undefined);
   html = html.replace(/Sumber:\s*(https?:\/\/[^\s<]+)/gi,
     `<div class="source-card">🌐 <a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2a7a9e">$1</a></div>`);
 
@@ -2849,9 +3677,91 @@ function formatContent(text) {
     return `<div class="streaming-plain">${escHtml(fallbackText).replace(/\n/g, '<br>')}</div>`;
   }
 
-  return DOMPurify.sanitize(html, {
+  const safeHtml = DOMPurify.sanitize(html, {
     ADD_ATTR: ['data-action', 'target', 'rel', 'style']
   });
+  return makeReadableMarkdownTables(compactExternalLinks(safeHtml));
+}
+
+// Keep URLs in href but display concise, human-readable source names.
+function compactExternalLinks(sanitizedHtml) {
+  if (!sanitizedHtml.includes('<a ')) return sanitizedHtml;
+  const fragment = document.createElement('template');
+  fragment.innerHTML = sanitizedHtml;
+  fragment.content.querySelectorAll('a[href]').forEach(link => {
+    let url;
+    try { url = new URL(link.getAttribute('href'), location.href); } catch { return; }
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin === location.origin) return;
+    const hostname = url.hostname.replace(/^www\./i, '');
+    const visible = (link.textContent || '').trim();
+    const looksLikeUrl = /^(?:https?:\/\/|www\.)/i.test(visible);
+    const isNumericCitation = /^(?:\[?\d{1,3}\]?|sumber\s*\d{1,3})$/i.test(visible);
+    if (looksLikeUrl || isNumericCitation || !visible) {
+      let conciseName = hostname;
+      if (/(^|\.)nodejs\.org$/i.test(hostname)) conciseName = 'Node.js';
+      else if (/(^|\.)github\.com$/i.test(hostname)) conciseName = 'GitHub';
+      else if (/(^|\.)wikipedia\.org$/i.test(hostname)) conciseName = 'Wikipedia';
+      else if (/(^|\.)risingstack\.com$/i.test(hostname)) conciseName = 'RisingStack';
+      else if (/(^|\.)supabase\.com$/i.test(hostname)) conciseName = 'Supabase';
+      else if (/(^|\.)openai\.com$/i.test(hostname)) conciseName = 'OpenAI';
+      link.textContent = conciseName;
+    }
+    link.classList.add('aai-source-link');
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.setAttribute('aria-label', (link.textContent || hostname).trim() + ' — buka situs eksternal');
+
+    if (!link.querySelector('.aai-inline-source-icon') && !link.querySelector('img')) {
+      const iconWrap = document.createElement('span');
+      iconWrap.className = 'aai-inline-source-icon';
+      iconWrap.setAttribute('aria-hidden', 'true');
+      const fallback = document.createElement('i');
+      fallback.className = 'fas fa-globe';
+      const favicon = document.createElement('img');
+      favicon.className = 'aai-inline-source-favicon';
+      favicon.setAttribute('data-aai-favicon', '');
+      favicon.src = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
+      favicon.alt = '';
+      favicon.width = 14;
+      favicon.height = 14;
+      favicon.loading = 'lazy';
+      favicon.referrerPolicy = 'no-referrer';
+      iconWrap.append(fallback, favicon);
+      link.prepend(iconWrap);
+    }
+  });
+  return fragment.innerHTML;
+}
+
+// Wide Markdown tables are readable cards; no horizontal five-column squinting.
+function makeReadableMarkdownTables(sanitizedHtml) {
+  if (!sanitizedHtml.includes('<table')) return sanitizedHtml;
+  const fragment = document.createElement('template');
+  fragment.innerHTML = sanitizedHtml;
+  fragment.content.querySelectorAll('table').forEach(table => {
+    // Preserve original rows and columns; let wide tables scroll horizontally.
+    table.classList.remove('aai-table-cards');
+    table.classList.add('aai-data-table');
+    const columnCount = Math.max(0, ...Array.from(table.querySelectorAll('tr'), row => row.children.length));
+    const shell = document.createElement('div');
+    shell.className = 'aai-table-shell';
+    const scroll = document.createElement('div');
+    scroll.className = 'aai-table-scroll';
+    scroll.tabIndex = 0;
+    scroll.setAttribute('role', 'region');
+    scroll.setAttribute('aria-label', 'Tabel jawaban. Geser horizontal untuk melihat kolom lainnya.');
+    table.parentNode.insertBefore(shell, table);
+    shell.appendChild(scroll);
+    scroll.appendChild(table);
+    if (columnCount >= 4) {
+      const hint = document.createElement('div');
+      hint.className = 'aai-table-hint';
+      hint.setAttribute('aria-hidden', 'true');
+      hint.textContent = '↔ Geser untuk kolom lainnya';
+      shell.appendChild(hint);
+    }
+  });
+  return fragment.innerHTML;
 }
 
 function escHtml(str) {
@@ -2890,25 +3800,23 @@ function toggleSettingsMenu() {
   if (menu.classList.contains('show')) renderSettingsMenu();
 }
 function renderSettingsMenu() {
-  const personas = [
-    { val: 'Auto',            label: '✨ Auto' },
-    { val: 'Santai',          label: '😌 Santai' },
-    { val: 'Coding',          label: '💻 Coding Expert' },
-    { val: 'Kritikus Brutal', label: '🔥 Kritikus' },
-    { val: 'Rosalia',         label: '🌹 Rosalia' }
+  let html = '<div class="settings-header">Model AI · pilih manual</div>';
+  const models = [
+    { val: 'main', label: '⚡ Qwen · utama' },
+    { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' }
   ];
-  let html = `<div class="settings-header">Persona AI</div>`;
-  personas.forEach(p => {
-    html += `<button class="settings-item ${currentPersona===p.val?'active':''}" onclick="selectPersonaUI('${p.val}')">
-      <span>${p.label}</span><i class="fas fa-check check"></i>
+  models.forEach(m => {
+    html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
+      <span>${m.label}</span><i class="fas fa-check check"></i>
     </button>`;
   });
-
+  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Rute gratis dipilih otomatis oleh OpenRouter; ketersediaan dapat berubah.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
 }
-function selectPersonaUI(val) {
-  currentPersona = val;
-  localStorage.setItem('aai_persona', val);
+function selectModelUI(val) {
+  if (val !== 'main' && val !== 'free-auto') return;
+  currentModelPreference = val;
+  localStorage.setItem('aai_model_preference', val);
   updateModeLabel();
   renderSettingsMenu();
 }
@@ -2988,7 +3896,7 @@ function renderFilePreview() {
         ? `<img src="${URL.createObjectURL(file)}" alt="preview">`
         : `<i class="fas fa-file-alt file-icon"></i>`
       }
-      <div class="file-name">${file.name}</div>
+      <div class="file-name">${escHtml(file.name)}</div>
       <span class="remove-file" onclick="removeFile(${index})">×</span>
     `;
     container.appendChild(div);
@@ -3015,6 +3923,54 @@ function fileToBase64(file) {
   });
 }
 
+const AAI_SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const AAI_MAX_IMAGES = 3;
+const AAI_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const AAI_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+// Preserve full resolution when small: tiny UI text is easier to read.
+async function prepareAAiImage(file) {
+  const mime = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+  if (!AAI_SUPPORTED_IMAGE_TYPES.has(mime)) {
+    throw new Error('Saat ini AAi bisa membaca gambar JPG, PNG, atau WebP. PDF/HEIC menyusul, ya.');
+  }
+  let processed = file;
+  if (file.size > AAI_MAX_IMAGE_BYTES) {
+    const src = URL.createObjectURL(file);
+    const img = new Image();
+    try {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('Gambar tidak bisa dibaca browser.'));
+        img.src = src;
+      });
+    } finally {
+      URL.revokeObjectURL(src);
+    }
+    for (const limit of [2600, 2200, 1800]) {
+      const scale = Math.min(1, limit / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Browser tidak dapat mengecilkan gambar.');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      processed = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+      canvas.width = 0; canvas.height = 0;
+      if (processed && processed.size <= AAI_MAX_IMAGE_BYTES) break;
+    }
+    if (!processed || processed.size > AAI_MAX_IMAGE_BYTES) {
+      throw new Error('Gambar terlalu besar. Coba crop bagian yang ingin dibaca.');
+    }
+  }
+  return {
+    name: file.name.slice(0, 100),
+    type: processed.type || mime,
+    base64: await fileToBase64(processed),
+    preview: URL.createObjectURL(file)
+  };
+}
+
 async function handleSend() {
   const inp = document.getElementById('messageInput');
   const text = inp.value.trim();
@@ -3036,18 +3992,22 @@ async function handleSend() {
       }
     }
 
-    const oversized = selectedFiles.find(f => f.size > 2 * 1024 * 1024);
-    if (oversized) throw new Error(`File "${oversized.name}" >2MB. Kompres dulu ya.`);
-
-    const filesPayload = await Promise.all(selectedFiles.map(async f => ({
-      name: f.name, type: f.type, base64: await fileToBase64(f)
-    })));
+    if (selectedFiles.length > AAI_MAX_IMAGES) throw new Error('Maksimal tiga gambar untuk satu pesan.');
+    const filesPayload = await Promise.all(selectedFiles.map(prepareAAiImage));
+    const bytes = filesPayload.reduce((sum, file) => {
+      const value = String(file.base64).split(',')[1] || '';
+      return sum + Math.floor(value.length * 3 / 4);
+    }, 0);
+    if (bytes > AAI_MAX_TOTAL_BYTES) {
+      filesPayload.forEach(file => URL.revokeObjectURL(file.preview));
+      throw new Error('Total gambar maksimal 8 MB. Kurangi jumlahnya dulu, ya.');
+    }
 
     inp.value = ''; autoResize(inp); updateMobileSendVisibility();
     const previewContainer = document.getElementById('filePreview');
     previewContainer.classList.add('fading-out');
 
-    sendMessage(text, filesPayload);
+    void sendMessage(text || 'Tolong jelaskan gambar yang kulampirkan.', filesPayload);
 
     setTimeout(() => {
       selectedFiles = [];
@@ -3061,38 +4021,30 @@ async function handleSend() {
     document.getElementById('filePreview').classList.remove('fading-out');
   } finally {
     sendBtn.disabled = false;
-    sendBtn.innerHTML = originalHTML;
+    if (!sendBtn.classList.contains('stop-mode')) sendBtn.innerHTML = originalHTML;
   }
 }
 
+function setHistoryDrawerOpen(isOpen) {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('open', Boolean(isOpen));
+  const toggle = document.querySelector('.hamburger');
+  if (toggle) toggle.setAttribute('aria-expanded', String(Boolean(isOpen)));
+  document.body.classList.toggle('aai-drawer-visible', Boolean(isOpen));
+}
 function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-
-  if (window.innerWidth <= 768) {
-    sidebar.classList.toggle('open');
-    return;
-  }
-
-  document.body.classList.toggle('desktop-sidebar-hidden');
+  setHistoryDrawerOpen(!document.getElementById('sidebar')?.classList.contains('open'));
 }
-document.addEventListener('click', e => {
-  if (window.innerWidth > 768) return;
-  const sidebar   = document.getElementById('sidebar');
-  const hamburger = document.querySelector('.hamburger');
-  if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && !hamburger.contains(e.target))
-    sidebar.classList.remove('open');
+document.addEventListener('click', (event) => {
+  const drawer = document.getElementById('sidebar');
+  if (!drawer?.classList.contains('open')) return;
+  if (event.target.closest('.aai-drawer-backdrop')) return;
+  if (event.target.closest('.hamburger') || event.target.closest('.aai-drawer-close')) return;
+  if (event.target.closest('.session-item')) setHistoryDrawerOpen(false);
 });
-window.addEventListener('resize', () => {
-  const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-
-  if (window.innerWidth > 768) {
-    sidebar.classList.remove('open');
-    return;
-  }
-
-  document.body.classList.remove('desktop-sidebar-hidden');
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') setHistoryDrawerOpen(false);
 });
 async function logout() {
   const shouldLogout = await showConfirmMessage('Yakin mau keluar?', 'Konfirmasi Logout', 'Keluar', 'Batal');
@@ -3148,6 +4100,63 @@ async function sendCompactCheckpoint() {
   sendMessage('[COMPACT_CHECKPOINT_REQUEST]');
 }
 
+function syncWebToolPermissionUI() {
+  const button = document.getElementById('webPermissionBtn');
+  if (!button) return;
+  const enabled = currentWebPermission === 'allow';
+  button.setAttribute('aria-checked', String(enabled));
+  button.classList.toggle('is-on', enabled);
+  const status = document.getElementById('webPermissionStatus');
+  if (status) status.textContent = enabled
+    ? 'Aktif · AAi boleh memakai Tavily/Exa bila perlu'
+    : 'Nonaktif · AAi menjawab tanpa pencarian web';
+  const indicator = button.querySelector('.composer-web-switch i');
+  if (indicator) indicator.className = enabled ? 'fas fa-toggle-on' : 'fas fa-toggle-off';
+}
+
+function toggleWebToolPermission() {
+  currentWebPermission = currentWebPermission === 'allow' ? 'deny' : 'allow';
+  localStorage.setItem('aai_web_tool_permission', currentWebPermission);
+  syncWebToolPermissionUI();
+}
+
+function closeComposerMenu({ restoreFocus = false } = {}) {
+  const menu = document.getElementById('composerActionMenu');
+  const button = document.getElementById('composerPlusBtn');
+  if (!menu || !button) return;
+  menu.hidden = true;
+  button.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) button.focus({ preventScroll: true });
+}
+
+function toggleComposerMenu() {
+  const menu = document.getElementById('composerActionMenu');
+  const button = document.getElementById('composerPlusBtn');
+  if (!menu || !button) return;
+  const willOpen = menu.hidden;
+  if (!willOpen) {
+    closeComposerMenu({ restoreFocus: true });
+    return;
+  }
+  menu.hidden = false;
+  button.setAttribute('aria-expanded', 'true');
+  syncWebToolPermissionUI();
+  menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function runComposerAction(action) {
+  if (action === 'web-permission') {
+    toggleWebToolPermission();
+    return; // Keep the menu open so the explicit permission state is visible.
+  }
+  closeComposerMenu();
+  if (action === 'upload') {
+    document.getElementById('fileInput')?.click();
+  } else if (action === 'compact') {
+    void sendCompactCheckpoint();
+  }
+}
+
 function initComposerUI() {
   const messageInput = document.getElementById('messageInput');
   if (messageInput && !messageInput.dataset.aaiBound) {
@@ -3155,9 +4164,33 @@ function initComposerUI() {
     messageInput.dataset.aaiBound = 'true';
   }
 
+  const menu = document.getElementById('composerActionMenu');
+  if (menu && !menu.dataset.aaiMenuBound) {
+    menu.dataset.aaiMenuBound = 'true';
+    document.addEventListener('pointerdown', event => {
+      if (!event.target.closest('.composer-plus-wrap')) closeComposerMenu();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !menu.hidden) {
+        event.preventDefault();
+        closeComposerMenu({ restoreFocus: true });
+      }
+    });
+    menu.addEventListener('keydown', event => {
+      const buttons = Array.from(menu.querySelectorAll('button'));
+      const index = buttons.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const offset = event.key === 'ArrowDown' ? 1 : -1;
+        buttons[(index + offset + buttons.length) % buttons.length]?.focus();
+      }
+    });
+  }
+
   updateModeLabel();
   updateCompactStatus();
   updateMobileSendVisibility();
+  syncWebToolPermissionUI();
 }
 
 
@@ -3321,10 +4354,4 @@ window.addEventListener('resize', () => {
 });
 setTimeout(scheduleStickyCodeHeadersUpdate, 600);
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/sw.js')
-      .catch(err => console.error('SW register gagal:', err));
-  });
-}
+// PWA registration and updates are handled by /assets/js/pwa.js.

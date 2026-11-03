@@ -1,0 +1,32 @@
+{
+  "name": "aai-v0",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-31",
+  "keep_vars": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.25,
+    "redact_query_string": true,
+    "logs": { "enabled": true, "invocation_logs": true, "head_sampling_rate": 0.25 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.25 }
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*",
+      "/login",
+      "/login/"
+    ]
+  },
+  "ratelimits": [
+    {
+      "name": "AAI_WEB_SEARCH_LIMITER",
+      "namespace_id": "311021",
+      "simple": {
+        "limit": 12,
+        "period": 60
+      }
+    }
+  ]
+}
