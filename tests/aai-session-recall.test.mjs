@@ -55,7 +55,7 @@ test('no evidence gives bounded language and never a claim of globally empty mem
 
 test('does not turn ordinary discussions and save-memory commands into recall', () => {
   const {rows,parent} = fixture();
-  for (const message of ['Halo AAi', 'Apa itu statistik sepak bola?', 'Buat cerita tentang Ronaldo']) {
+  for (const message of ['Halo AAi', 'Apa itu statistik sepak bola?', 'Buat cerita tentang Ronaldo', 'Ingat ini: saya suka bola', 'Tolong catat rencana baru']) {
     assert.equal(isSessionRecallRequest(message), false,message);
     assert.equal(findEarlierSessionRecall(rows,parent,message),null,message);
   }
