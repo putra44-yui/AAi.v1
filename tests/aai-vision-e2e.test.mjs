@@ -65,8 +65,8 @@ test('vision HTTP chat really streams a multimodal provider payload without pers
       OPENROUTER_MAIN_MODEL:'fixture/text-only',
       TAVILY_API_KEY:'fixture-search-key',
     });
-    assert.equal(response.status, 200, await response.text());
     const sse = await response.text();
+    assert.equal(response.status, 200, sse);
     assert.match(sse, /Teks dalam screenshot adalah ABC-123/);
     assert.match(sse, /"done":true/);
 
