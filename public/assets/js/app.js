@@ -3344,7 +3344,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
       filesHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">`;
       metadata.files.forEach(f => {
         const isImage = f.type && f.type.startsWith('image/');
-        const name = f.name || 'file';
+        const name = escHtml(f.name || 'file');
         if (isImage && (f.preview || f.base64)) {
           const safeSrc = (f.preview || f.base64).replace(/"/g, '&quot;');
           filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
@@ -3894,7 +3894,7 @@ function renderFilePreview() {
         ? `<img src="${URL.createObjectURL(file)}" alt="preview">`
         : `<i class="fas fa-file-alt file-icon"></i>`
       }
-      <div class="file-name">${file.name}</div>
+      <div class="file-name">${escHtml(file.name)}</div>
       <span class="remove-file" onclick="removeFile(${index})">×</span>
     `;
     container.appendChild(div);
