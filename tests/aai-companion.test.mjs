@@ -63,7 +63,7 @@ test('reactions rotate instead of repeating recent responses, with no LLM requir
   assert.match(source,/const local=core\.reactionFor\(zone,state\.recent\)/);
   assert.match(source,/mascot\.addEventListener\('pointermove'/);
   assert.match(source,/AAiCompanionBridge/);
-  assert.match(source,/state\.alphaMap=null/);
+  assert.match(source,/state\.alphaMap\s*=\s*null/);
 });
 
 test('new view is bound to existing SSE, never starts another chat API request', () => {
