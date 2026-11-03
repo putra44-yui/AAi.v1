@@ -65,6 +65,7 @@ public final class CompanionOverlayService extends Service {
     private int page = 0;
     private int previousReaction = -1;
     private boolean composerVisible = true;
+    private String overlayOwnerId = "";
     private boolean streaming = false;
     private long lastReactionAt = 0L;
     private int reactionCount = 0;
@@ -105,6 +106,12 @@ public final class CompanionOverlayService extends Service {
             return START_NOT_STICKY;
         }
         if (ACTION_SHOW.equals(action) || action == null) {
+            overlayOwnerId = intent == null ? "" : intent.getStringExtra("ownerId");
+            if (overlayOwnerId == null || !overlayOwnerId.matches(
+                "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             composerVisible=intent == null || intent.getBooleanExtra("showComposer",true);
             showNotification();
             if (floatingWidget == null) {
@@ -313,7 +320,7 @@ public final class CompanionOverlayService extends Service {
             Intent app=new Intent(this,MainActivity.class);
             app.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
             String draft=edit.getText().toString().trim();
-            if(!draft.isEmpty()) app.putExtra("AAI_COMPANION_DRAFT",draft);
+            if(!draft.isEmpty()) { app.putExtra("AAI_COMPANION_DRAFT",draft); app.putExtra("AAI_COMPANION_OWNER",overlayOwnerId); }
             startActivity(app);
             edit.setText("");
         });
