@@ -29,6 +29,7 @@ const NO_WEB_RESTRICTIONS = [
   /\b(?:jangan|tidak\s+(?:usah|perlu)|ga(?:k)?\s+(?:usah|perlu)|nggak\s+(?:usah|perlu)|tak\s+(?:usah|perlu)|do\s+not|don't|dont)\s+(?:browse|browsing|googling|search(?:ing)?|web\s+search|pencarian\s+(?:web|online))\b/i,
   /\b(?:jangan|tidak\s+(?:usah|perlu)|ga(?:k)?\s+(?:usah|perlu)|nggak\s+(?:usah|perlu)|tak\s+(?:usah|perlu))\s+(?:web|internet|online|google|tavily|exa)\b/i,
   /\b(?:tanpa|no|without)\s+(?:akses\s+|pencarian\s+)?(?:web|internet|online|browsing|search|google|tavily|exa)\b/i,
+  /\b(?:jangan|tidak\s+usah|gak\s+usah|nggak\s+usah|tak\s+usah)\s+(?:cari|telusuri|cek)\s+(?:dulu|lagi)\b/i,
   /\boffline\s+saja\b/i,
   /\b(?:dari|berdasarkan|pakai|gunakan)\s+(?:pengetahuan|bobot|ingatan)(?:mu|model)?\s+(?:saja|aja|only)\b/i,
   /\b(?:hanya|cukup|only)\s+(?:pakai|gunakan|dari|berdasarkan)\s+(?:pengetahuan|bobot|ingatan)(?:mu|model)?\b/i,
@@ -53,6 +54,10 @@ export function isAllowedPublicWebQuery(userMessage: string, query: string): boo
     && !/[\r\n]/.test(clean);
 }
 const EXPLICIT_SEARCH = /(?:cari(?:kan)?\s+(?:di\s+)?(?:web|internet|google|online|sumber|referensi|berita|informasi|aturan|dokumentasi\s+resmi|artikel\s+ilmiah|jurnal|paper|tautan|link|situs\s+resmi)|(?:search|browse|googling|telusuri)\s+(?:di\s+)?(?:web|internet|online|tentang|dokumentasi)|(?:cek|periksa|verifikasi|carikan)\s+(?:sumber resmi|berita terbaru|di web|di internet)|(?:tolong|coba)\s+(?:cari|telusuri)\s+(?:sumber|referensi|berita|dokumentasi)|(?:temukan|find)\s+(?:dokumentasi\s+resmi|artikel\s+ilmiah|jurnal|paper|sumber resmi))/i;
+// Catch conversational requests that explicitly ask to look something up,
+// even when the subject comes before the instruction: "BOAT coba cari dulu".
+// Do not treat creative requests such as "cari ide cerita" as web searches.
+const EXPLICIT_CONVERSATIONAL_LOOKUP = /(?:\b(?:coba|tolong|mohon)\s+(?:cari|telusuri|cek)\s+(?:dulu|lagi|sebentar|di\s+web|di\s+internet|tentang)\b|\b(?:cari|telusuri|cek)\s+(?:dulu|lagi|lebih\s+dalam)\b|\b(?:buka|lihat)\s+(?:web|internet|sumber\s+resmi)\b)/i;
 const FRESH_QUERY = /(?:terbaru|terkini|hari ini|kemarin|sekarang|saat ini|minggu ini|bulan ini|tahun ini|update terbaru|rilis terbaru|masih berlaku|sudah berubah|jadwal|harga|tarif|kurs|cuaca|berita|peraturan|undang-undang|pkpu|putusan mk|siapa (?:presiden|menteri|gubernur|kepala)|pengumuman terbaru)/i;
 const INFO_REQUEST = /(?:\b(?:apa|siapa|berapa|kapan|dimana|bagaimana|apakah|cek|tolong|cari|jelaskan|daftar|bandingkan|verifikasi)\b|\?)/i;
 
@@ -63,7 +68,7 @@ export function decideWebSearch(message: string): WebSearchDecision {
   if (!normalized || hasWebSearchOptOut(normalizedFull) || BLOCKED_SECRETS.test(normalizedFull)) {
     return { search: false, query: '', explicit: false };
   }
-  const explicit = EXPLICIT_SEARCH.test(normalized);
+  const explicit = EXPLICIT_SEARCH.test(normalized) || EXPLICIT_CONVERSATIONAL_LOOKUP.test(normalized);
   // Private family/memory questions must stay inside AAi unless the user is asking
   // for genuinely public information in a separate, anonymized query.
   if (PRIVATE_TOPIC.test(normalized)) return { search: false, query: '', explicit };

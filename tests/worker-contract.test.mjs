@@ -119,10 +119,10 @@ test('Native web search stays server-side and progress reflects real tool result
   assert.match(client, /parsed\.phase === 'progress'/);
   assert.doesNotMatch(client, /Persona AI/);
 });
-test('AAi displays measured collapsible activity and readable named source links', () => {
+test('AAi displays a compact evidence trail and readable named source links', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
-  assert.match(client, /Memproses selama /);
+  assert.match(client, /Penelusuran selesai/);
   assert.match(client, /saveActivityTrace\(parsed\.message_id/);
   assert.match(client, /buildStoredActivityPanelHTML\(messageId, extra\?\.activityTrace\)/);
   assert.match(client, /function compactExternalLinks/);
@@ -131,7 +131,7 @@ test('AAi displays measured collapsible activity and readable named source links
   assert.match(css, /content: '↗'/);
 });
 
-test('every reply shows progress on phones, and saved activity can travel with the session', () => {
+test('router traces stay saved for audit without flooding phone screens', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.match(server, /message: 'Menyiapkan jawaban\.\.\.'/);
@@ -148,14 +148,16 @@ test('AAi shows real search sources with favicons, and model reports without too
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
   assert.match(server, /step: 'sources', message: `Menemukan \$\{outcome\.sources\.length\} sumber\.`/);
-  assert.match(server, /Mencari sumber dari web/);
+  assert.match(server, /Menelusuri web/);
   assert.doesNotMatch(server, /Mencari sumber melalui Tavily|lanjut ke Exa/);
   assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)\.map\(source =>/);
   assert.match(server, /source\.image \? \{ image: source\.image \}/);
   assert.match(client, /if \(step === 'sources'\)/);
-  assert.match(client, /if \(step === 'strategy'\)/);
-  assert.match(client, /step === 'tavily' \? 'Mencari sumber dari web/);
-  assert.match(client, /step === 'exa' \? 'Hasil awal belum cukup/);
+  assert.match(client, /function publicActivityStep\(/);
+  assert.match(client, /if \(step === 'tavily'\)/);
+  assert.match(client, /if \(step === 'exa'\)/);
+  assert.match(client, /if \(step === 'report'\)/);
+  assert.match(client, /Ignore provider, memory count, tool decision, compose and model strategy/);
   assert.match(client, /renderActivitySourceHTML/);
   assert.match(client, /www\.google\.com\/s2\/favicons/);
   assert.match(client, /rel="noopener noreferrer nofollow"/);
@@ -187,16 +189,14 @@ test('AAi promotes model-generated opening text into the compact tool activity',
   assert.ok(css.includes('.aai-activity-step-icon'));
   assert.ok(css.includes('.aai-preface'));
 });
-test('AAi keeps the preface inside the collapsible activity, not outside the answer', () => {
+test('a public preface remains visible while the details panel stays collapsed', () => {
   const client = read('public/assets/js/app.js');
-  assert.ok(client.includes('return `<details class="aai-activity is-complete aai-saved-activity">'));
-  const storedPanel = client.indexOf('return `<details class="aai-activity is-complete aai-saved-activity">');
-  const introInside = client.indexOf('${intro}', storedPanel);
-  const listInside = client.indexOf('<ul class="aai-activity-list">', introInside);
-  assert.ok(storedPanel >= 0 && introInside > storedPanel && listInside > introInside);
-  assert.ok(client.includes('<p class="aai-preface" id="preface_${streamId}" hidden></p>'));
-  assert.ok(!client.includes('return intro + `<details'));
-  assert.ok(!client.includes('>Sebentar, aku cek dulu, ya. ✨</p>'));
+  assert.match(client, /const activityHtml = `<p class="aai-preface"/);
+  assert.match(client, /<details class="aai-activity" id="activity_/);
+  assert.match(client, /data-started-at="\$\{Date\.now\(\)\}" hidden/);
+  assert.match(client, /if \(prefaceEl && prefaceEl\.hidden\)/);
+  assert.match(client, /if \(!rows\) return intro/);
+  assert.doesNotMatch(client, /activityEl\.open = true/);
 });
 
 test('AAi asks the selected LLM to call a real tool or reply directly', () => {

@@ -178,7 +178,7 @@ interface ToolSwitchEvent {
 
 interface ProgressEvent {
   phase: 'progress';
-  step: 'memory' | 'assess' | 'strategy' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose' | 'provider';
+  step: 'memory' | 'assess' | 'strategy' | 'report' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose' | 'provider';
   message: string;
   at_ms?: number;
   source_count?: number;
@@ -901,7 +901,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         role: 'system',
         content: webSearchOptedOut
           ? '[BATASAN PENGGUNA] Pengguna meminta tanpa pencarian web. Jawab dari pengetahuan dan konteks yang tersedia. Jangan mengaku memakai tools atau memverifikasi sumber terkini.'
-          : '[IZIN TOOLS] Pengguna belum mengizinkan pencarian web. Jangan mengaku memakai tools atau memverifikasi sumber terkini. Jawab jujur dari konteks; bila penting, sarankan mengaktifkan izin Web melalui tombol +.',
+          : requestedWebDecision.explicit
+            ? '[IZIN WEB BELUM AKTIF] Pengguna secara eksplisit meminta pencarian web. Kamu TIDAK bisa menjalankan pencarian pada permintaan ini. Jangan mengganti pencarian dengan tebakan dari bobot. Balas singkat dan alami: jelaskan bahwa izin web harus diaktifkan melalui tombol +, lalu pengguna dapat mengulang permintaannya. Jangan klaim sudah mencari.'
+            : '[IZIN TOOLS] Web belum diizinkan. Jangan mengaku menggunakan tools atau memverifikasi sumber terkini. Untuk pertanyaan yang tidak perlu web, jawab langsung dari konteks; untuk informasi terkini, jelaskan batasannya.',
       });
     } else if (!shouldRunToolDecision) {
       providerPayload.messages.splice(context.systemMessages.length, 0, {
@@ -949,6 +951,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 ...(source.image ? { image: source.image.slice(0, 1200) } : {}),
               })) } : {}),
             });
+          } else if ('phase' in event && event.phase === 'preface' && !activityPreface && event.message) {
+            activityPreface = event.message.slice(0, 240);
           } else if ('phase' in event && event.phase === 'tool_switch' && !activityPreface && event.message) {
             activityPreface = event.message.slice(0, 240);
           }
@@ -981,8 +985,16 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
-          // All replies have a visible, truthful activity trail, including
-          // ordinary chats with no memories or external tools (also on mobile).
+          // This is a plan, not a claim that search already succeeded. Only
+          // display it for explicit, authorized web requests, not everyday chat.
+          if (shouldRunToolDecision && requestedWebDecision.explicit) {
+            const opening = /(?:sumber\s+resmi|dokumentasi\s+resmi|cek)/i.test(message)
+              ? 'Bentar, aku cek sumber yang bisa dipercaya dulu, ya.'
+              : 'Bentar, aku coba cari di web dulu, ya.';
+            enqueueEvent({ phase: 'preface', message: opening });
+          }
+          // Retain the raw router events for bounded audit traces; the family UI
+          // suppresses them and only shows confirmed work milestones.
           enqueueEvent({ phase: 'progress', step: 'assess', message: 'Menyiapkan jawaban...' });
           if (context.memoryCount > 0) {
             enqueueEvent({
@@ -1041,6 +1053,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           if (shouldRunToolDecision) {
             const searchedQueries = new Set<string>();
             let toolRounds = 0;
+            let previousSearchFound = 0;
             const agentStartedAt = Date.now();
             while (!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS
               && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
@@ -1119,6 +1132,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 message: toolRounds === 0 ? publicOpening : '',
               });
               if (toolRounds > 0 && publicOpening) {
+                // Keep model-authored public openings only in the internal trace;
+                // the UX will show one bounded, verified follow-up report instead.
                 enqueueEvent({ phase: 'progress', step: 'strategy', message: publicOpening.slice(0, 200) });
               }
               replyParts.length = 0;
@@ -1150,25 +1165,29 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   toolResult = JSON.stringify({ ok: false, error: 'Batas kuota pencarian tercapai. Tidak ada sumber baru yang diambil.' });
                   enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Kuota pencarian terbatas; aku tidak akan mengarang sumber baru.' });
                 } else {
-                  enqueueEvent({
-                    phase: 'progress', step: 'assess',
-                    message: toolRounds === 0 ? 'Butuh sumber tambahan untuk memastikan jawaban.'
-                      : 'Mencari lagi untuk mengecek detail yang belum jelas...',
-                  });
+                  if (toolRounds > 0) {
+                    enqueueEvent({
+                      phase: 'progress', step: 'report',
+                      message: previousSearchFound > 0
+                        ? 'Aku sudah menemukan sumber awal, tapi akan cari pembandingnya dulu, ya.'
+                        : 'Sumber tadi belum membantu. Aku coba cari dengan cara lain.',
+                    });
+                  }
                   const decision = { search: true, query, explicit: requestedWebDecision.explicit };
                   logTiming('web_search_start');
                   const outcome = await collectWebSources(decision, env, (step, count) => {
                     const messages: Record<string, string> = {
-                      tavily: 'Mencari sumber dari web...',
-                      exa: 'Hasil awal belum cukup; mencari sumber lain...',
-                      found: 'Menemukan ' + (count || 0) + ' sumber. Meninjau isinya...',
-                      unavailable: 'Belum menemukan sumber yang bisa dipastikan.',
+                      tavily: 'Menelusuri web...',
+                      exa: 'Hasil pertama belum cukup. Aku coba sumber lain, ya.',
+                      found: 'Ketemu ' + (count || 0) + ' sumber. Aku cek isinya dulu...',
+                      unavailable: 'Belum ada sumber yang bisa kupastikan.',
                     };
                     enqueueEvent({
                       phase: 'progress', step, message: messages[step],
                       ...(count !== undefined ? { source_count: count } : {}),
                     });
                   }, upstreamAbortController.signal);
+                  previousSearchFound = outcome.sources.length;
                   logTiming('web_search_complete', { source_count: outcome.sources.length });
                   // Surface only real, normalized search results; never invent sources.
                   if (outcome.sources.length) {

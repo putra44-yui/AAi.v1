@@ -57,10 +57,12 @@ test('activity shows factual streaming milestones, not the raw JSON log', () => 
   const html = getLiveHTML('trace_test');
   assert.match(html, /role="status" aria-live="polite"/);
   assert.match(html, /activity_live_trace_test/);
-  assert.match(html, /Menghubungkan ke AAi/);
+  assert.match(html, /Sedang bekerja/); // Placeholder is hidden until a real public activity begins.
   assert.doesNotMatch(app, /JSON aktivitas|aai-activity-json|activity_json_/);
-  assert.match(app, /Jawaban sedang ditulis, sedikit demi sedikit/);
-  assert.match(app, /updateActivityLive\(parsed\.step === 'tavily'/);
+  assert.match(app, /function publicActivityStep\(/);
+  assert.match(app, /if \(publicStep && activityEl && activityListEl\)/);
+  assert.match(app, /if \(activityEl && !activityEl\.hidden\) activityEl\.open = false/);
+  assert.doesNotMatch(app, /updateActivityLive\('Jawaban sedang ditulis/);
   assert.match(css, /aai-activity-live-dot/);
   assert.match(css, /prefers-reduced-motion/);
 });
