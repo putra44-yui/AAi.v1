@@ -1,4 +1,5 @@
 import { POST as chatPost } from './chat';
+import { handleCompanionMicro } from './companion-micro';
 import { handleSessionApi } from './session-api';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
@@ -131,6 +132,10 @@ export default {
       return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
         headers: { 'cache-control': 'no-store' },
       });
+    }
+
+    if (path === '/api/companion/reaction') {
+      return handleCompanionMicro(request, env);
     }
 
     if (path === '/api/chat' || path === '/api/chat/') {
