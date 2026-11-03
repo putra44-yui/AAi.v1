@@ -14,6 +14,30 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        setCompanionInApp(true);
+    }
+
+    @Override
+    protected void onPause() {
+        setCompanionInApp(false);
+        super.onPause();
+    }
+
+    private void setCompanionInApp(boolean visible) {
+        if (!CompanionOverlayService.isRunning()) return;
+        Intent overlay = new Intent(this, CompanionOverlayService.class);
+        overlay.setAction(visible
+            ? CompanionOverlayService.ACTION_APP_FOREGROUND
+            : CompanionOverlayService.ACTION_APP_BACKGROUND);
+        try { startService(overlay); }
+        catch (IllegalStateException | SecurityException ignored) {
+            // Device policy may prevent service controls during transitions.
+        }
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
