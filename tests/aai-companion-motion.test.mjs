@@ -57,6 +57,13 @@ test('web companion wires pixel-part renderer without changing canonical PNG or 
   assert.match(rig,/requestAnimationFrame/);
   assert.match(rig,/document\.hidden/);
   assert.match(rig,/prefers-reduced-motion/);
+  assert.match(rig,/if\(!timer\)timer=requestAnimationFrame\(tick\)/);
+  assert.match(rig,/if\(ready\)return;/);
+  assert.match(rig,/function hitTest\(clientX,clientY\)/);
+  assert.match(rig,/getImageData\(px,py,1,1\)/);
+  assert.match(js,/AAiCompanionMotion\?\.hitTest\?\./);
+  assert.doesNotMatch(js,/if \(!prefs\.composer\) \{ prefs\.composer=true;/);
+  assert.match(js,/if \(zone === null\) \{/);
   assert.match(css,/\.aai-companion-mascot\.motion-ready img/);
   assert.doesNotMatch(rig,/aai-mascot\.jpg|vercel\.app/);
 });
