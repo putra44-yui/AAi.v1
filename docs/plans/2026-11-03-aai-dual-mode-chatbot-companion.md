@@ -177,8 +177,8 @@ Alur yang disarankan:
 3. **CharacterOverlay** untuk karakter, transparan, bisa drag; **SpeechBubbleOverlay** mengikuti pivot kepala dengan ukuran terbatas.
 4. **BottomComposerOverlay** adalah komponen terpisah berlabuh di bawah layar, dapat ditutup sendiri. Implementasi final native view atau WebView terbatas dipilih berdasarkan hasil uji IME dan permission Android.
 5. **ConversationAdapter** berbagi satu session_id dan satu sumber event SSE/API. Mode Chatbot dan Pendamping tidak boleh membuka dua streaming request untuk prompt yang sama.
-7. **CompanionGestureEngine** menjalankan hit testing, debounce, cooldown dan animasi lokal tanpa panggilan jaringan. **CompanionMicroReplyGateway** (fitur opsional, server-only) menghasilkan kalimat singkat bervariasi melalui model ringan tanpa reasoning panjang; tidak terhubung ke riwayat percakapan Chatbot dan tidak mengakses tools. Seluruh secret tetap di Worker.
 6. **Web demo** boleh mensimulasikan pengalaman Pendamping **di dalam AAi** untuk validasi interaksi; PWA/website tidak bisa menampilkan karakter di atas aplikasi Android lain. Untuk itu butuh overlay native.
+7. **CompanionGestureEngine** menjalankan hit testing, debounce, cooldown dan animasi lokal tanpa panggilan jaringan. **CompanionMicroReplyGateway** (fitur opsional, server-only) menghasilkan kalimat singkat bervariasi melalui model ringan tanpa reasoning panjang; tidak terhubung ke riwayat percakapan Chatbot dan tidak mengakses tools. Seluruh secret tetap di Worker.
 
 **Android:** WindowManager TYPE_APPLICATION_OVERLAY, window dengan alpha (PixelFormat.TRANSLUCENT), izin SYSTEM_ALERT_WINDOW dan permission settings saat diminta pengguna. Gunakan komponen sentuh yang berbatas; jangan membuat overlay transparan layar penuh yang menghalangi input aplikasi lain. Foreground service + notifikasi hanya jika diperlukan dan sesuai aturan versi Android. Jangan paksa auto-start tanpa persetujuan.
 
