@@ -19,6 +19,7 @@
   const showComposer = el('aaiCompanionShowComposer');
   const showPreview = el('aaiCompanionShowPreview');
   const lowMotion = el('aaiCompanionLowMotion');
+  const useMicro = el('aaiCompanionUseMicro');
   const preview = el('aaiCompanionPreview');
   const previewText = el('aaiCompanionPreviewText');
   const reveal = el('aaiCompanionReveal');
@@ -35,6 +36,7 @@
     composer: saved.composer !== false,
     preview: saved.preview !== false,
     lowMotion: saved.lowMotion === true,
+    micro: saved.micro === true,
     x: Number.isFinite(saved.x) ? saved.x : .5,
     y: Number.isFinite(saved.y) ? saved.y : .25,
   };
@@ -42,6 +44,7 @@
     pages: [], index: 0, fullText: '', streaming: false, shownFromServer: false,
     status: '', recent: [], tapHistory: [], currentRequestId: null, renderScheduled: false,
     gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null, emotion:'idle',
+    microAvailable:true, lastMicroAt:0,
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch {} };
   const isActive = () => document.body.classList.contains('aai-companion-active');
@@ -149,6 +152,7 @@
     showComposer.checked = prefs.composer;
     showPreview.checked = prefs.preview;
     lowMotion.checked = prefs.lowMotion;
+    useMicro.checked = prefs.micro;
     reveal.hidden = !prefs.active || prefs.composer;
     preview.hidden = !prefs.active || !prefs.preview || !previewText.textContent.trim();
     settings.hidden = true;
@@ -176,6 +180,11 @@
   showComposer.addEventListener('change', () => { prefs.composer = showComposer.checked; persist(); refreshView(); });
   showPreview.addEventListener('change', () => { prefs.preview = showPreview.checked; persist(); refreshView(); });
   lowMotion.addEventListener('change', () => { prefs.lowMotion = lowMotion.checked; persist(); refreshView(); });
+  useMicro.addEventListener('change', () => {
+    prefs.micro = useMicro.checked; persist();
+    state.microAvailable = true;
+    refreshView();
+  });
   reveal.addEventListener('click', () => {
     prefs.composer = true;
     persist();
@@ -239,6 +248,38 @@
     if(relY>.39 && relY<.72) return 'protect';
     return 'normal';
   }
+  async function getDynamicReaction(zone, fallback, seq) {
+    if (!prefs.micro || !state.microAvailable || Date.now() - state.lastMicroAt < 1800) return;
+    state.lastMicroAt = Date.now();
+    if (state.reactionAbort) state.reactionAbort.abort();
+    const controller = new AbortController();
+    state.reactionAbort = controller;
+    const timeout = setTimeout(() => controller.abort(), 1700);
+    try {
+      const response = await fetch('/api/companion/reaction', {
+        method:'POST', credentials:'same-origin',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({event:zone,recent:state.recent.slice(-3)}),
+        signal:controller.signal,
+      });
+      if (!response.ok) {
+        if ([401,403,415,503].includes(response.status)) state.microAvailable=false;
+        return;
+      }
+      const data=await response.json();
+      const reply=typeof data.reply === 'string' ? data.reply.trim().slice(0,120) : '';
+      if (!reply || seq !== state.reactionSequence || state.streaming || !isActive()) return;
+      if (reply === fallback || state.recent.slice(-6).includes(reply)) return;
+      state.recent.push(reply);
+      if (state.recent.length>8) state.recent.shift();
+      showSpeech(reply,zone === 'head' || zone === 'protect' ? 'shy' : 'idle');
+    } catch {
+      // Local response already appeared instantly; no extra warning balloons.
+    } finally {
+      clearTimeout(timeout);
+      if (state.reactionAbort===controller) state.reactionAbort=null;
+    }
+  }
   function reactToTouch(clientX,clientY) {
     if (state.streaming) return; // Never overwrite a live answer with a tap line.
     const now=Date.now();
@@ -247,13 +288,15 @@
     let zone=touchZone(clientX,clientY);
     if(state.tapHistory.length>3) zone='repeat';
     const local=core.reactionFor(zone,state.recent);
+    const sequence=++state.reactionSequence;
     state.recent.push(local);
     if(state.recent.length>8) state.recent.shift();
     const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
     if (!prefs.composer) { prefs.composer=true; persist(); refreshView(); }
     showSpeech(local,emotion);
-    // Reaction is immediate, even offline. An optional micro-LLM is deliberately
-    // not called until server-authenticated account and quota gates exist.
+    // Visual reaction does NOT wait for the model. The protected micro endpoint
+    // can replace the sentence only if it responds quickly and remains current.
+    void getDynamicReaction(zone,local,sequence);
     setTimeout(() => {
       if (!state.streaming && state.emotion==='shy') {
         state.emotion='idle';
@@ -309,6 +352,8 @@
     handleChatEvent(kind,data={}) {
       if(!isActive()) return;
       if(kind==='begin'){
+        state.reactionSequence++;
+        if (state.reactionAbort) state.reactionAbort.abort();
         state.streaming=true;state.currentRequestId=data.streamId||null;
         state.fullText='';state.pages=[];state.index=0;state.status='Aku cek dulu, ya.';
         setPreviewText(data.userMessage||'');
