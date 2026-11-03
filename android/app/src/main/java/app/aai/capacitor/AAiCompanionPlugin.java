@@ -62,6 +62,8 @@ public class AAiCompanionPlugin extends Plugin {
                 return;
             }
             service.putExtra("ownerId", ownerId);
+            // Show the native overlay only when AAi is outside the foreground.
+            service.putExtra("appVisible", true);
             service.putExtra("showComposer", call.getBoolean("showComposer", true));
             ContextCompat.startForegroundService(getContext(), service);
             call.resolve();
