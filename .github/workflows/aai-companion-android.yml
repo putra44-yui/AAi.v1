@@ -34,7 +34,9 @@ jobs:
       - name: Android SDK platform 36 (GitHub runner already provides sdkmanager)
         run: |
           echo "SDK root: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unknown}}"
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDK_MANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -x "$SDK_MANAGER"
+          "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
       - name: Install JS deps
         run: npm ci
       - name: Sync Capacitor Android using current Cloudflare website
