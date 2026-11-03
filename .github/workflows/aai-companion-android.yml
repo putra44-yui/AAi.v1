@@ -31,10 +31,10 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Platform 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Android SDK platform 36 (GitHub runner already provides sdkmanager)
+        run: |
+          echo "SDK root: ${ANDROID_HOME:-${ANDROID_SDK_ROOT:-unknown}}"
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - name: Install JS deps
         run: npm ci
       - name: Sync Capacitor Android using current Cloudflare website
