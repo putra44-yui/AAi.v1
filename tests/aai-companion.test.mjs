@@ -82,3 +82,29 @@ test('Android legacy Vercel app must not be treated as the Companion production 
   assert.match(decision,/ARSIP LAWAS — JANGAN DITIRU/);
   assert.match(decision,/kristal bertuliskan AAi/);
 });
+
+test('native overlay draft is consumed only when WebView is ready and user owner matches', () => {
+  const main = read('android/app/src/main/java/app/aai/capacitor/MainActivity.java');
+  const plugin = read('android/app/src/main/java/app/aai/capacitor/AAiCompanionPlugin.java');
+  const service = read('android/app/src/main/java/app/aai/capacitor/CompanionOverlayService.java');
+  const client = read('public/assets/js/aai-companion.js');
+  assert.match(main, /pendingDraftOwner/);
+  assert.match(main, /pendingDraftAt/);
+  assert.doesNotMatch(main, /postDelayed\(\(\)\s*->/);
+  assert.match(plugin, /public void consumeDraft\(PluginCall call\)/);
+  assert.match(plugin, /owner\.equals\(draftOwner\)/);
+  assert.match(plugin, /age < 600000L/);
+  assert.match(service, /AAI_COMPANION_OWNER/);
+  assert.match(client, /await nativePlugin\.show\(\{showComposer:prefs\.composer,ownerId\}\)/);
+  assert.match(client, /await nativePlugin\.consumeDraft\(\{userId:ownerId\}\)/);
+  assert.match(client, /acceptNativeDraft\(draft\)/);
+  assert.doesNotMatch(client, /nativePlugin\.send\(/);
+});
+
+test('Android Gradle does not retain passwords, signing keys, or developer Windows JAVA_HOME', () => {
+  const gradle = read('android/gradle.properties');
+  assert.doesNotMatch(gradle, /^\s*(?:AAI_RELEASE_(?:STORE_PASSWORD|KEY_PASSWORD|STORE_FILE|KEY_ALIAS)|org\.gradle\.java\.home)\s*=/m);
+  const cap = JSON.parse(read('capacitor.config.json'));
+  assert.equal(cap.server.url, 'https://aai-v0.aai-agents-yuiputra44.workers.dev');
+  assert.doesNotMatch(JSON.stringify(cap), /a-ai-rust\.vercel\.app/);
+});
