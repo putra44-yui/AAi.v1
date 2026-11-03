@@ -121,3 +121,14 @@ test('actual canonical PNG remains pixel-identity-locked and uses RGBA (not a st
     .update(png).digest('hex');
   assert.equal(blob,'03ecbf99299936270dfdd465ade49e84500fe777');
 });
+
+test('transparent pixels do not trigger mascot reactions in browser or Android', () => {
+  const web=read('public/assets/js/aai-companion.js');
+  const native=read('android/app/src/main/java/app/aai/capacitor/CompanionOverlayService.java');
+  assert.match(web, /const sample=state\.alphaMap\.ctx\.getImageData/);
+  assert.match(web, /if\(sample\[3\]<35\) return null/);
+  assert.match(web, /drawnH=img\.naturalHeight\*scale/);
+  assert.match(native, /private float hitVisibleSprite\(MotionEvent event\)/);
+  assert.match(native, /Color\.alpha\(canonicalSprite\.getPixel\(x,y\)\)<35/);
+  assert.match(native, /if\(hitVisibleSprite\(event\)<0\) return false/);
+});
