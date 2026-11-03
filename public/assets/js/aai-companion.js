@@ -41,7 +41,7 @@
   const state = {
     pages: [], index: 0, fullText: '', streaming: false, shownFromServer: false,
     status: '', recent: [], tapHistory: [], currentRequestId: null, renderScheduled: false,
-    gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null,
+    gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null, emotion:'idle',
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch {} };
   const isActive = () => document.body.classList.contains('aai-companion-active');
@@ -80,7 +80,7 @@
     pageLabel.textContent = state.pages.length > 1
       ? (state.index + 1) + ' / ' + state.pages.length
       : (state.streaming ? 'Menjawab...' : 'AAi');
-    widget.dataset.emotion = state.streaming ? (state.pages.length ? 'talk' : 'think') : 'idle';
+    widget.dataset.emotion = state.streaming ? (state.pages.length ? 'talk' : 'think') : state.emotion;
     scheduleLayout();
   }
   function showSpeech(text, type) {
@@ -88,12 +88,13 @@
     state.pages = [];
     state.index = 0;
     state.fullText = '';
-    widget.dataset.emotion = type || 'idle';
+    state.emotion = type || 'idle';
     renderSpeech();
   }
   function renderFullText(text, keepIndex = true) {
     const oldIndex = state.index;
     state.fullText = String(text || '');
+    state.emotion = 'idle';
     state.pages = core.paginateSpeech(state.fullText, 168);
     state.index = keepIndex ? Math.min(oldIndex, Math.max(state.pages.length - 1, 0)) : 0;
     state.status = state.pages.length ? '' : (state.streaming ? 'Aku sedang menyiapkan jawaban…' : '');
@@ -163,6 +164,7 @@
   }
   modeButton.addEventListener('click', () => chooseMode(!prefs.active));
   full.addEventListener('click', () => chooseMode(false));
+  el('aaiCompanionViewFull').addEventListener('click', () => chooseMode(false));
   settingsButton.addEventListener('click', () => {
     settings.hidden = !settings.hidden;
     settingsButton.setAttribute('aria-expanded', String(!settings.hidden));
@@ -247,11 +249,17 @@
     const local=core.reactionFor(zone,state.recent);
     state.recent.push(local);
     if(state.recent.length>8) state.recent.shift();
-    widget.dataset.emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
-    showSpeech(local,widget.dataset.emotion);
+    const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
+    if (!prefs.composer) { prefs.composer=true; persist(); refreshView(); }
+    showSpeech(local,emotion);
     // Reaction is immediate, even offline. An optional micro-LLM is deliberately
     // not called until server-authenticated account and quota gates exist.
-    setTimeout(() => { if (!state.streaming && widget.dataset.emotion==='shy') widget.dataset.emotion='idle'; },900);
+    setTimeout(() => {
+      if (!state.streaming && state.emotion==='shy') {
+        state.emotion='idle';
+        widget.dataset.emotion='idle';
+      }
+    },900);
   }
   mascot.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
