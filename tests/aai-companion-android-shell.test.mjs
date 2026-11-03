@@ -32,3 +32,11 @@ test('Android launcher reuses the existing AAi brand PNG exactly', () => {
     hash(bytes('public/icons/aai-512.png'))
   );
 });
+
+test('debug QA app installs beside the existing AAi without overwriting app data', () => {
+  const gradle = read('android/app/build.gradle');
+  const label = read('android/app/src/debug/res/values/strings.xml');
+  assert.match(gradle, /applicationIdSuffix ".qa"/);
+  assert.match(gradle, /versionNameSuffix "-qa"/);
+  assert.match(label, /AAi Uji/);
+});

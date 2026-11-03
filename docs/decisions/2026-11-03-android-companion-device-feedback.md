@@ -17,6 +17,7 @@
 - Saat beralih ke aplikasi lain, service foreground yang sebelumnya diaktifkan dengan izin pengguna menampilkan kembali maskot, balon, dan composer native. Teks jawaban terakhir tetap dipertahankan.
 - Launcher Android memakai ulang `public/icons/aai-512.png` secara **identik**, tanpa menggambar ulang atau mengganti kristal AAi. Android menggunakan salinan blob yang sama di `drawable-nodpi/aai_brand.png`.
 - Ditambah tes kontrak untuk lifecycle dan kesamaan byte aset ikon.
+- APK debug memakai package **`id.aai.personal.qa`** dan label **AAi Uji**, supaya bisa dipasang di samping aplikasi AAi lama tanpa menghapus sesi lokalnya. Perubahan ini hanya untuk debug, bukan release.
 
 ## Yang belum dianggap selesai
 
