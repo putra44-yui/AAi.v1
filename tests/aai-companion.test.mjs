@@ -62,7 +62,7 @@ test('reactions rotate instead of repeating recent responses, with no LLM requir
   assert.match(source,/function reactToTouch/);
   assert.match(source,/const local=core\.reactionFor\(zone,state\.recent\)/);
   assert.match(source,/mascot\.addEventListener\('pointermove'/);
-  assert.match(source,/aaiCompanionBridge/);
+  assert.match(source,/AAiCompanionBridge/);
   assert.match(source,/state\.alphaMap=null/);
 });
 
