@@ -1496,7 +1496,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
           // Memory persistence must not turn a successfully saved answer into a failed chat.
           try {
-            if (!visionImages.length) {
+            if (!visionImages.length && !verifiedHistoryUserId) {
+              // Recalled excerpts are only temporary answer evidence; do not
+              // silently promote private cross-session snippets to permanent memory.
               await persistAAiMemory(supabase as unknown as SupabaseClient, context.personId,
                 requestBody.value.userId!, message, userMessageId, rawReply, sessionId);
             }
