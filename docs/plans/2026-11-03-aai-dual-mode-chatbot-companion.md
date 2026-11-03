@@ -2,6 +2,7 @@
 
 **Tanggal:** 3 November 2026  
 **Status:** PLAN ONLY — belum membuat APK, animasi, atau overlay  
+**Revisi:** 3 November 2026 — identitas maskot, gesture, modesty response, micro-LLM, dan larangan memakai APK Vercel/Next lawas sebagai acuan  
 **Repository:** putra44-yui/AAi.v1  
 **Branch kerja produk:** design/aai-crystal-refresh  
 **Prinsip produk:** SATU AAi, SATU backend, SATU data akun/sesi/riwayat, DUA antarmuka; tidak perlu repo baru.
@@ -19,7 +20,10 @@
 7. Status proses dapat tampil sementara di balon yang sama, misalnya **"Aku cek dulu, ya."**, dan **digantikan** saat jawaban tiba. Status harus sesuai event kerja nyata, tidak boleh mengarang "ketemu" atau "sudah cari".
 8. Default page navigation **manual**; tidak meloncat otomatis saat user sedang membaca. Halaman terakhir/pertama menonaktifkan tombol yang tak bisa digunakan.
 9. Pindah Chatbot ↔ Pendamping **tidak memulai sesi baru, tidak mengirim prompt dua kali, dan tidak menghilangkan riwayat atau bukti tool**.
-10. Arah ini adalah lapisan pengalaman UI. Jangan mengganti model, menambah agent, mengubah korpus Benih AAi, atau memindahkan runtime kembali ke Next.js tanpa keputusan terpisah.
+10. Arah ini adalah lapisan pengalaman UI. Jangan mengganti model utama, menambah agent rapat, mengubah korpus Benih AAi, atau memindahkan runtime kembali ke Next.js tanpa keputusan terpisah.
+11. **Interaksi sentuh karakter** memicu ekspresi sopan dengan animasi sangat cepat. Kalimat respons dapat bervariasi memakai model ringan **non-reasoning** melalui backend; tidak menjalankan pipeline reasoning, tools, atau pencarian web.
+12. **Animasi lembut dan natural** adalah kriteria kualitas, bukan sekadar dekorasi. Saat sentuhan di kepala atau zona pribadi maskot, responsnya malu/menjaga batas, bukan konten erotis.
+13. **APK/website Vercel + Next yang lama adalah arsip eksperimen pemilik, BUKAN rujukan desain atau arsitektur.** Pertahankan hanya informasi yang memang berguna secara eksplisit dan telah diaudit; jangan copy UI lawas.
 
 ## 1. IDENTITAS MASKOT AAi — GATE WAJIB
 
@@ -78,6 +82,72 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 - Ukuran font balon, reduced motion, mode hemat baterai, tombol matikan overlay.
 - Opsi balon status saat proses; **auto page** tidak diaktifkan pada MVP.
 
+### 2.3 Personality & Touch Interaction — aturan maskot
+
+**Tujuan:** membuat AAi terasa hidup, hangat, pemalu secukupnya, punya batas, dan kadang usil. Ia **tidak** berubah menjadi karakter lain, tidak genit atau erotis, tidak agresif, dan tidak memarahi pengguna dengan bahasa moralistik. Contoh yang disetujui pengguna: "Duh… jangan dipegang, malu." atau variasi natural seperti "Ih, jangan pegang kepala sembarangan… rambutku jadi berantakan."
+
+**Zona interaksi awal (hitbox transparan mengikuti sprite, bukan membaca layar HP):**
+
+| Gesture/area | Reaksi visual instan | Reaksi verbal (contoh, bukan template wajib) |
+| --- | --- | --- |
+| Tap netral pada karakter | Noleh, kedip, senyum kecil | "Hmm? Ada apa?" / "Heii, kaget aku." |
+| Tap kepala/rambut | Refleks tangan **menutup atau merapikan kepala**, sedikit menunduk | "Duh… kepala juga jangan sembarang dipegang, malu." |
+| Tap bagian pribadi/area sensitif sprite | Tangan **menutupi bagian tubuh yang relevan**, sedikit berputar atau mundur; tetap sopan | "Ih, jangan begitu dong… malu, tau." / "Heii, jaga tangan… bukan mahram." |
+| Tap berulang yang mengganggu | Ekspresi makin tegas tanpa eskalasi fisik berlebihan | "Dari tadi usil terus, ya?" |
+| Drag/geser | Gerak mengikuti jari, ekspresi singkat tanpa berulang-ulang bicara | "Pelan-pelan, dong." (opsional) |
+| Long-press | Tampilkan menu setting/kunci posisi/sembunyikan, **bukan** event sentuhan pribadi | Tidak wajib mengucapkan apa pun |
+| Idle | Napas halus, kedip natural, micro-movement hemat baterai | **Default diam**; tidak menyapa tanpa diminta atau terus mengganggu |
+
+**Batas etika dan UX:** reaksi adalah gesture sosial kartun yang sopan, bukan mengundang sentuhan berulang demi konten sugestif. Hindari framing erotis, ekspresi berlebihan, maupun detail tubuh eksplisit. "Bukan mahram" adalah **contoh gaya AAi** yang boleh dipakai sesuai pengaturan persona/konteks, **bukan** kalimat otomatis setiap tap. Hindari menyebut pengguna "nakal" dengan cara mempermalukan; respons cukup melindungi batas karakter dengan humor ringan.
+
+**Pemisahan teknis:** tap dan drag memiliki makna berbeda. Gunakan threshold gerakan dan durasi sentuh agar gerakan memindahkan AAi tidak dianggap menyentuh kepala/badan. Hitbox area kepala dan pribadi harus mengikuti koordinat **maskot kanonis dan frame animasi aktual**; jangan membagi gambar menjadi tiga bidang horizontal sembarangan yang menyebabkan salah reaksi. Jika aset statis belum dapat dianotasi dengan aman, MVP hanya mendukung tap umum + drag dulu sampai peta zona lulus audit.
+
+### 2.4 Animasi halus — identitas lebih penting dari efek
+
+- Idle menggunakan napas tipis, kedip yang tidak periodik kaku, sedikit perubahan orientasi kepala, dan goyangan kristal/rambut **ringan** sesuai bentuk asli. Jangan menambahkan anggota tubuh, pakaian, atau ornamen yang berbeda dari karakter kanonis.
+- Transisi gerakan **ease-in/ease-out** dan blend antarstate (IDLE, NOTICE, SHY_HEAD, SHY_PROTECT, THINKING, TALKING, SLEEP). Gerak tangan menutup kepala/bagian pribadi **hanya** dijalankan bila frame/sprite bisa dibuat tanpa mengubah identitas atau tulisan "AAi" pada kristal.
+- Saat ditekan, animasi lokal bereaksi **segera** tanpa menunggu server atau model. Balon teks boleh menyusul ketika kalimat dihasilkan.
+- Jangan membuat gerakan besar, bouncing tanpa henti, kilatan/flicker, atau animasi ramai yang menghalangi orang menggunakan HP. Gerakan tidak boleh merusak keterbacaan teks di balon.
+- Animasi saat idle bisa dibatasi frame rate atau dijeda pada low-power, background/layar terkunci, reduced-motion dan ketika overlay tersembunyi. Tetapkan target CPU/FPS/baterai **sesudah** mengukur perangkat nyata; jangan mengklaim pasti ringan sejak dokumen rencana.
+- Gunakan model transformasi/sprite 2D sederhana terlebih dahulu. Live2D/3D atau lip-sync hanya hipotesis tahap lanjut, tidak perlu untuk MVP.
+
+### 2.5 Micro-Reaction Engine — cepat, bervariasi, tanpa reasoning panjang
+
+**Keputusan revisi:** pengguna tidak ingin kumpulan respons statis yang terasa seperti template. Karena itu **LLM ringan tanpa reasoning panjang adalah kandidat utama untuk kalimat spontan**, sementara **animasi harus tetap deterministik/lokal dan langsung**. Dua bagian ini tidak boleh saling menunggu.
+
+Alur yang disarankan:
+
+1. Android mengidentifikasi event dan zona melalui gesture/hitbox lokal; trigger animasi instan tanpa HTTP request.
+2. Modul Companion menyiapkan konteks minimal yang aman: jenis event (HEAD_TAP, PROTECTIVE_TAP, NORMAL_TAP, REPEATED_TAP, DRAG_END), state emosional ringan, dan **sedikit variasi kalimat terakhir** agar tidak berulang. Tidak mengirim koordinat layar, aplikasi lain yang terbuka, atau histori penuh.
+3. Bila fitur respons dinamis ON, backend AAi memanggil **model ringan berlatensi rendah dengan reasoning dimatikan jika provider mendukung**, temperature/variasi terkendali dan output dibatasi satu kalimat singkat. **Bukan** model chat utama, bukan agent, bukan tool-calling, bukan pencarian web, bukan reasoning panjang, dan tidak memodifikasi sesi chat.
+4. Jika hasil lolos validasi gaya, balon yang sama menampilkan satu respons natural; jika model terlambat/error/offline/terbatas kuota, pilih satu **fallback lokal dari kumpulan reaksi yang dikurasi** agar sentuhan tidak terasa macet.
+5. Respons micro-reaction **tidak** otomatis masuk ke histori chat, memori permanen, data training, atau log sensitif. Jika pengguna memilih agar respons ini masuk ke riwayat, perlu desain dan persetujuan terpisah.
+
+**Output contract micro-LLM:**
+- Bahasa mengikuti pengaturan AAi; kalimat pendek, natural dan sopan, tidak menggunakan format panjang, markdown, pertanyaan kuis atau ceramah.
+- Dilarang menambahkan klaim sudah mengakses layar, chat lama, kamera, memori, tools, atau data keluarga.
+- Dilarang konten seksual eksplisit, penghinaan, narasi tubuh erotis, ajakan berulang menyentuh zona tertentu, atau kalimat yang terlalu intim di luar gaya yang dipilih pengguna.
+- Validasi panjang, keselamatan, relevansi zona, dan teks duplikat; **retry maksimal terbatas**. Jika gagal pakai fallback yang aman.
+- Anti-spam: debounce tap, cooldown per zona/ucapan, minimal jeda antar-request, pembatasan biaya, pembatalan request lama bila gesture baru datang; **jangan meluncurkan satu request untuk setiap tap cepat**.
+- Percakapan nyata tetap memakai pipeline Chatbot/AAi penuh saat pengguna mengirim pertanyaan di composer, **jangan** mengalihkan semua chat ke micro-LLM.
+- Konfigurasi model, mode tanpa reasoning, dan batas output harus mengikuti ketersediaan model API sebenarnya; lakukan pengukuran TTFT, biaya, dan kegagalan sebelum memilih model final. Tidak menjanjikan respons jaringan instan/0 ms.
+
+**Pilihan praktis:** micro-LLM boleh dimatikan di Pengaturan (hemat data/baterai atau privat). Dalam mode offline/fallback, variasi memakai state, cooldown, dan penghindaran pengulangan; jujur bahwa sebagian kalimat lokal. Tidak membuat model berpura-pura punya reasoning internal.
+
+### 2.6 Contoh walkthrough gesture (sintetis)
+
+**Tap kepala:** AAi berkedip, sedikit menunduk dan mengangkat tangan melindungi/merapikan kepala; lalu satu balon mengucapkan, misalnya: "Duh… jangan dipegang, malu."
+
+**Tap area pribadi:** AAi mundur kecil dan menutupi area terkait dengan gerakan non-vulgar; balon menampilkan respons singkat yang variatif, misalnya: "Ih, jangan begitu dong… malu, tau."
+
+**Tap berulang:** tanpa memanggil LLM berkali-kali, AAi mengubah ekspresi menjadi tegas dan setelah cooldown dapat menjawab: "Heii, dari tadi usil terus."
+
+**Drag:** maskot ikut bergerak; ketika dilepas dia settle dengan halus; input bawah dan halaman balon **tidak ikut terseret**. Drag tidak dianggap sentuhan pribadi.
+
+**Saat pengguna mengetik pertanyaan:** balik ke alur **chat utama** satu sesi, bukan event micro-LLM; jawaban utama menggunakan halaman komik manual seperti yang disepakati.
+
+**Penting:** ini contoh perilaku produk, **bukan perintah untuk menghasilkan aset baru sekarang**.
+
 ## 3. Pagination balon komik — aturan implementasi
 
 1. **Simpan teks jawaban lengkap** sebagai konten kanonis di histori sesi. Page hanya representasi tampilan yang boleh dihitung ulang.
@@ -97,7 +167,7 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 - Jalur produksi adalah **web statis di public/** dan **Cloudflare Worker** (src/worker.ts, src/chat.ts), bukan React/Next aktif. Jangan membongkar UI aktif hanya karena prototype.
 - Repo sudah berisi Capacitor Android **8.3.x** (package.json), android/, dan MainActivity.java berbasis BridgeActivity. **Tidak perlu membuat repository Android baru.**
 - AndroidManifest.xml sekarang hanya memiliki izin INTERNET; belum ada komponen overlay.
-- **PERHATIAN:** capacitor.config.json masih menunjuk ke **https://a-ai-rust.vercel.app** (alamat lama). Audit endpoint dan desain packaging sebelum membangun APK. Target Worker aktif adalah **https://aai-v0.aai-agents-yuiputra44.workers.dev/**.
+- **ARSIP LAWAS — JANGAN DITIRU:** capacitor.config.json masih menunjuk ke **https://a-ai-rust.vercel.app**, yaitu APK/prototipe lama buatan pemilik dengan Next.js. Pemilik menegaskan desain/arsitektur lamanya **bukan acuan dan tidak boleh dicopy**. Proyek Android yang ada boleh dijadikan titik audit Gradle/manifest saja, bukan referensi UI. Desain baru wajib berasal dari spesifikasi ini + web Cloudflare aktif. Target Worker aktif adalah **https://aai-v0.aai-agents-yuiputra44.workers.dev/**.
 - UI produksi sekarang memakai aset maskot yang dikunci di atas.
 
 **Arsitektur kandidat (belum diwujudkan):**
@@ -108,6 +178,7 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 4. **BottomComposerOverlay** adalah komponen terpisah berlabuh di bawah layar, dapat ditutup sendiri. Implementasi final native view atau WebView terbatas dipilih berdasarkan hasil uji IME dan permission Android.
 5. **ConversationAdapter** berbagi satu session_id dan satu sumber event SSE/API. Mode Chatbot dan Pendamping tidak boleh membuka dua streaming request untuk prompt yang sama.
 6. **Web demo** boleh mensimulasikan pengalaman Pendamping **di dalam AAi** untuk validasi interaksi; PWA/website tidak bisa menampilkan karakter di atas aplikasi Android lain. Untuk itu butuh overlay native.
+7. **CompanionGestureEngine** menjalankan hit testing, debounce, cooldown dan animasi lokal tanpa panggilan jaringan. **CompanionMicroReplyGateway** (fitur opsional, server-only) menghasilkan kalimat singkat bervariasi melalui model ringan tanpa reasoning panjang; tidak terhubung ke riwayat percakapan Chatbot dan tidak mengakses tools. Seluruh secret tetap di Worker.
 
 **Android:** WindowManager TYPE_APPLICATION_OVERLAY, window dengan alpha (PixelFormat.TRANSLUCENT), izin SYSTEM_ALERT_WINDOW dan permission settings saat diminta pengguna. Gunakan komponen sentuh yang berbatas; jangan membuat overlay transparan layar penuh yang menghalangi input aplikasi lain. Foreground service + notifikasi hanya jika diperlukan dan sesuai aturan versi Android. Jangan paksa auto-start tanpa persetujuan.
 
@@ -122,6 +193,7 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 - **Jangan membaca isi layar aplikasi lain** secara otomatis. Tidak ada AccessibilityService, tangkapan layar diam-diam, perekaman layar, atau penangkapan sentuhan di luar komponen AAi. Share intent teks/gambar hanya lewat tindakan sadar pengguna.
 - Jika izin overlay ditolak/dicabut, gunakan Chatbot atau mode Pendamping **di dalam aplikasi saja**; jangan memaksa perizinan berulang.
 - Tidak ada Supabase service-role, OpenRouter key, atau token server yang ditaruh di APK; semuanya tetap di Worker.
+- **Micro-LLM:** semua panggilan dilakukan lewat backend AAi yang mengendalikan izin, kuota, validasi output dan anti-spam. Tidak menyimpan posisi tap, nama aplikasi lain, konten pribadi, atau rangkaian histori lengkap untuk prompt gesture.
 - **Gate sebelum APK keluarga digunakan untuk data pribadi:** login produksi masih username-only. Autentikasi global dan otorisasi semua endpoint harus selesai, dengan bukti akun A tidak dapat melihat sesi akun B. PR #8 terkait Auth dan PR #12 tool pencarian antar-sesi adalah pekerjaan terpisah yang belum boleh dianggap selesai/aktif.
 - Pertimbangkan teks balon yang bisa terlihat oleh orang lain saat membuka aplikasi sensitif. Jangan memunculkan percakapan sensitif di lock screen atau mengirim isinya ke analytics/log publik.
 - Overlay dan service harus bisa dihentikan mudah; test Android 12–16 / berbagai vendor tanpa klaim pasti kompatibel sebelum diuji.
@@ -132,8 +204,8 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 | Tahap | Pekerjaan | Bukti lulus |
 | --- | --- | --- |
 | **F0 — Baseline & Maskot** | Audit asset kanonis secara visual dan alpha; audit sumber UI, Capacitor config, Android build, alur SSE | Maskot sama persis, huruf AAi utuh, source hash tercatat, masalah config terinventaris |
-| **F1 — Prototipe tampilan** | Pilihan mode Chatbot/Pendamping di UI; karakter draggable; satu balon berpage; chat bawah opsional di dalam aplikasi | UX sesuai contoh pengguna; Chatbot lama tidak rusak; belum mengklaim overlay |
-| **F2 — Integrasi satu sesi** | Adapter status/streaming, pelestarian jawaban utuh, page stability, pergantian mode | Satu pesan satu respons, ID sesi konsisten, tidak ada duplicate send |
+| **F1 — Prototipe tampilan** | Pilihan mode Chatbot/Pendamping di UI; karakter draggable; satu balon berpage; chat bawah opsional; **gestur kepala/netral/pribadi sintetis + reaksi animasi sopan** | UX sesuai contoh pengguna; Chatbot lama tidak rusak; zona drag/tap tidak tertukar; belum mengklaim overlay |
+| **F2 — Integrasi satu sesi** | Adapter status/streaming, pelestarian jawaban utuh, page stability, pergantian mode; **micro-reaction gateway opsional non-reasoning dan fallback lokal** | Satu pesan satu respons, ID sesi konsisten, tidak ada duplicate send; micro-LLM tidak menambah chat/memori atau tool web |
 | **F3 — Native Android** | Character + bubble overlays, bottom composer independen, izin OS, IME, insets, notifikasi/fallback | APK debug terbukti berfungsi di atas aplikasi lain tanpa menyadap sentuhan |
 | **F4 — Security & stabilitas** | Supabase Auth, uji akun A/B, hidup/mati overlay, baterai, crash, performa | Tak ada akses silang, izin dapat dicabut, baterai terukur |
 | **F5 — Uji perangkat & rilis** | Android 12–16, font besar, mode hemat, rotasi, keyboard, aksesibilitas, regression suite | QA nyata PASS dan keputusan rilis berdasarkan bukti |
@@ -152,14 +224,18 @@ Jika latar belum transparan, buat **salinan turunan** dari sumber produksi dan l
 8. **Keamanan:** akun A/B, overlay permission, lock screen, tidak ada konten pribadi yang dilog, tidak ada key di APK.
 9. **Kinerja:** profil CPU, FPS, RAM, baterai idle dan streaming pada perangkat nyata; target angka baru ditentukan setelah baseline.
 10. **Regression:** seluruh tes existing dan Cloudflare build hijau; APK diuji dengan akun dummy.
+11. **Sentuhan:** zona kepala/area pribadi hanya aktif bila hitbox benar; respons menutup kepala/bagian terkait dengan sopan; tap biasa dan drag dibedakan; spam tap tidak menembakkan request berulang.
+12. **Micro-LLM:** hasil bervariasi non-template tanpa reasoning/tools, output satu kalimat sesuai konteks, tidak mengarang memori; jika lambat/error/offline, animasi tetap instan dan fallback lokal dapat berfungsi; tidak menulis ke riwayat.
+13. **Animasi:** cek gerak halus, transisi tanpa jitter, tulisan AAi tetap terlihat, reduced motion, state tidak macet saat rotate/IME/background.
+14. **Legacy:** APK/web Vercel + Next lama tidak digunakan sebagai referensi visual dan bukan endpoint build baru.
 
 ## 8. Yang BELUM disetujui atau di luar MVP
 
 - Mengganti desain maskot; menghapus kristal/tulisan AAi; karakter generik.
-- Live2D/3D kompleks, voice aktif sepanjang hari, lip sync penuh, animasi berat, selalu menyala saat boot.
+- Live2D/3D kompleks, voice aktif sepanjang hari, lip sync penuh, animasi berat, selalu menyala saat boot. **Animasi mikro yang halus, gesture sopan, dan balasan dinamis singkat justru masuk ruang lingkup prototipe.**
 - Auto-page yang menghilangkan kontrol pembaca, balon panjang tak terbatas, fitur menyadap aplikasi lain.
 - Mengubah model atau tool policy, menambah database kedua, mengaktifkan PR #12 tanpa Auth.
-- Migrasi Next/React baru, backend baru, atau repository baru.
+- Migrasi Next/React baru, backend baru, repository baru, atau menyalin ulang visual APK Vercel/Next lama.
 - Mengklaim PNG sudah transparan/Android sudah berhasil build/live hanya karena perencanaan selesai.
 
 ## 9. Format laporan setiap fase untuk audit dan dataset AAi
@@ -168,8 +244,8 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 
 ## 10. Checkpoint 3 November 2026
 
-**Sudah:** kesepakatan dua mode dan interaksi balon komik; identifikasi maskot produksi, path dan hash; konfirmasi Android/Capacitor sudah ada; catatan konfigurasi Vercel lama; kerangka kerja ini.
+**Sudah:** kesepakatan dua mode dan interaksi balon komik; identifikasi maskot produksi, path dan hash; konfirmasi Android/Capacitor sudah ada; **larangan mengikuti APK Vercel/Next lawas**; spesifikasi gesture sopan, animasi lembut, dan micro-LLM non-reasoning (sebagai keputusan desain, bukan implementasi); kerangka kerja ini.
 
-**Belum:** inspeksi visual/pixel PNG, turunan transparan, komponen mode Pendamping, Android overlay, build APK, uji lintas perangkat, perbaikan Auth. Semua itu adalah pekerjaan fase berikutnya, **bukan hasil yang telah dicapai**.
+**Belum:** inspeksi visual/pixel PNG, turunan transparan, state/animasi sprite, zona hitbox, micro-LLM, komponen mode Pendamping, Android overlay, build APK, uji lintas perangkat, perbaikan Auth. Semua itu adalah pekerjaan fase berikutnya, **bukan hasil yang telah dicapai**.
 
 **Langkah pertama nanti:** F0 — **pastikan aset maskot benar secara visual**, terutama rambut putih, kristal, dan tulisan **AAi**, baru membuat sprite/animasi apa pun.
