@@ -1458,7 +1458,7 @@ body.desktop-sidebar-hidden #topbarTitle {
           <button type="button" role="menuitem" class="composer-menu-action"
                   onclick="runComposerAction('upload')">
             <span class="composer-action-icon"><i class="fas fa-paperclip" aria-hidden="true"></i></span>
-            <span class="composer-action-text"><strong>Lampirkan file</strong><small>Foto, PDF, atau dokumen</small></span>
+            <span class="composer-action-text"><strong>Kirim gambar</strong><small>Foto, screenshot · JPG, PNG, WebP</small></span>
           </button>
           <button type="button" role="menuitemcheckbox" aria-checked="false"
                   class="composer-menu-action composer-web-permission" id="webPermissionBtn"
@@ -1480,7 +1480,7 @@ body.desktop-sidebar-hidden #topbarTitle {
                 placeholder="Tanya, cerita, atau mulai dari sebuah ide..."
                 onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
       <input type="file" id="fileInput" multiple
-             accept="image/*,.pdf,.txt,.doc,.docx,.zip,.html,.htm,.js,.mjs,.cjs" hidden>
+             accept="image/jpeg,image/png,image/webp" hidden>
       <button type="button" class="send-btn" id="sendBtn" onclick="handleSend()"
               title="Kirim pesan" aria-label="Kirim pesan">
         <i class="fas fa-arrow-up" aria-hidden="true"></i>
