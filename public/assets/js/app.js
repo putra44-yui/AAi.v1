@@ -1089,6 +1089,7 @@ function buildActivityLiveHTML(streamId) {
 const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   memory: 'fa-brain',
   vision: 'fa-image',
+  recall: 'fa-brain',
   assess: 'fa-lightbulb',
   strategy: 'fa-compass',
   tavily: 'fa-search',
@@ -1221,6 +1222,7 @@ function publicActivityStep(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const step = String(entry.step || '');
   const raw = String(entry.message || '').slice(0, 220).trim();
+  if (step === 'recall') return { step, message: raw || 'Aku memeriksa bagian percakapan ini dulu...' };
   if (step === 'vision') return { step, message: 'Aku sedang melihat gambar yang kamu kirim...' };
   if (step === 'tavily') return { step, message: 'Menelusuri web...' };
   if (step === 'exa') return { step, message: 'Aku coba sumber pencarian lain, ya.' };

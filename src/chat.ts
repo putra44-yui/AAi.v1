@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { findEarlierSessionRecall, sessionRecallGuidance, type SessionRecall } from './aai-session-recall.ts';
 import { parseVisionFiles, buildVisionContent, VISION_MAX_BODY_BYTES, type VisionImage, type VisionContentPart } from './aai-vision.ts';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, shouldRunWebToolDecision, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
@@ -181,7 +182,7 @@ interface ToolSwitchEvent {
 
 interface ProgressEvent {
   phase: 'progress';
-  step: 'memory' | 'assess' | 'strategy' | 'report' | 'vision' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose' | 'provider';
+  step: 'memory' | 'assess' | 'strategy' | 'report' | 'recall' | 'vision' | 'tavily' | 'exa' | 'found' | 'sources' | 'unavailable' | 'compose' | 'provider';
   message: string;
   at_ms?: number;
   source_count?: number;
@@ -456,6 +457,7 @@ type PreparedSession = {
   userMessageId: string;
   message: string;
   history: ProviderMessage[];
+  sessionRecall: SessionRecall | null;
   isNewSession: boolean;
   provisionalTitle: string;
 };
@@ -664,7 +666,10 @@ async function prepareSession(
     contextParentId = parentId;
   }
   const history = buildSessionContext(recent ?? [], contextParentId);
-  return { ok: true, value: { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } };
+  // Reuse the bounded session rows already loaded above, and only the selected
+  // branch: no cross-session access, no separate memory/table search.
+  const sessionRecall = findEarlierSessionRecall(recent ?? [], contextParentId, message);
+  return { ok: true, value: { supabase, sessionId, userMessageId, message, history, sessionRecall, isNewSession, provisionalTitle } };
 }
 
 function createStreamHeaders(traceId: string): Headers {
@@ -894,7 +899,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
     logTiming('session_ready');
-    const { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } = prepared.value;
+    const { supabase, sessionId, userMessageId, message, history, sessionRecall, isNewSession, provisionalTitle } = prepared.value;
     if (requestBody.value.userMessageId && !requestBody.value.visionImages.length &&
         message.includes('[📷 Lampiran gambar:')) {
       return createJsonError(400, 'Gambar lama tidak disimpan. Kirim ulang fotonya untuk dianalisis lagi.', traceId);
@@ -915,6 +920,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     logTiming('context_ready');
     context.systemMessages.push({ role: 'system', content: buildAAiClockContext(requestBody.value.timeZone, history.length === 0) });
     const providerPayload = buildProviderPayload(message, context, modelName, traceId, history);
+    if (sessionRecall) {
+      providerPayload.messages.splice(context.systemMessages.length, 0, {
+        role: 'system', content: sessionRecallGuidance(sessionRecall),
+      });
+    }
     if (visionImages.length) {
       providerPayload.messages[providerPayload.messages.length - 1].content =
         buildVisionContent(message, visionImages);
@@ -1031,6 +1041,14 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
         try {
           enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
+          if (sessionRecall) {
+            enqueueEvent({ phase: 'preface', message: sessionRecall.excerpts.length
+              ? 'Nah, ada bagian obrolan sebelumnya yang nyambung. Aku cocokkan dulu, ya.'
+              : 'Aku cek bagian percakapan ini, tapi belum ketemu petunjuk yang cocok.' });
+            enqueueEvent({ phase: 'progress', step: 'recall', message: sessionRecall.excerpts.length
+              ? 'Ada bagian riwayat yang cocok, aku periksa konteksnya...'
+              : 'Belum ada kecocokan dalam bagian sesi yang tersedia.' });
+          }
           if (visionImages.length) {
             enqueueEvent({ phase: 'preface', message: visionImages.length > 1
               ? 'Bentar, aku lihat gambar-gambarnya dulu, ya.'
