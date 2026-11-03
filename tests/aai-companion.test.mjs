@@ -117,7 +117,7 @@ test('actual canonical PNG remains pixel-identity-locked and uses RGBA (not a st
   assert.equal(png.readUInt32BE(20),1278);
   assert.equal(png[25],6,'PNG must have RGBA color type for transparent mascot');
   const blob=createHash('sha1')
-    .update(Buffer.from('blob '+png.length+' ')).update(Buffer.from([0]))
+    .update(Buffer.from('blob '+png.length)).update(Buffer.from([0]))
     .update(png).digest('hex');
   assert.equal(blob,'03ecbf99299936270dfdd465ade49e84500fe777');
 });
