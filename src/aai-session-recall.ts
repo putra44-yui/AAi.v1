@@ -32,6 +32,10 @@ function terms(text: string): string[] {
 }
 
 export function isSessionRecallRequest(message: string): boolean {
+  // "Ingat ini / ingat bahwa ..." is a request to save, NOT to recall.
+  if (/^\s*(?:tolong\s+)?(?:ingat\s+(?:ini|ya|bahwa|kalau)|catat|simpan|remember\s+this)\b/i.test(message)) {
+    return false;
+  }
   return RECALL_INTENT.test(message);
 }
 
