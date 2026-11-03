@@ -27,6 +27,14 @@
         "limit": 12,
         "period": 60
       }
+    },
+    {
+      "name": "AAI_COMPANION_RATE_LIMITER",
+      "namespace_id": "311022",
+      "simple": {
+        "limit": 8,
+        "period": 60
+      }
     }
   ]
 }
