@@ -1,7 +1,7 @@
 # AAi — Kerangka Kerja Dua Mode (Chatbot + Pendamping Android)
 
 **Tanggal:** 3 November 2026  
-**Status:** PLAN ONLY — belum membuat APK, animasi, atau overlay  
+**Status:** F1 prototipe animasi pixel-part di cabang fitur; APK baru tidak dibuat. Uji visual HP masih diperlukan.  
 **Revisi:** 3 November 2026 — identitas maskot, gesture, modesty response, micro-LLM, dan larangan memakai APK Vercel/Next lawas sebagai acuan  
 **Repository:** putra44-yui/AAi.v1  
 **Branch kerja produk:** design/aai-crystal-refresh  
@@ -249,3 +249,18 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 **Belum:** pose animasi tangan yang benar-benar melindungi kepala/bagian pribadi (sprite saat ini hanya gerak lembut, bukan animasi tulang), uji overlay/IME pada HP fisik, uji sejumlah merek Android, autentikasi global produksi, aktifkan micro-LLM, dan pengiriman pesan langsung dari overlay (sementara hanya mengirim draf ke Chatbot). APK masih debug dan belum lulus gate F4/F5. Kredensial penandatanganan lama yang pernah masuk riwayat Git publik harus dirotasi sebelum rilis.
 
 **Langkah pertama berikutnya:** tuntaskan uji nyata F3 (tap alpha, rotasi, keyboard, izin overlay, perbedaan vendor), validasi pose turunan maskot **tanpa mengubah tulisan AAi**, lalu selesaikan pengamanan login F4 sebelum mengaktifkan model reaksi cepat atau mendistribusikan APK pribadi.
+
+
+## F1.A — Implementasi rig animasi Pendamping (4 November 2026)
+
+**Branch uji:** feat/aai-companion-rig-motion-20261104 (berasal dari fix/aai-companion-no-double-icon-20261103).
+
+**Alasan perubahan / catatan dataset:**
+- Pengguna melaporkan PNG hanya bergeser/berputar, tanpa gerak tangan. Gerakan seluruh gambar tidak memenuhi kebutuhan ekspresif dan respons kontekstual.
+- Gunakan *pixel-part cutout rig* dari master public/aai-mascot-studio.png (1230×1278), bukan mengganti karakter. Delapan wilayah raster mencakup tangan kiri/kanan, rambut samping kiri/kanan, ujung pakaian kiri/kanan, pita kiri/kanan. Teks **AAi** di kristal tetap berada pada lapisan inti yang tidak dipotong.
+- Renderer Canvas 2D membuang piksel posisi awal setiap potongan dan menggambar kembali potongan yang diputar pada sendinya. Gerak tangan bukan translasi satu PNG. Perkiraan bentuk dan sambungan perlu audit visual pada ukuran HP; ini masih rig prototipe, bukan ilustrasi frame tidur meringkuk yang disempurnakan.
+- States: sleep (awal), wake, idle, think (sebelum token), talk (streaming), shy (sentuhan), happy (selesai), fly (tombol uji). Otomatis tidur lagi setelah 42 detik idle.
+- Gambar kanonis dipertahankan sebagai fallback serta sumber hit-test alpha; Canvas akan aktif hanya jika dimensi master sesuai. Gerak maksimal ~30 FPS dan berhenti saat tab tersembunyi; opsi Kurangi Gerakan/reduced-motion menghasilkan gambar statis.
+- Mode Chatbot, satu SSE, pagination balon komik, dan composer bawah tidak diubah. Tombol ✦ Coba AAi terbang hanya menguji web animasi; tidak menambah APK atau overlay native baru.
+
+**Validasi yang wajib sebelum menganggap final:** cek jahitan batas segmen, bentuk mata/mulut tertutup, rambut/gaun saat bergerak, sentuhan kepala/tubuh, tombol terbang, perubahan dari berpikir ke bicara, reduced motion, tab background, drag, orientasi HP, performa/baterai. Jika tampak ada bagian terpotong atau identitas kristal rusak, jangan deploy ke produksi: revisi koordinat rig atau produksi keyframe ilustrasi manual dari master.

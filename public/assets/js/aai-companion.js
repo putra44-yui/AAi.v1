@@ -19,6 +19,7 @@
   const showComposer = el('aaiCompanionShowComposer');
   const showPreview = el('aaiCompanionShowPreview');
   const lowMotion = el('aaiCompanionLowMotion');
+  const flyButton = el('aaiCompanionFly');
   const useMicro = el('aaiCompanionUseMicro');
   const nativeButton = el('aaiCompanionAndroidOverlay');
   const nativePlugin = window.Capacitor?.Plugins?.AAiCompanion || null;
@@ -237,6 +238,9 @@
   });
   showPreview.addEventListener('change', () => { prefs.preview = showPreview.checked; persist(); refreshView(); });
   lowMotion.addEventListener('change', () => { prefs.lowMotion = lowMotion.checked; persist(); refreshView(); });
+  flyButton?.addEventListener('click', () => {
+    if (!state.streaming) window.AAiCompanionMotion?.fly();
+  });
   useMicro.addEventListener('change', () => {
     prefs.micro = useMicro.checked; persist();
     state.microAvailable = true;
@@ -362,6 +366,7 @@
     if(state.recent.length>8) state.recent.shift();
     const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
     if (!prefs.composer) { prefs.composer=true; persist(); refreshView(); }
+    window.AAiCompanionMotion?.react(zone);
     showSpeech(local,emotion);
     // Visual reaction does NOT wait for the model. The protected micro endpoint
     // can replace the sentence only if it responds quickly and remains current.
@@ -424,6 +429,7 @@
         state.reactionSequence++;
         if (state.reactionAbort) state.reactionAbort.abort();
         state.streaming=true;state.currentRequestId=data.streamId||null;
+        window.AAiCompanionMotion?.activity('begin');
         state.fullText='';state.pages=[];state.index=0;state.status='Aku cek dulu, ya.';
         setPreviewText(data.userMessage||'');
         renderSpeech();
@@ -432,18 +438,22 @@
       if(data.streamId && state.currentRequestId && data.streamId!==state.currentRequestId) return;
       if(kind==='status' && !state.fullText.trim()){
         state.status=String(data.message||'Aku cek dulu, ya.').slice(0,200);
+        window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }
       if(kind==='reset'){
         state.fullText='';state.pages=[];state.index=0;state.status='Aku cek sumbernya dulu, ya.';
+        window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }
       if(kind==='token'){
         state.status='';state.fullText+=String(data.token||'');
+        window.AAiCompanionMotion?.activity('token');
         scheduleStreamRender();return;
       }
       if(kind==='done'){
         state.streaming=false;state.currentRequestId=null;
+        window.AAiCompanionMotion?.activity('done');
         renderFullText(data.text||state.fullText,false);
         return;
       }
@@ -451,6 +461,7 @@
         state.streaming=false;state.currentRequestId=null;
         state.pages=[];state.index=0;
         state.status='Koneksi terputus. Coba lagi, ya.';
+        window.AAiCompanionMotion?.activity('error');
         renderSpeech();
       }
     },
