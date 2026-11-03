@@ -239,7 +239,10 @@
   showPreview.addEventListener('change', () => { prefs.preview = showPreview.checked; persist(); refreshView(); });
   lowMotion.addEventListener('change', () => { prefs.lowMotion = lowMotion.checked; persist(); refreshView(); });
   flyButton?.addEventListener('click', () => {
-    if (!state.streaming) window.AAiCompanionMotion?.fly();
+    if (state.streaming) return;
+    settings.hidden=true; // Let the user actually see the flight animation.
+    settingsButton.setAttribute('aria-expanded','false');
+    window.AAiCompanionMotion?.fly();
   });
   useMicro.addEventListener('change', () => {
     prefs.micro = useMicro.checked; persist();
@@ -295,9 +298,19 @@
     } catch { state.alphaMap = null; } // CORS or malformed image: general touch only.
   }
   function touchZone(clientX,clientY) {
-    if (!state.alphaMap) return 'normal';
     const img = mascot.querySelector('img');
     if (!img?.naturalWidth || !img.naturalHeight) return 'normal';
+    const rigHit=window.AAiCompanionMotion?.hitTest?.(clientX,clientY);
+    if(rigHit===null)return null;
+    if(rigHit!==undefined){
+      if(!state.alphaMap)return 'normal';
+      const map=state.alphaMap;
+      const y=rigHit.y/img.naturalHeight*map.canvas.height;
+      const r=map.rect;
+      const relY=(y-r.top)/Math.max(r.bottom-r.top,1);
+      return relY<.32?'head':relY>.39&&relY<.72?'protect':'normal';
+    }
+    if (!state.alphaMap) return 'normal';
     const box=img.getBoundingClientRect();
     // The canonical sprite is drawn with object-fit: contain; its transparent
     // visual content is NOT the whole image tag rectangle.
@@ -352,20 +365,23 @@
       if (state.reactionAbort===controller) state.reactionAbort=null;
     }
   }
-  function reactToTouch(clientX,clientY) {
+  function reactToTouch(clientX,clientY,keyboard=false) {
     if (state.streaming) return; // Never overwrite a live answer with a tap line.
     const now=Date.now();
     state.tapHistory=state.tapHistory.filter(t=>now-t<3400);
-    state.tapHistory.push(now);
     let zone=touchZone(clientX,clientY);
-    if (zone === null) return;
+    if (zone === null) {
+      if (!keyboard) return; // A pointer on transparent space isn't a touch.
+      zone='normal'; // Enter/Space on the focused mascot remains operable.
+    }
+    state.tapHistory.push(now);
     if(state.tapHistory.length>3) zone='repeat';
     const local=core.reactionFor(zone,state.recent);
     const sequence=++state.reactionSequence;
     state.recent.push(local);
     if(state.recent.length>8) state.recent.shift();
     const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
-    if (!prefs.composer) { prefs.composer=true; persist(); refreshView(); }
+    // Touch reactions must not override the user's hidden-composer setting.
     window.AAiCompanionMotion?.react(zone);
     showSpeech(local,emotion);
     // Visual reaction does NOT wait for the model. The protected micro endpoint
@@ -408,8 +424,10 @@
   mascot.addEventListener('keydown', event => {
     if(event.key==='Enter'||event.key===' ') {
       event.preventDefault();
-      reactToTouch(mascot.getBoundingClientRect().left+mascot.offsetWidth/2,
-        mascot.getBoundingClientRect().top+mascot.offsetHeight/2);
+      // Keyboard activation is intentional, even if the centre is transparent
+      // in the current sleeping/flying pose.
+      const box=mascot.getBoundingClientRect();
+      reactToTouch(box.left+box.width/2,box.top+box.height/2,true);
     }
     if(event.key.startsWith('Arrow')){
       const step=20;
