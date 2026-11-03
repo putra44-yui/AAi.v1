@@ -57,7 +57,7 @@ test('activity shows factual streaming milestones, not the raw JSON log', () => 
   const html = getLiveHTML('trace_test');
   assert.match(html, /role="status" aria-live="polite"/);
   assert.match(html, /activity_live_trace_test/);
-  assert.match(html, /Menghubungkan ke AAi/); // Hidden until a real public activity begins.
+  assert.match(html, /Sedang bekerja/); // Placeholder is hidden until a real public activity begins.
   assert.doesNotMatch(app, /JSON aktivitas|aai-activity-json|activity_json_/);
   assert.match(app, /function publicActivityStep\(/);
   assert.match(app, /if \(publicStep && activityEl && activityListEl\)/);
