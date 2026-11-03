@@ -1317,6 +1317,7 @@ body.desktop-sidebar-hidden #topbarTitle {
 }
 </style>
 <link rel="stylesheet" href="/assets/css/aai-studio.css?v=20261101-tables" />
+<link rel="stylesheet" href="/assets/css/aai-companion.css?v=20261103-companion1" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 </head>
@@ -1429,6 +1430,12 @@ body.desktop-sidebar-hidden #topbarTitle {
     </div>
     <span class="topbar-spacer"></span>
     <span class="topbar-status"><span class="topbar-status-dot"></span> Teman ide harian</span>
+    <button class="aai-companion-switch" type="button" id="aaiCompanionSwitch"
+      aria-label="Beralih antara mode Chatbot dan Pendamping"
+      aria-pressed="false" title="Buka Mode Pendamping">
+      <i class="fas fa-star" aria-hidden="true"></i>
+      <span class="companion-switch-label">Pendamping</span>
+    </button>
     <div class="settings-wrapper aai-top-settings">
       <button class="settings-btn" type="button" onclick="toggleSettingsMenu()" title="Pengaturan model" aria-label="Pengaturan model">
         <i class="fas fa-sliders-h"></i>
@@ -1442,6 +1449,69 @@ body.desktop-sidebar-hidden #topbarTitle {
     <span><i class="fas fa-gem"></i> Versi AAi terbaru siap digunakan.</span>
     <button type="button" id="aaiReloadForUpdate">Muat ulang</button>
   </div>
+  <!-- Companion is an alternate view of the same chat, not a second chatbot.
+       The canonical mascot asset MUST never be silently replaced. -->
+  <section class="aai-companion-stage" id="aaiCompanionStage"
+           aria-label="Mode Pendamping AAi" hidden>
+    <span class="aai-companion-stage-title">AAi · Pendamping</span>
+    <div class="aai-companion-stage-actions">
+      <button id="aaiCompanionSettingsButton" type="button"
+              aria-label="Pengaturan Pendamping" aria-expanded="false"
+              aria-controls="aaiCompanionSettings" title="Pengaturan Pendamping">
+        <i class="fas fa-cog" aria-hidden="true"></i>
+      </button>
+      <button id="aaiCompanionFull" type="button" aria-label="Buka Chatbot lengkap"
+              title="Buka Chatbot lengkap">
+        <i class="fas fa-expand-alt" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div class="aai-companion-widget" id="aaiCompanionWidget"
+         data-emotion="idle" data-bubble-side="above" data-dragging="false">
+      <div class="aai-companion-bubble" id="aaiCompanionBubble" role="status" aria-live="polite" hidden>
+        <div class="aai-companion-speech-caption">
+          <span>AAi ✦</span>
+          <span id="aaiCompanionPage">AAi</span>
+        </div>
+        <div class="aai-companion-pager">
+          <button id="aaiCompanionPrev" type="button" aria-label="Halaman jawaban sebelumnya"
+                  title="Sebelumnya" disabled><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
+          <p class="aai-companion-speech" id="aaiCompanionSpeech"></p>
+          <button id="aaiCompanionNext" type="button" aria-label="Halaman jawaban berikutnya"
+                  title="Berikutnya" disabled><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
+        </div>
+        <button id="aaiCompanionViewFull" class="aai-companion-more" type="button">
+          Lihat jawaban lengkap di Chatbot
+        </button>
+      </div>
+      <button class="aai-companion-mascot" id="aaiCompanionMascot" type="button"
+        aria-label="AAi, sentuh untuk menyapa, tahan untuk pengaturan, atau geser untuk memindahkan"
+        title="Sentuh atau geser AAi">
+        <img src="/aai-mascot-studio.png" alt="Maskot AAi asli dengan kristal bertuliskan AAi"
+             draggable="false"/>
+      </button>
+    </div>
+    <div class="aai-companion-preview" id="aaiCompanionPreview" hidden>
+      <i class="fas fa-comment-dots" aria-hidden="true"></i>
+      <span id="aaiCompanionPreviewText"></span>
+    </div>
+    <button class="aai-companion-reveal" id="aaiCompanionReveal" type="button" hidden>
+      <i class="fas fa-pen" aria-hidden="true"></i> Tulis pesan
+    </button>
+    <div class="aai-companion-settings" id="aaiCompanionSettings" hidden>
+      <strong>Pengaturan Pendamping</strong>
+      <label for="aaiCompanionShowComposer">Kolom chat di bawah
+        <input id="aaiCompanionShowComposer" type="checkbox" checked />
+      </label>
+      <label for="aaiCompanionShowPreview">Tampilkan pesan yang kukirim
+        <input id="aaiCompanionShowPreview" type="checkbox" checked />
+      </label>
+      <label for="aaiCompanionLowMotion">Kurangi gerakan AAi
+        <input id="aaiCompanionLowMotion" type="checkbox" />
+      </label>
+      <small>Geser AAi untuk pindah tempat. Respons sentuhan masih prototipe lokal; mode lintas aplikasi dan reaksi AI dinamis memerlukan Android serta pengamanan login.</small>
+      <button class="aai-companion-close-settings" id="aaiCompanionCloseSettings" type="button">Selesai</button>
+    </div>
+  </section>
   <div class="chat-area" id="chatArea"></div>
   <div class="input-area">
     <div id="filePreview" class="file-preview-container"></div>
@@ -1492,6 +1562,8 @@ body.desktop-sidebar-hidden #topbarTitle {
 </main>
 
 <script src="/assets/js/app.js?v=20261102-activity"></script>
+<script src="/assets/js/aai-companion-core.js?v=20261103-companion1"></script>
+<script src="/assets/js/aai-companion.js?v=20261103-companion1"></script>
 <script src="/assets/js/pwa.js"></script>
 </body>
 </html>
