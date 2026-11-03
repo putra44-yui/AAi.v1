@@ -264,3 +264,16 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 - Mode Chatbot, satu SSE, pagination balon komik, dan composer bawah tidak diubah. Tombol ✦ Coba AAi terbang hanya menguji web animasi; tidak menambah APK atau overlay native baru.
 
 **Validasi yang wajib sebelum menganggap final:** cek jahitan batas segmen, bentuk mata/mulut tertutup, rambut/gaun saat bergerak, sentuhan kepala/tubuh, tombol terbang, perubahan dari berpikir ke bicara, reduced motion, tab background, drag, orientasi HP, performa/baterai. Jika tampak ada bagian terpotong atau identitas kristal rusak, jangan deploy ke produksi: revisi koordinat rig atau produksi keyframe ilustrasi manual dari master.
+
+
+## F1.B — Audit kode Pendamping (4 November 2026, PR #17)
+
+**Temuan terkonfirmasi dari inspeksi source:**
+- Saat `tick()` berpindah dari tidur→bangun, bangun→diam, malu→diam, atau terbang→diam, `setPhase()` memanggil `ensure()` ketika timer kosong. `tick()` sebelumnya selalu menjadwalkan RAF baru tanpa mengecek timer yang sudah dijadwalkan. Hasilnya dua loop aktif, dan jumlahnya dapat bertambah. Perbaikan: jadwalkan RAF hanya bila belum ada timer.
+- Sentuhan pada maskot sebelumnya mengubah preferensi `composer=false` menjadi `true`. Ini melanggar pilihan pengguna untuk menyembunyikan kolom ketik. Perbaikan: reaksi sentuhan tidak lagi mengubah preferensi.
+- Alpha hit-test sebelumnya memakai koordinat PNG diam; setelah tubuh berputar saat tidur/terbang, titik sentuh dan gambar tidak cocok. Perbaikan: sampel transparansi dari frame Canvas yang benar-benar ditampilkan, lalu balik transformasi tubuh untuk klasifikasi zona; bila Canvas tak tersedia, gunakan peta PNG lama.
+- Tap di area transparan sebelumnya tetap menambah hitungan sentuhan berulang, meskipun tidak bereaksi. Perbaikan: hitungan hanya bertambah pada hit yang sah.
+- Tombol uji terbang berada di dalam panel pengaturan yang tetap terbuka dan dapat menutupi animasinya. Perbaikan: panel menutup sebelum terbang.
+- Aset gambar dapat memicu `onImage()` melalui event `load` dan pemeriksaan gambar cache. Perbaikan: lindungi inisialisasi agar Canvas tidak terpasang dua kali.
+
+**Batas validasi:** Browser lokal terhubung tidak tersedia pada sesi ini. Pemeriksaan di atas berbasis kode, dan CI otomatis hanya membuktikan logika/build—belum membuktikan kualitas visual. Gate visual pada HP (jahitan segmen, mata/mulut, gerak tidur) tetap **BELUM LULUS**. Jangan gabungkan PR atau deploy produksi sebelum uji visual.
