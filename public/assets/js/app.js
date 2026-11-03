@@ -1214,21 +1214,38 @@ function wireSourcePreviewImages(root = document) {
   });
 }
 
+// Router internals stay in the saved trace for diagnostics, but do not belong
+// in a family conversation. Apply this mapping to live AND historical events.
+function publicActivityStep(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const step = String(entry.step || '');
+  const raw = String(entry.message || '').slice(0, 220).trim();
+  if (step === 'tavily') return { step, message: 'Menelusuri web...' };
+  if (step === 'exa') return { step, message: 'Aku coba sumber pencarian lain, ya.' };
+  if (step === 'report') return { step, message: raw || 'Aku coba cari pembandingnya dulu.' };
+  if (step === 'found') {
+    const match = /(?:Menemukan|Ketemu)\s+(\d+)\s+sumber/i.exec(raw);
+    return { step, message: match
+      ? 'Ketemu ' + match[1] + ' sumber. Aku cek isinya dulu...'
+      : 'Ada sumber yang ditemukan. Aku cek isinya dulu...' };
+  }
+  if (step === 'sources') return { step, message: 'Sumber yang ditemukan:' };
+  if (step === 'unavailable') return { step, message:
+    /(?:model|tool\s*calling|provider)/i.test(raw)
+      ? 'Aku belum bisa melanjutkan pencarian. Aku akan jujur soal batas informasinya.'
+      : raw || 'Pencariannya belum berhasil, ya.' };
+  // Ignore provider, memory count, tool decision, compose and model strategy.
+  return null;
+}
+
 function renderActivityStepHTML(entry) {
-  const step = entry && typeof entry === 'object' ? entry.step : '';
-  const message = entry && typeof entry === 'object' ? entry.message : entry;
-  // Older saved activity traces may still name a backend search provider.
-  const displayMessage = step === 'tavily' ? 'Mencari sumber dari web...'
-    : step === 'exa' ? 'Hasil awal belum cukup; mencari sumber lain...' : message;
-  const safeText = escHtml(String(displayMessage || '').slice(0, 220));
+  const publicStep = publicActivityStep(entry);
+  if (!publicStep) return '';
+  const { step, message } = publicStep;
+  const safeText = escHtml(message);
   const sourceLinks = Array.isArray(entry?.sources)
     ? entry.sources.slice(0, 5).map(renderActivitySourceHTML).filter(Boolean).join('')
     : '';
-  // Model-authored reports are conversation, not mechanical tool status.
-  // Apply this to saved traces too so past sessions get the same presentation.
-  if (step === 'strategy') {
-    return '<li class="aai-activity-step aai-activity-report"><span class="aai-activity-step-text">' + safeText + '</span></li>';
-  }
   if (step === 'sources') {
     const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-book-open';
     const milestone = '<li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas ' + icon + '"></i></span>'
@@ -1251,14 +1268,16 @@ function buildStoredActivityPanelHTML(messageId, persistedTrace = null) {
     && Array.isArray(persistedTrace.steps) && persistedTrace.steps.length
     ? persistedTrace : getStoredActivityTraces()[messageId];
   if (!trace || !Array.isArray(trace.steps) || !trace.steps.length) return '';
-  const label = 'Memproses selama ' + formatActivityDuration(trace.durationMs);
+  const rows = trace.steps.map(renderActivityStepHTML).filter(Boolean).join('');
   const intro = typeof trace.preface === 'string' && trace.preface.trim()
     ? '<p class="aai-preface">' + escHtml(trace.preface) + '</p>'
     : '';
-  return `<details class="aai-activity is-complete aai-saved-activity">
+  if (!rows) return intro; // Hide legacy router-only traces even after reload.
+  const searched = trace.steps.some(item => ['tavily', 'exa', 'found', 'sources'].includes(item?.step));
+  const label = (searched ? 'Penelusuran selesai · ' : 'Aktivitas selesai · ') + formatActivityDuration(trace.durationMs);
+  return `${intro}<details class="aai-activity is-complete aai-saved-activity">
     <summary><span class="aai-activity-title">${escHtml(label)}</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
-    ${intro}
-    <ul class="aai-activity-list">${trace.steps.map(renderActivityStepHTML).join('')}</ul>
+    <ul class="aai-activity-list">${rows}</ul>
   </details>`;
 }
 
@@ -1298,11 +1317,11 @@ function buildStreamBubbleHTML(streamId, timeStr) {
   const teaserHtml = REASONING_PREVIEW_ENABLED
     ? `<div class="ai-live-teaser" id="preview_stream_${streamId}" style="display:none;"></div>`
     : '';
-  const activityHtml = `<details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" open>
-    <summary><span class="aai-activity-title">Memproses...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
-    <p class="aai-preface" id="preface_${streamId}" hidden></p>
+  const activityHtml = `<p class="aai-preface" id="preface_${streamId}" hidden></p>
+  <details class="aai-activity" id="activity_${streamId}" data-started-at="${Date.now()}" hidden>
+    <summary><span class="aai-activity-title">Menelusuri web...</span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
     ${buildActivityLiveHTML(streamId)}
-    <ul class="aai-activity-list" id="activity_list_${streamId}"><li class="aai-activity-step"><span class="aai-activity-step-icon" aria-hidden="true"><i class="fas fa-circle-notch fa-spin"></i></span><span class="aai-activity-step-text">Menghubungkan ke AAi dan menyiapkan konteks...</span></li></ul>
+    <ul class="aai-activity-list" id="activity_list_${streamId}"></ul>
   </details>`;
 
   return `
@@ -1845,7 +1864,7 @@ async function processStream(response, streamId, onDone) {
   const activityLiveEl = document.getElementById(`activity_live_${streamId}`);
   const prefaceEl = document.getElementById(`preface_${streamId}`);
   const activityStartedAt = Number(activityEl?.dataset.startedAt) || Date.now();
-  const activityTimeline = [{ step: 'assess', message: 'Menghubungkan ke AAi dan menyiapkan konteks...', atMs: 0 }];
+  const activityTimeline = [];
   let activityTimer = null;
   let firstVisibleTokenMs = null;
   let waitingForModel = false;
@@ -1860,9 +1879,14 @@ async function processStream(response, streamId, onDone) {
     const measuredMs = completed && finalDurationMs != null && Number.isFinite(Number(finalDurationMs))
       ? Number(finalDurationMs) : Date.now() - activityStartedAt;
     const duration = formatActivityDuration(measuredMs);
-    const label = completed ? 'Memproses selama ' : hasAnswerToken ? 'Menjawab... '
-      : waitingForModel ? 'Menunggu jawaban model... ' : 'Memproses... ';
-    activityTitleEl.textContent = label + duration;
+    const publicTitle = activityEl?.dataset.publicTitle || '';
+    if (!publicTitle) return;
+    if (completed) {
+      const searched = activityEl?.dataset.hadSearch === '1';
+      activityTitleEl.textContent = (searched ? 'Penelusuran selesai · ' : 'Aktivitas selesai · ') + duration;
+    } else {
+      activityTitleEl.textContent = publicTitle;
+    }
   };
   const reader    = response.body.getReader();
   const decoder   = new TextDecoder();
@@ -2130,7 +2154,7 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.phase === 'preface') {
-      if (prefaceEl && typeof parsed.message === 'string') {
+      if (prefaceEl && typeof parsed.message === 'string' && parsed.message.trim()) {
         prefaceEl.textContent = parsed.message.slice(0, 240);
         prefaceEl.hidden = false;
         scrollBottom();
@@ -2147,7 +2171,7 @@ async function processStream(response, streamId, onDone) {
       firstToken = true;
       hasAnswerToken = false;
       waitingForModel = false;
-      updateActivityLive('Mencari informasi tambahan sebelum menjawab...');
+      updateActivityLive('Aku cek sumbernya dulu...');
       streamingNode = null;
       streamingCommittedLength = 0;
       if (bubbleEl) {
@@ -2157,12 +2181,14 @@ async function processStream(response, streamId, onDone) {
       }
       if (activityEl) {
         activityEl.hidden = false;
-        activityEl.open = true;
+        activityEl.dataset.publicTitle = 'Menelusuri web...';
         if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
         updateActivityClock();
       }
-      if (prefaceEl && typeof parsed.message === 'string' && parsed.message.trim()) {
-        prefaceEl.textContent = parsed.message.slice(0, 240);
+      if (prefaceEl && prefaceEl.hidden) {
+        prefaceEl.textContent = (typeof parsed.message === 'string' && parsed.message.trim())
+          ? parsed.message.slice(0, 240)
+          : 'Bentar, aku coba cek sumber yang lebih pasti dulu.';
         prefaceEl.hidden = false;
       }
       scrollBottom();
@@ -2170,10 +2196,7 @@ async function processStream(response, streamId, onDone) {
     }
 
     if (parsed.phase === 'progress') {
-      if (activityEl && activityListEl && typeof parsed.message === 'string') {
-        activityEl.hidden = false;
-        activityEl.open = true;
-        waitingForModel = parsed.step === 'provider';
+      if (typeof parsed.message === 'string') {
         const step = {
           step: String(parsed.step || ''),
           message: parsed.message.slice(0, 220),
@@ -2186,16 +2209,22 @@ async function processStream(response, streamId, onDone) {
                 ...(typeof source?.image === 'string' ? { image: source.image.slice(0, 1200) } : {})
               })) } : {})
         };
-        activityListEl.insertAdjacentHTML('beforeend', renderActivityStepHTML(step));
-        wireSourcePreviewImages(activityListEl);
+        // Keep full bounded trace in storage for audit, never print router state.
         activityTimeline.push(step);
         if (activityTimeline.length > 18) activityTimeline.shift();
-        updateActivityLive(parsed.step === 'tavily' ? 'Mencari sumber dari web...'
-          : parsed.step === 'exa' ? 'Memeriksa sumber tambahan...'
-          : parsed.message);
-        if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
-        updateActivityClock();
-        scrollBottom();
+        const publicStep = publicActivityStep(step);
+        if (publicStep && activityEl && activityListEl) {
+          activityEl.hidden = false;
+          const html = renderActivityStepHTML(step);
+          if (html) activityListEl.insertAdjacentHTML('beforeend', html);
+          wireSourcePreviewImages(activityListEl);
+          if (['tavily', 'exa', 'found', 'sources'].includes(step.step)) activityEl.dataset.hadSearch = '1';
+          activityEl.dataset.publicTitle = publicStep.message;
+          updateActivityLive(publicStep.message);
+          if (!activityTimer) activityTimer = setInterval(() => updateActivityClock(), 1000);
+          updateActivityClock();
+          scrollBottom();
+        }
       }
       return;
     }
@@ -2239,7 +2268,9 @@ async function processStream(response, streamId, onDone) {
         hasAnswerToken = true;
         waitingForModel = false;
         firstVisibleTokenMs = Date.now() - activityStartedAt;
-        updateActivityLive('Jawaban sedang ditulis, sedikit demi sedikit...', true);
+        // The answer itself is streaming; do not replace the search report
+        // with a mechanical "preparing the answer" router status.
+        if (activityEl && !activityEl.hidden) activityEl.open = false;
         updateActivityClock();
         streamingNode = null;
         streamingCommittedLength = 0;
@@ -2285,7 +2316,6 @@ async function processStream(response, streamId, onDone) {
       if (activityEl && !activityEl.hidden) {
         activityEl.open = false;
         activityEl.classList.add('is-complete');
-        updateActivityLive('Jawaban siap.');
         updateActivityClock(true, parsed.timings?.duration_ms);
         saveActivityTrace(parsed.message_id, parsed.timings?.duration_ms ?? Date.now() - activityStartedAt,
           activityTimeline, prefaceEl?.textContent || '', parsed.timings?.first_token_ms ?? firstVisibleTokenMs);
