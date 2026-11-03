@@ -36,7 +36,7 @@ test('web permission and providers gate actual searches even for fresh questions
 });
 
 test('a tool-decision response never becomes a single buffered public answer', () => {
-  assert.match(chatSource, /const shouldRunToolDecision = !visionImages\\.length && !webSearchOptedOut/);
+  assert.match(chatSource, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(chatSource, /if \(shouldRunToolDecision\) \{/);
   assert.match(chatSource, /\[KEPUTUSAN TOOL SAJA\]/);
   assert.match(chatSource, /max_tokens: 320/);
