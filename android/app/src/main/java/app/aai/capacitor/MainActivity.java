@@ -27,9 +27,12 @@ public class MainActivity extends BridgeActivity {
         intent.removeExtra("AAI_COMPANION_DRAFT");
         // A fixed 250 ms WebView delay used to lose drafts on slow phones.
         // Store locally until the authenticated AAi web UI explicitly consumes it.
+        String owner = intent.getStringExtra("AAI_COMPANION_OWNER");
         getSharedPreferences("aai_companion", MODE_PRIVATE)
             .edit()
             .putString("pendingDraft", draft.substring(0, Math.min(draft.length(), 700)))
+            .putString("pendingDraftOwner", owner == null ? "" : owner)
+            .putLong("pendingDraftAt", System.currentTimeMillis())
             .apply();
     }
 }
