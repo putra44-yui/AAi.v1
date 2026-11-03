@@ -157,7 +157,7 @@ test('AAi shows real search sources with favicons, and model reports without too
   assert.match(client, /if \(step === 'tavily'\)/);
   assert.match(client, /if \(step === 'exa'\)/);
   assert.match(client, /if \(step === 'report'\)/);
-  assert.match(client, /return null; \/\/ Ignore provider/);
+  assert.match(client, /Ignore provider, memory count, tool decision, compose and model strategy/);
   assert.match(client, /renderActivitySourceHTML/);
   assert.match(client, /www\.google\.com\/s2\/favicons/);
   assert.match(client, /rel="noopener noreferrer nofollow"/);
