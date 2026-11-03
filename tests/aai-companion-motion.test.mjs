@@ -44,6 +44,7 @@ test('web companion wires pixel-part renderer without changing canonical PNG or 
   const html=read('public/index.html');
   const js=read('public/assets/js/aai-companion.js');
   const css=read('public/assets/css/aai-companion.css');
+  const studioCss=read('public/assets/css/aai-studio.css');
   const rig=read('public/assets/js/aai-companion-motion.js');
   assert.match(html,/src="\/aai-mascot-studio\.png"/);
   assert.match(html,/aai-companion-motion-core\.js/);
@@ -63,6 +64,11 @@ test('web companion wires pixel-part renderer without changing canonical PNG or 
   assert.match(rig,/getImageData\(px,py,1,1\)/);
   assert.match(js,/AAiCompanionMotion\?\.hitTest\?\./);
   assert.doesNotMatch(js,/if \(!prefs\.composer\) \{ prefs\.composer=true;/);
+  assert.match(js,/returnAfterReaction/);
+  assert.match(js,/Restore the answer; never delete or rewrite chat history/);
+  assert.match(studioCss,/grid-template-columns:38px minmax\(0,1fr\) 40px/);
+  assert.match(studioCss,/#sendBtn\s*\{/);
+  assert.match(studioCss,/display:flex!important; align-self:end/);
   assert.match(js,/if \(zone === null\) \{/);
   assert.match(css,/\.aai-companion-mascot\.motion-ready img/);
   assert.doesNotMatch(rig,/aai-mascot\.jpg|vercel\.app/);

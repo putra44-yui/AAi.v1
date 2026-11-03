@@ -47,7 +47,8 @@
   const state = {
     pages: [], index: 0, fullText: '', streaming: false, shownFromServer: false,
     status: '', recent: [], tapHistory: [], currentRequestId: null, renderScheduled: false,
-    gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null, emotion:'idle',
+    gesture: null, reactionAbort: null, reactionSequence: 0, returnAfterReaction:null,
+    alphaMap: null, emotion:'idle',
     microAvailable:true, lastMicroAt:0, nativeOn:false, nativeLastUpdate:0,
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch {} };
@@ -210,6 +211,9 @@
     }
   }
   function chooseMode(active) {
+    // A pending touch reaction must not restore stale text after switching modes.
+    state.reactionSequence++;
+    state.returnAfterReaction=null;
     prefs.active = Boolean(active);
     persist();
     refreshView();
@@ -381,6 +385,11 @@
     state.recent.push(local);
     if(state.recent.length>8) state.recent.shift();
     const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
+    // The greeting is transient. Keep the real chat answer intact underneath.
+    if(!state.returnAfterReaction) state.returnAfterReaction={
+      pages:state.pages.slice(),index:state.index,fullText:state.fullText,
+      status:state.status,emotion:state.emotion,
+    };
     // Touch reactions must not override the user's hidden-composer setting.
     window.AAiCompanionMotion?.react(zone);
     showSpeech(local,emotion);
@@ -388,11 +397,17 @@
     // can replace the sentence only if it responds quickly and remains current.
     void getDynamicReaction(zone,local,sequence);
     setTimeout(() => {
-      if (!state.streaming && state.emotion==='shy') {
-        state.emotion='idle';
-        widget.dataset.emotion='idle';
-      }
-    },900);
+      if(sequence!==state.reactionSequence||state.streaming||!isActive())return;
+      const previous=state.returnAfterReaction;
+      state.returnAfterReaction=null;
+      if(!previous)return;
+      state.pages=previous.pages;
+      state.index=previous.index;
+      state.fullText=previous.fullText;
+      state.status=previous.status;
+      state.emotion=previous.emotion;
+      renderSpeech(); // Restore the answer; never delete or rewrite chat history.
+    },3200);
   }
   mascot.addEventListener('pointerdown', event => {
     if (event.button !== 0 || touchZone(event.clientX,event.clientY) === null) return;
@@ -445,6 +460,7 @@
       if(!isActive()) return;
       if(kind==='begin'){
         state.reactionSequence++;
+        state.returnAfterReaction=null;
         if (state.reactionAbort) state.reactionAbort.abort();
         state.streaming=true;state.currentRequestId=data.streamId||null;
         window.AAiCompanionMotion?.activity('begin');

@@ -277,3 +277,17 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 - Aset gambar dapat memicu `onImage()` melalui event `load` dan pemeriksaan gambar cache. Perbaikan: lindungi inisialisasi agar Canvas tidak terpasang dua kali.
 
 **Batas validasi:** Browser lokal terhubung tidak tersedia pada sesi ini. Pemeriksaan di atas berbasis kode, dan CI otomatis hanya membuktikan logika/build—belum membuktikan kualitas visual. Gate visual pada HP (jahitan segmen, mata/mulut, gerak tidur) tetap **BELUM LULUS**. Jangan gabungkan PR atau deploy produksi sebelum uji visual.
+
+
+## F1.C — Balon jawaban dan Send di HP (4 November 2026)
+
+**Keluhan:** chat pengguna tidak boleh tertimpa karakter/balon, dan tombol Send harus tetap di dalam baris kolom input. Pengiriman dari mode Pendamping tetap memakai satu request/riwayat SSE yang sama; tidak boleh membuka Chatbot atau membuat maskot ganda.
+
+**Temuan di source:**
+- Markup hanya memiliki satu `#sendBtn`. CSS lama pada breakpoint HP menyembunyikan `.send-btn` sambil mengharapkan `#mobileSendBtn` (yang tidak ada di markup). CSS studio lebih baru memang menampilkan kembali Send, tetapi mengubah composer menjadi kolom sementara elemen Send tetap berada di luar baris teks. Urutan visual tidak konsisten.
+- `reactToTouch()` memanggil `showSpeech()`, yang mengosongkan `pages` dan `fullText`. Ini tidak menghapus pesan pada sesi backend, tetapi balon jawaban sebelumnya hilang dari tampilan saat maskot disentuh.
+- Alur web `handleSend()` sendiri sudah mengirim ke `sendMessage()` dan meneruskan SSE ke `AAiCompanionBridge`; tidak memerlukan peralihan mode. Perilaku overlay native Android yang membuka layar Chatbot adalah tahap terpisah dan **belum diperbaiki** pada perubahan web ini.
+
+**Perbaikan:** tata letak grid tiga kolom (+, teks, Send) dengan satu tombol Send untuk Chatbot dan Pendamping, termasuk ukuran sentuh HP; reaksi maskot disimpan sementara lalu balon jawaban sebelumnya dipulihkan setelah 3,2 detik. Saat chat baru dimulai atau mode berpindah, pemulihan reaksi lama dibatalkan agar tidak menimpa respons streaming terbaru.
+
+**Tes wajib:** CSS dan unit test otomatis, lalu audit layar HP untuk respons keyboard virtual, elemen tidak saling tindih, Send/Stop saat streaming, serta sentuhan beruntun dan chat baru yang datang sebelum balon reaksi kembali. **Belum divalidasi secara visual** karena browser terhubung tidak tersedia pada sesi ini. Jangan mengklaim bug overlay Android selesai sebelum APK native terpisah diuji.
