@@ -1090,6 +1090,9 @@ const AAI_ACTIVITY_STEP_ICONS = Object.freeze({
   memory: 'fa-brain',
   vision: 'fa-image',
   recall: 'fa-brain',
+  history: 'fa-search',
+  history_found: 'fa-check-circle',
+  history_empty: 'fa-info-circle',
   assess: 'fa-lightbulb',
   strategy: 'fa-compass',
   tavily: 'fa-search',
@@ -1222,6 +1225,9 @@ function publicActivityStep(entry) {
   if (!entry || typeof entry !== 'object') return null;
   const step = String(entry.step || '');
   const raw = String(entry.message || '').slice(0, 220).trim();
+  if (step === 'history' || step === 'history_found' || step === 'history_empty') {
+    return { step, message: raw || 'Aku memeriksa riwayat obrolan kita...' };
+  }
   if (step === 'recall') return { step, message: raw || 'Aku memeriksa bagian percakapan ini dulu...' };
   if (step === 'vision') return { step, message: 'Aku sedang melihat gambar yang kamu kirim...' };
   if (step === 'tavily') return { step, message: 'Menelusuri web...' };
