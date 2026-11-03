@@ -36,5 +36,19 @@
         "period": 60
       }
     }
-  ]
+  ],
+  "previews": {
+    "ratelimits": [
+      {
+        "name": "AAI_WEB_SEARCH_LIMITER",
+        "namespace_id": "93110401",
+        "simple": { "limit": 12, "period": 60 }
+      },
+      {
+        "name": "AAI_COMPANION_RATE_LIMITER",
+        "namespace_id": "93110402",
+        "simple": { "limit": 8, "period": 60 }
+      }
+    ]
+  }
 }
