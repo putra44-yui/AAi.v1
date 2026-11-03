@@ -75,8 +75,8 @@ test('verified user can get nonreasoning micro-reaction and provider sees no pri
     const ok=await handleCompanionMicro(request({event:'head',recent:['Duh… jangan dipegang, malu.']},{
       headers:{cookie:'__Host-aai_access=verified-fixture-token'},
     }),liveEnv);
-    assert.equal(ok.status,200,await ok.text());
-    const text=await ok.clone().json().catch(()=>null);
+    const text=await ok.json();
+    assert.equal(ok.status,200,JSON.stringify(text));
     assert.equal(text?.persisted,false);
     const provider=calls.find(c=>c.url.includes('openrouter.ai'));
     assert.ok(provider);
