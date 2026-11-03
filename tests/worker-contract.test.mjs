@@ -244,7 +244,7 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
 });
