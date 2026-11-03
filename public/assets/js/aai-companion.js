@@ -292,19 +292,30 @@
   }
   function touchZone(clientX,clientY) {
     if (!state.alphaMap) return 'normal';
-    const rect = mascot.getBoundingClientRect();
-    const coords = {
-      x: Math.round((clientX-rect.left)/Math.max(rect.width,1)*state.alphaMap.canvas.width),
-      y: Math.round((clientY-rect.top)/Math.max(rect.height,1)*state.alphaMap.canvas.height),
-    };
+    const img = mascot.querySelector('img');
+    if (!img?.naturalWidth || !img.naturalHeight) return 'normal';
+    const box=img.getBoundingClientRect();
+    // The canonical sprite is drawn with object-fit: contain; its transparent
+    // visual content is NOT the whole image tag rectangle.
+    const scale=Math.min(box.width/img.naturalWidth,box.height/img.naturalHeight);
+    const drawnW=img.naturalWidth*scale;
+    const drawnH=img.naturalHeight*scale;
+    const localX=clientX-box.left-(box.width-drawnW)/2;
+    const localY=clientY-box.top-(box.height-drawnH)/2;
+    if(localX<0 || localY<0 || localX>=drawnW || localY>=drawnH) return null;
+    const x=Math.floor(localX/drawnW*state.alphaMap.canvas.width);
+    const y=Math.floor(localY/drawnH*state.alphaMap.canvas.height);
+    const sample=state.alphaMap.ctx.getImageData(x,y,1,1).data;
+    if(sample[3]<35) return null; // No touching empty alpha around the mascot.
     const r=state.alphaMap.rect;
-    if(coords.y<r.top||coords.y>r.bottom||coords.x<r.left||coords.x>r.right) return 'normal';
-    const relY=(coords.y-r.top)/Math.max(r.bottom-r.top,1);
-    // Phase F1 heuristic only; F0 manual asset/zone audit required for production.
+    const relY=(y-r.top)/Math.max(r.bottom-r.top,1);
+    // F1 heuristic only; validated per-limb sprites are required for precise
+    // protective/hand poses. Never interpret blank space as sensitive touch.
     if(relY<.32) return 'head';
     if(relY>.39 && relY<.72) return 'protect';
     return 'normal';
   }
+
   async function getDynamicReaction(zone, fallback, seq) {
     if (!prefs.micro || !state.microAvailable || Date.now() - state.lastMicroAt < 1800) return;
     state.lastMicroAt = Date.now();
@@ -343,6 +354,7 @@
     state.tapHistory=state.tapHistory.filter(t=>now-t<3400);
     state.tapHistory.push(now);
     let zone=touchZone(clientX,clientY);
+    if (zone === null) return;
     if(state.tapHistory.length>3) zone='repeat';
     const local=core.reactionFor(zone,state.recent);
     const sequence=++state.reactionSequence;
@@ -362,7 +374,7 @@
     },900);
   }
   mascot.addEventListener('pointerdown', event => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || touchZone(event.clientX,event.clientY) === null) return;
     const point={x:event.clientX,y:event.clientY};
     state.gesture={ point, t:Date.now(),left:widget.offsetLeft,top:widget.offsetTop };
     mascot.setPointerCapture(event.pointerId);
