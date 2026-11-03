@@ -69,7 +69,7 @@ test('server honors no-web constraints before exposing native tools', () => {
   assert.match(server, /const webSearchOptedOut = hasWebSearchOptOut\(message\)/);
   assert.match(server, /if \(webSearchOptedOut\) \{/);
   assert.match(server, /Tanpa pencarian web, sesuai permintaanmu/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(server, /shouldRunWebToolDecision\(requestedWebDecision, requestBody\.value\.webPermission, hasSearchProvider\)/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
 });
