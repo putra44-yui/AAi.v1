@@ -114,6 +114,7 @@ interface ParsedChatRequest {
   webPermission: WebToolPermission;
   timeZone: string | null;
   visionImages: VisionImage[];
+  persistedMessage: string;
 }
 
 type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
@@ -331,6 +332,10 @@ function parseRequestBody(input: string): ParseRequestResult {
       webPermission,
       timeZone,
       visionImages: imagesResult.images,
+      persistedMessage: imagesResult.images.length
+        ? message + '\n\n[📷 Lampiran gambar: ' + imagesResult.images.length
+          + ' (gambar tidak disimpan di riwayat, kirim ulang untuk dianalisis lagi)]'
+        : message,
     },
   };
 }
@@ -652,7 +657,7 @@ async function prepareSession(
       if (!parent) return preparationError(400, 'Induk pesan tidak termasuk sesi ini.', traceId);
     }
     const { data, error } = await supabase.from('messages')
-      .insert({ session_id: sessionId, role: 'user', content: input.message, parent_id: parentId })
+      .insert({ session_id: sessionId, role: 'user', content: input.persistedMessage, parent_id: parentId })
       .select('id').single();
     if (error) throw error;
     userMessageId = data.id;
@@ -890,6 +895,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     if (!prepared.ok) return prepared.response;
     logTiming('session_ready');
     const { supabase, sessionId, userMessageId, message, history, isNewSession, provisionalTitle } = prepared.value;
+    if (requestBody.value.userMessageId && !requestBody.value.visionImages.length &&
+        message.includes('[📷 Lampiran gambar:')) {
+      return createJsonError(400, 'Gambar lama tidak disimpan. Kirim ulang fotonya untuk dianalisis lagi.', traceId);
+    }
     const personaName = requestBody.value.personaName;
     // Rute gratis otomatis hanya dipakai setelah dipilih eksplisit di pengaturan.
     // Keep image requests on a confirmed vision-capable model. "free-auto"
