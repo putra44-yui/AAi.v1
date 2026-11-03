@@ -1082,7 +1082,7 @@ function createPublicActivityReport(trace = {}) {
 function buildActivityLiveHTML(streamId) {
   return '<div class="aai-activity-live" role="status" aria-live="polite" aria-atomic="true">'
     + '<span class="aai-activity-live-dot" aria-hidden="true"></span>'
-    + '<span class="aai-activity-live-text" id="activity_live_' + escHtml(streamId) + '">Menghubungkan ke AAi...</span>'
+    + '<span class="aai-activity-live-text" id="activity_live_' + escHtml(streamId) + '">Sedang bekerja...</span>'
     + '</div>';
 }
 
