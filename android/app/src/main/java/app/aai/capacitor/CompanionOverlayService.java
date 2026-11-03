@@ -54,6 +54,8 @@ public final class CompanionOverlayService extends Service {
     private LinearLayout floatingWidget;
     private LinearLayout bottomComposer;
     private ImageView mascotImage;
+    private Bitmap canonicalSprite;
+    private int spriteTop=0, spriteBottom=1;
     private TextView speechText;
     private TextView pageNumber;
     private Button prevButton, nextButton;
@@ -209,7 +211,19 @@ public final class CompanionOverlayService extends Service {
         mascotImage.setContentDescription("Maskot asli AAi dengan kristal bertuliskan AAi");
         try (InputStream source=getAssets().open("public/aai-mascot-studio.png")) {
             Bitmap image=BitmapFactory.decodeStream(source);
-            if (image != null) mascotImage.setImageBitmap(image);
+            if (image != null) {
+                canonicalSprite=image;
+                mascotImage.setImageBitmap(image);
+                spriteTop=image.getHeight(); spriteBottom=0;
+                // Find visible sprite bounds for accurate head/body zones.
+                for(int y=0;y<image.getHeight();y+=2)
+                    for(int x=0;x<image.getWidth();x+=2)
+                        if(Color.alpha(image.getPixel(x,y))>50) {
+                            spriteTop=Math.min(spriteTop,y);
+                            spriteBottom=Math.max(spriteBottom,y);
+                        }
+                if(spriteBottom<=spriteTop) {spriteTop=0;spriteBottom=image.getHeight();}
+            }
         } catch (Exception ignored) {
             // Never silently replace the AAi mascot with stock artwork.
         }
@@ -236,6 +250,24 @@ public final class CompanionOverlayService extends Service {
         breathing.start();
     }
 
+    private float hitVisibleSprite(MotionEvent event) {
+        if(canonicalSprite==null || mascotImage==null) return 0.5f;
+        // ImageView FIT_CENTER letterboxes the actual RGBA image.
+        float w=mascotImage.getWidth(), h=mascotImage.getHeight();
+        if(w<=0 || h<=0) return -1f;
+        float scale=Math.min(w/canonicalSprite.getWidth(),h/canonicalSprite.getHeight());
+        float drawW=canonicalSprite.getWidth()*scale;
+        float drawH=canonicalSprite.getHeight()*scale;
+        float localX=event.getX()-(w-drawW)/2f;
+        float localY=event.getY()-(h-drawH)/2f;
+        if(localX<0 || localX>=drawW || localY<0 || localY>=drawH) return -1f;
+        int x=Math.max(0,Math.min(canonicalSprite.getWidth()-1,(int)(localX/scale)));
+        int y=Math.max(0,Math.min(canonicalSprite.getHeight()-1,(int)(localY/scale)));
+        if(Color.alpha(canonicalSprite.getPixel(x,y))<35) return -1f;
+        return Math.max(0f,Math.min(1f,
+            (float)(y-spriteTop)/Math.max(1,spriteBottom-spriteTop)));
+    }
+
     private void installMascotGesture() {
         mascotImage.setOnTouchListener(new View.OnTouchListener() {
             float rawX,rawY,startX,startY;
@@ -244,6 +276,7 @@ public final class CompanionOverlayService extends Service {
                 if(widgetParams==null||floatingWidget==null)return false;
                 switch(event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
+                        if(hitVisibleSprite(event)<0) return false;
                         rawX=event.getRawX();rawY=event.getRawY();
                         startX=widgetParams.x;startY=widgetParams.y;
                         touchedAt=System.currentTimeMillis();moved=false;return true;
@@ -262,7 +295,10 @@ public final class CompanionOverlayService extends Service {
                         if(!moved) {
                             if(System.currentTimeMillis()-touchedAt>550) {
                                 composerVisible=!composerVisible;updateComposerVisibility();
-                            } else onMascotTap(event.getY()/Math.max(1,view.getHeight()));
+                            } else {
+                                float spriteY=hitVisibleSprite(event);
+                                if(spriteY>=0) onMascotTap(spriteY);
+                            }
                         }
                         return true;
                     case MotionEvent.ACTION_CANCEL:return true;
