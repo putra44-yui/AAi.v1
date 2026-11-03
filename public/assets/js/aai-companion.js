@@ -78,7 +78,7 @@
         nativeButton.textContent='Setelah memberi izin, ketuk lagi';
         return;
       }
-      await nativePlugin.show({showComposer:prefs.composer});
+      await nativePlugin.show({showComposer:prefs.composer,ownerId});
       state.nativeOn=true;
       nativeButton.textContent='Hentikan AAi di atas aplikasi lain';
       nativeBubbleUpdate(true);
@@ -458,6 +458,24 @@
       setPreviewText(draft);
     },
   };
+  // Read the draft after the WebView is really ready, not after an arbitrary
+  // native 250ms timeout. It remains a draft until the user presses Send.
+  async function consumeNativeDraft() {
+    if (!nativePlugin || !ownerId || typeof nativePlugin.consumeDraft !== 'function') return;
+    try {
+      const result=await nativePlugin.consumeDraft({userId:ownerId});
+      const draft=String(result?.draft || '').trim();
+      if (draft && window.AAiCompanionBridge?.acceptNativeDraft)
+        window.AAiCompanionBridge.acceptNativeDraft(draft);
+    } catch { /* Native app may be on an older APK; keep web Chatbot usable. */ }
+  }
+  if (nativePlugin) {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void consumeNativeDraft();
+    });
+    window.addEventListener('focus', () => void consumeNativeDraft());
+    void consumeNativeDraft();
+  }
   let mutationTimer=null;
   const chatArea=el('chatArea');
   if(chatArea){
