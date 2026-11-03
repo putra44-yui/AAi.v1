@@ -12,7 +12,7 @@
   canvas.className='aai-companion-rig';
   canvas.setAttribute('aria-hidden','true');
   canvas.setAttribute('role','presentation');
-  const ctx=canvas.getContext('2d',{alpha:true,desynchronized:true});
+  const ctx=canvas.getContext('2d',{alpha:true,desynchronized:true,willReadFrequently:true});
   if(!ctx) return; // Original accessible image remains the fallback.
   let phase='sleep',phaseAt=0,lastAction=0,ready=false,started=false;
   let autoWake=true,fromPose=null,blendAt=0,currentPose=null;
@@ -134,7 +134,9 @@
     else if(phase==='fly'&&elapsed>3800)setPhase('idle');
     else if(phase==='idle'&&t-lastAction>42000){autoWake=false;setPhase('sleep');}
     if(t-lastFrame>=32){lastFrame=t;draw(t);}
-    timer=requestAnimationFrame(tick);
+    // setPhase() can already schedule the next frame during this tick.
+    // Scheduling again here creates two independent RAF loops after a transition.
+    if(!timer)timer=requestAnimationFrame(tick);
   }
   function ensure(){
     if(!ready||!live()||document.hidden)return;
@@ -157,13 +159,39 @@
     else stop();
   }
   function onImage(){
+    if(ready)return; // A cached PNG can trigger both complete and load callbacks.
     if(img.naturalWidth!==core.WIDTH||img.naturalHeight!==core.HEIGHT)return;
     ready=true;mascot.insertBefore(canvas,img);
     resize();draw(now());
     mascot.classList.add('motion-ready');
     ensure();
   }
+  // A transformed cut-out no longer occupies its original PNG coordinates.
+  // Hit-test the rendered frame, then undo the body transform for touch zones.
+  // Returning undefined means the original image-based fallback should be used.
+  function hitTest(clientX,clientY){
+    if(!ready||!live())return undefined;
+    const box=mascot.getBoundingClientRect();
+    if(!box.width||!box.height)return null;
+    const px=Math.floor((clientX-box.left)*canvas.width/box.width);
+    const py=Math.floor((clientY-box.top)*canvas.height/box.height);
+    if(px<0||py<0||px>=canvas.width||py>=canvas.height)return null;
+    try { if(ctx.getImageData(px,py,1,1).data[3]<35)return null; }
+    catch {return undefined;}
+    const scale=Math.min(canvas.width/core.WIDTH,canvas.height/core.HEIGHT);
+    const dx=(canvas.width-core.WIDTH*scale)/2;
+    const dy=(canvas.height-core.HEIGHT*scale)/2;
+    const pose=currentPose||core.poseFor('idle',0);
+    const vx=(px-dx)/scale-core.WIDTH/2-pose.x;
+    const vy=(py-dy)/scale-core.HEIGHT/2-pose.y;
+    const cos=Math.cos(pose.angle),sin=Math.sin(pose.angle);
+    return {
+      x:(vx*cos+vy*sin)/pose.scale+core.WIDTH/2,
+      y:(vy*cos-vx*sin)/pose.scale+core.HEIGHT/2,
+    };
+  }
   const api={
+    hitTest,
     activity(kind){
       if(!live()||!ready)return;
       autoWake=false;
