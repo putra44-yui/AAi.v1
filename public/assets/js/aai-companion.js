@@ -20,6 +20,9 @@
   const showPreview = el('aaiCompanionShowPreview');
   const lowMotion = el('aaiCompanionLowMotion');
   const useMicro = el('aaiCompanionUseMicro');
+  const nativeButton = el('aaiCompanionAndroidOverlay');
+  const nativePlugin = window.Capacitor?.Plugins?.AAiCompanion || null;
+  if (nativeButton && nativePlugin) nativeButton.hidden=false;
   const preview = el('aaiCompanionPreview');
   const previewText = el('aaiCompanionPreviewText');
   const reveal = el('aaiCompanionReveal');
@@ -44,10 +47,53 @@
     pages: [], index: 0, fullText: '', streaming: false, shownFromServer: false,
     status: '', recent: [], tapHistory: [], currentRequestId: null, renderScheduled: false,
     gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null, emotion:'idle',
-    microAvailable:true, lastMicroAt:0,
+    microAvailable:true, lastMicroAt:0, nativeOn:false, nativeLastUpdate:0,
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch {} };
   const isActive = () => document.body.classList.contains('aai-companion-active');
+  function nativeBubbleUpdate(force=false) {
+    if (!state.nativeOn || !nativePlugin) return;
+    const now=Date.now();
+    if (!force && now-state.nativeLastUpdate<450) return;
+    state.nativeLastUpdate=now;
+    const content=(state.fullText || state.status || '').slice(0,8000);
+    if (!content) return;
+    void nativePlugin.update({text:content,streaming:state.streaming}).catch(() => {
+      state.nativeOn=false;
+      if (nativeButton) nativeButton.textContent='Aktifkan AAi di atas aplikasi lain';
+    });
+  }
+  async function toggleNativeOverlay() {
+    if (!nativePlugin) return;
+    try {
+      const status=await nativePlugin.status();
+      if (status.running) {
+        await nativePlugin.hide();
+        state.nativeOn=false;
+        nativeButton.textContent='Aktifkan AAi di atas aplikasi lain';
+        return;
+      }
+      if (!status.overlayGranted) {
+        await nativePlugin.requestOverlayPermission();
+        nativeButton.textContent='Setelah memberi izin, ketuk lagi';
+        return;
+      }
+      await nativePlugin.show({showComposer:prefs.composer});
+      state.nativeOn=true;
+      nativeButton.textContent='Hentikan AAi di atas aplikasi lain';
+      nativeBubbleUpdate(true);
+    } catch {
+      nativeButton.textContent='Overlay belum diizinkan · coba lagi';
+    }
+  }
+  if (nativeButton && nativePlugin) {
+    nativeButton.addEventListener('click',toggleNativeOverlay);
+    void nativePlugin.status().then(status => {
+      state.nativeOn=status.running===true;
+      nativeButton.textContent=state.nativeOn
+        ? 'Hentikan AAi di atas aplikasi lain' : 'Aktifkan AAi di atas aplikasi lain';
+    }).catch(()=>{});
+  }
 
   function layoutWidget() {
     if (!isActive()) return;
@@ -85,6 +131,7 @@
       : (state.streaming ? 'Menjawab...' : 'AAi');
     widget.dataset.emotion = state.streaming ? (state.pages.length ? 'talk' : 'think') : state.emotion;
     scheduleLayout();
+    nativeBubbleUpdate();
   }
   function showSpeech(text, type) {
     state.status = String(text || '').trim().slice(0, 200);
@@ -165,6 +212,12 @@
     prefs.active = Boolean(active);
     persist();
     refreshView();
+    if (!prefs.active && state.nativeOn && nativePlugin) {
+      void nativePlugin.hide().finally(() => {
+        state.nativeOn=false;
+        if(nativeButton) nativeButton.textContent='Aktifkan AAi di atas aplikasi lain';
+      });
+    }
   }
   modeButton.addEventListener('click', () => chooseMode(!prefs.active));
   full.addEventListener('click', () => chooseMode(false));
@@ -177,7 +230,11 @@
     settings.hidden = true;
     settingsButton.setAttribute('aria-expanded', 'false');
   });
-  showComposer.addEventListener('change', () => { prefs.composer = showComposer.checked; persist(); refreshView(); });
+  showComposer.addEventListener('change', () => {
+    prefs.composer = showComposer.checked; persist(); refreshView();
+    if (state.nativeOn && nativePlugin)
+      void nativePlugin.setComposer({visible:prefs.composer}).catch(()=>{});
+  });
   showPreview.addEventListener('change', () => { prefs.preview = showPreview.checked; persist(); refreshView(); });
   lowMotion.addEventListener('change', () => { prefs.lowMotion = lowMotion.checked; persist(); refreshView(); });
   useMicro.addEventListener('change', () => {
@@ -387,6 +444,19 @@
     },
     refreshFromChat() { if(isActive()) reloadLastSavedAnswer(); },
     setMode: chooseMode,
+    acceptNativeDraft(text) {
+      const draft=String(text || '').slice(0,700);
+      if(!draft.trim())return;
+      prefs.active=true;prefs.composer=true;persist();
+      refreshView();
+      const input=el('messageInput');
+      if(input) {
+        input.value=draft;
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        input.focus();
+      }
+      setPreviewText(draft);
+    },
   };
   let mutationTimer=null;
   const chatArea=el('chatArea');
