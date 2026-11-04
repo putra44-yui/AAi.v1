@@ -40,7 +40,7 @@ test('the chat handler never sends images to web search or permanent memory', ()
   assert.match(server, /visionImages\.length\s*\?\s*\(readEnv\('OPENROUTER_VISION_MODEL'/);
   assert.match(server, /buildVisionContent\(message, visionImages\)/);
   assert.match(server, /shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
-  assert.match(server, /if \(!visionImages\.length\) \{\s*await persistAAiMemory/);
+  assert.match(server, /if \(!visionImages\.length && !verifiedHistoryUserId\) \{[\s\S]*?await persistAAiMemory/);
   assert.match(server, /content: input\.persistedMessage/);
   assert.match(server, /gambar tidak disimpan di riwayat/);
   assert.doesNotMatch(server, /console\.(?:log|info|warn)\(.*(?:base64|dataUrl)/);
