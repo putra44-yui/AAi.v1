@@ -326,3 +326,14 @@ Keputusan terbaru dari Guh: **buat APK pengujian AAi Pendamping**. Ini mengganti
 - Versi internal `versionCode 2`, `versionName 1.1.0-qa`; build memakai penandatanganan debug otomatis, bukan key release. Paket ZIP Actions berisi `app-debug.apk` dan checksum SHA-256; masa simpan 7 hari.
 - Repo tidak memiliki berkas `.apk` yang terlacak untuk dihapus. **APK lama yang terpasang di HP tidak dapat dihapus dari GitHub.** Setelah memeriksa data lokal dan riwayat, pengguna perlu uninstall AAi lawas melalui Pengaturan Android → Aplikasi → AAi → Uninstall. Jika QA lama memiliki tanda tangan debug berbeda, Android mungkin mewajibkan uninstall versi QA lawas juga sebelum install yang baru. Jangan menghapus data secara diam-diam.
 - APK ini adalah **uji internal**, bukan rilis publik; login username-only dan WebView background masih batas keamanan/ketersediaan. Preview bisa dihapus otomatis saat PR ditutup/digabung, sehingga APK uji bergantung pada keberadaan Preview.
+
+
+## F1.F — Perbaikan 503 Supabase di APK Preview (5 November 2026)
+
+**Regresi:** APK QA menunjuk ke Cloudflare Worker Preview, bukan Worker produksi. Preview memiliki kode/UI Pendamping terbaru, tetapi tidak mewarisi `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY` dari Worker produksi. Login, sesi, dan chat mengembalikan 503 "Konfigurasi Supabase belum tersedia".
+
+**Fix tanpa menyalin secret:** `previews.services` mendeklarasikan `AAI_PRODUCTION_API` yang mengarah ke Worker produksi `aai-v0`. Pada Preview saja, `src/worker.ts` meneruskan request API autentikasi/sesi/chat (kecuali status dan reaksi lokal Pendamping) menggunakan service binding `env.AAI_PRODUCTION_API.fetch(request)`. File statis/animasi tetap disajikan oleh Preview. Produksi tidak memiliki binding ini dan jalurnya tidak berubah.
+
+**Pertimbangan:** panggilan API Preview sekarang benar-benar menggunakan data dan sesi **produksi**, bukan database uji terisolasi. Ini mengikuti tujuan akun yang sama antara APK QA dan Chatbot, tetapi membuat Preview publik bergantung pada backend produksi yang login-nya masih username-only. Untuk uji internal keluarga saja, hindari data sensitif dan jangan rilis publik sampai Supabase Auth/JWT diperbaiki. Jika nanti memakai lingkungan staging, gantikan service binding target dengan Worker staging beserta DB terpisah.
+
+**Validasi:** tes wiring + Wrangler dry-run; cek `GET /api/login` pada URL Preview harus mengembalikan 405 (bukan 503), sedangkan request invalid `POST /api/login` seharusnya 400 tanpa membuat akun/riwayat. APK QA lama tidak perlu diubah karena alamat Preview stabil; setelah Preview dibangun ulang, buka kembali aplikasi agar kode server terbaru terpakai.

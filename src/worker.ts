@@ -8,6 +8,9 @@ type WorkerBindings = Record<string, unknown> & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  // Present only in Preview. It forwards API calls to the already configured
+  // production Worker without copying privileged Supabase keys to a Preview.
+  AAI_PRODUCTION_API?: { fetch(request: Request): Promise<Response> };
 };
 
 type QueryValue = string | string[] | undefined;
@@ -127,6 +130,17 @@ export default {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // Preview builds do not inherit production secrets. Reuse the existing
+    // production API through a same-account Worker service binding, preserving
+    // the user's sessions while keeping Preview-only UI/animation assets here.
+    // The binding is declared exclusively under wrangler.previews.services.
+    if (path.startsWith('/api/') &&
+        path !== '/api/status' &&
+        path !== '/api/companion/reaction' &&
+        env.AAI_PRODUCTION_API) {
+      return env.AAI_PRODUCTION_API.fetch(request);
+    }
 
     if (path === '/api/status' && request.method === 'GET') {
       return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {

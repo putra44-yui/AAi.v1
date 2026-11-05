@@ -7,8 +7,15 @@
     "enabled": true,
     "head_sampling_rate": 0.25,
     "redact_query_string": true,
-    "logs": { "enabled": true, "invocation_logs": true, "head_sampling_rate": 0.25 },
-    "traces": { "enabled": true, "head_sampling_rate": 0.25 }
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 0.25
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.25
+    }
   },
   "assets": {
     "directory": "./public",
@@ -42,12 +49,24 @@
       {
         "name": "AAI_WEB_SEARCH_LIMITER",
         "namespace_id": "93110401",
-        "simple": { "limit": 12, "period": 60 }
+        "simple": {
+          "limit": 12,
+          "period": 60
+        }
       },
       {
         "name": "AAI_COMPANION_RATE_LIMITER",
         "namespace_id": "93110402",
-        "simple": { "limit": 8, "period": 60 }
+        "simple": {
+          "limit": 8,
+          "period": 60
+        }
+      }
+    ],
+    "services": [
+      {
+        "binding": "AAI_PRODUCTION_API",
+        "service": "aai-v0"
       }
     ]
   }
