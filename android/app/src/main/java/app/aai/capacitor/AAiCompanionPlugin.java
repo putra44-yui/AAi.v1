@@ -3,6 +3,8 @@ package id.aai.personal;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.Context;
+import android.app.Activity;
+import java.lang.ref.WeakReference;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -17,6 +19,63 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 @CapacitorPlugin(name = "AAiCompanion")
 public class AAiCompanionPlugin extends Plugin {
     private static final java.util.regex.Pattern OWNER_UUID = java.util.regex.Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+    private static volatile WeakReference<AAiCompanionPlugin> activePlugin = new WeakReference<>(null);
+    private volatile String readyOwnerId = "";
+
+    @Override public void load() {
+        super.load();
+        activePlugin = new WeakReference<>(this);
+    }
+
+    /** Forward to the already loaded AAi WebView. No network secrets enter Android. */
+    public static boolean offerOverlaySend(String ownerId, String requestId, String text) {
+        AAiCompanionPlugin plugin = activePlugin.get();
+        if (plugin == null || !OWNER_UUID.matcher(ownerId).matches()
+                || !ownerId.equals(plugin.readyOwnerId) || text == null || text.trim().isEmpty()) return false;
+        Activity activity = plugin.getActivity();
+        if (activity == null || activity.isFinishing()) return false;
+        activity.runOnUiThread(() -> {
+            // A paused WebView may not execute listeners; the service retains the draft
+            // until an explicit acknowledgment, or returns it on timeout.
+            if (activePlugin.get() != plugin || !ownerId.equals(plugin.readyOwnerId)) return;
+            JSObject payload = new JSObject();
+            payload.put("ownerId", ownerId);
+            payload.put("requestId", requestId);
+            payload.put("text", text);
+            plugin.notifyListeners("overlaySend", payload);
+        });
+        return true;
+    }
+
+    @PluginMethod
+    public void setSendChannel(PluginCall call) {
+        String ownerId = call.getString("ownerId", "");
+        if (!OWNER_UUID.matcher(ownerId).matches()) {
+            call.reject("Identitas AAi belum siap untuk mengirim dari overlay.");
+            return;
+        }
+        readyOwnerId = ownerId;
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void acknowledgeSend(PluginCall call) {
+        String ownerId = call.getString("ownerId", "");
+        String requestId = call.getString("requestId", "");
+        if (!OWNER_UUID.matcher(ownerId).matches() || !ownerId.equals(readyOwnerId)
+                || !OWNER_UUID.matcher(requestId).matches()) {
+            call.reject("Konfirmasi pesan overlay tidak valid.");
+            return;
+        }
+        Intent service = new Intent(getContext(), CompanionOverlayService.class);
+        service.setAction(CompanionOverlayService.ACTION_SEND_ACK);
+        service.putExtra("ownerId", ownerId);
+        service.putExtra("requestId", requestId);
+        service.putExtra("accepted", call.getBoolean("accepted", false));
+        try { getContext().startService(service); call.resolve(); }
+        catch (Exception ex) { call.reject("Konfirmasi pengiriman belum tersampaikan."); }
+    }
+
     @PluginMethod
     public void status(PluginCall call) {
         JSObject result = new JSObject();

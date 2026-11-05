@@ -291,3 +291,26 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 **Perbaikan:** tata letak grid tiga kolom (+, teks, Send) dengan satu tombol Send untuk Chatbot dan Pendamping, termasuk ukuran sentuh HP; reaksi maskot disimpan sementara lalu balon jawaban sebelumnya dipulihkan setelah 3,2 detik. Saat chat baru dimulai atau mode berpindah, pemulihan reaksi lama dibatalkan agar tidak menimpa respons streaming terbaru.
 
 **Tes wajib:** CSS dan unit test otomatis, lalu audit layar HP untuk respons keyboard virtual, elemen tidak saling tindih, Send/Stop saat streaming, serta sentuhan beruntun dan chat baru yang datang sebelum balon reaksi kembali. **Belum divalidasi secara visual** karena browser terhubung tidak tersedia pada sesi ini. Jangan mengklaim bug overlay Android selesai sebelum APK native terpisah diuji.
+
+
+## F1.D — Send langsung dari overlay native Android (5 November 2026, PR #17)
+
+**Masalah yang ditangani:**
+1. Tombol kirim pada bar input native sebelumnya bertuliskan `Chat` dan membuka `MainActivity`, sehingga pengguna melihat Chatbot, AAi Pendamping seperti menggandakan layar/maskot, dan pesan masih berupa draft.
+2. Reaksi sentuhan native memaksa composer yang disembunyikan menjadi terlihat, mereset `streaming=false`, lalu mengganti balon yang sedang menampilkan jawaban dengan teks reaksi tanpa memulihkannya.
+3. Saat Chrome/WebView di background, `requestAnimationFrame` bisa berhenti sementara, sehingga pembaruan balon native pada token streaming dapat tertunda.
+
+**Implementasi pada cabang fitur (bukan produksi):**
+- Tombol Send overlay bertanda ↑ mengirim event dari `CompanionOverlayService` → `AAiCompanionPlugin` → pendengar `overlaySend` di **WebView AAi yang sudah ada**. Tidak memanggil `MainActivity` dan tidak memulai Chatbot kedua.
+- Handler `AAiSendFromOverlay` memeriksa owner ID pengguna, batas panjang teks, dan keadaan chat yang tidak sedang mengirim. Pesan diproses oleh `sendMessage()` yang sama dengan mode Chatbot, termasuk sesi/branch/SSE/riwayat.
+- Plugin mengirim ACK dengan owner dan request ID **setelah server menyetujui request HTTP**, bukan sekadar setelah tombol disentuh. Input native tetap disimpan selama menunggu. ACK negatif menjaga teks dan menampilkan pesan gagal; jika tidak ada ACK dalam 11 detik, tombol pulih, draft tetap ada, dan pengguna diminta memeriksa riwayat sebelum mencoba lagi; tidak ada *automatic retry* yang berisiko mengirim ganda.
+- Request ID yang telah diterima disimpan sementara di WebView untuk mencegah pengiriman ulang pada duplikasi event selama sesi JS masih hidup.
+- Balon native menyimpan `latestModelText`: reaksi usil hanya tampil 1,8 detik, lalu jawaban terkini dipulihkan. Composer tersembunyi tidak dibuka oleh tap; `streaming` tidak direset oleh reaksi. Token saat `document.hidden` langsung memicu pembaruan balon native (dengan throttle).
+- Kunci rahasia Worker, database, ataupun API model **tidak** diberikan kepada layanan Android.
+
+**Risiko dan gate yang masih terbuka:**
+- **Autentikasi masih prototipe**: login web saat ini berdasarkan nama pengguna saja; `user_id` bukan bukti identitas kuat. Alur ini mewarisi kelemahan backend dan **hanya untuk uji internal**, tidak aman untuk rilis multi-pengguna sampai Supabase Auth/JWT dan otorisasi per pemilik sesi dibenahi.
+- Android dapat menangguhkan/mematikan WebView saat app di background atau sistem menghemat baterai. Event akan berhenti atau ACK gagal. Draft dilindungi oleh batas waktu, tetapi **pengiriman latar belakang tidak dapat dijamin** dengan arsitektur ini. Solusi produksi butuh auth yang benar dan jalur kerja background yang disepakati, bukan service-role key di APK.
+- ACK HTTP membuktikan permintaan diterima, **belum menjamin** streaming selesai atau pesan tersimpan utuh. Jika koneksi putus, lihat sesi chat sebelum mengirim ulang.
+- Belum ada kompilasi APK baru atau uji perangkat nyata dalam tahap ini. Perlu validasi di Android 11–15: tampilan di atas aplikasi lain, izin overlay, keyboard, Home/background, layar terkunci, penundaan server, stop/rekoneksi, logout/ganti akun, dua tap Send, dan balon yang disentuh ketika token mengalir. Wajib lolos sebelum PR di-merge atau rilis.
+- Perubahan mengikuti larangan membuat APK sampai animasi/UX dinilai layak; status PR tetap draft.

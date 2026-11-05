@@ -2425,7 +2425,7 @@ async function processStream(response, streamId, onDone) {
 // ══════════════════════════════════════════
 // KIRIM PESAN BARU
 // ══════════════════════════════════════════
-async function sendMessage(text, files = []) {
+async function sendMessage(text, files = [], { onRequestAccepted = null, onRequestRejected = null } = {}) {
   if (chatMutationRunning) return;
   chatMutationRunning = true;
   const area = document.getElementById('chatArea');
@@ -2478,6 +2478,7 @@ async function sendMessage(text, files = []) {
       throw new Error(errMsg);
     }
 
+    onRequestAccepted?.();
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
       if (requestLoadSerial !== sessionLoadSerial) return; // User has opened another session.
@@ -2528,6 +2529,7 @@ async function sendMessage(text, files = []) {
     });
 
     } catch (e) {
+    onRequestRejected?.();
     console.error('❌ SendMessage Error:', e);
     clearTimeout(timeoutId);
     renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
@@ -2755,6 +2757,30 @@ async function saveEdit(btn, msgId) {
 
   await sendMessageBranched(newText, originalMessage.parent_id, msgId, row);
 }
+
+// Native overlay send bridge: dispatch through the EXISTING web session and SSE.
+// No background API keys, service-role credentials or parallel chat threads.
+window.AAiSendFromOverlay = function (rawText, ownerId) {
+  const text=typeof rawText==='string'?rawText.trim():'';
+  if(!text||text.length>700||!currentUser?.id||currentUser.id!==ownerId
+      ||chatMutationRunning||!document.getElementById('chatArea')) return false;
+  return new Promise(resolve => {
+    let settled = false;
+    const acknowledge = success => {
+      if (settled) return;
+      settled = true;
+      resolve(Boolean(success));
+    };
+    // Confirm only after /api/chat accepts the request, not just on button tap.
+    void sendMessage(text, [], {
+      onRequestAccepted: () => acknowledge(true),
+      onRequestRejected: () => acknowledge(false)
+    }).catch(error => {
+      acknowledge(false);
+      console.warn('[AAi overlay] Pengiriman via sesi web gagal:', error?.message||'unknown');
+    });
+  });
+};
 
 // ══════════════════════════════════════════
 // KIRIM PESAN DARI EDIT (branched)

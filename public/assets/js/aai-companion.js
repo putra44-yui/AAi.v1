@@ -97,6 +97,36 @@
     }).catch(()=>{});
   }
 
+  // Only the signed-in AAi WebView may dispatch an overlay draft into the
+  // existing chat session. If Android suspends this WebView, the native composer
+  // keeps the text and times out rather than silently opening another UI.
+  const recentOverlayRequests=new Set();
+  async function registerNativeSendChannel(){
+    if(!ownerId||!nativePlugin?.addListener||!nativePlugin?.setSendChannel
+        ||!nativePlugin?.acknowledgeSend)return;
+    try {
+      await nativePlugin.addListener('overlaySend',async incoming=>{
+        const requestId=typeof incoming?.requestId==='string'?incoming.requestId:'';
+        const text=typeof incoming?.text==='string'?incoming.text.trim():'';
+        if(incoming?.ownerId!==ownerId||!requestId||!text||text.length>700)return;
+        let accepted=recentOverlayRequests.has(requestId);
+        if(!accepted){
+          if(!isActive())chooseMode(true);
+          accepted=(await window.AAiSendFromOverlay?.(text,ownerId))===true;
+          if(accepted){
+            recentOverlayRequests.add(requestId);
+            if(recentOverlayRequests.size>32)
+              recentOverlayRequests.delete(recentOverlayRequests.values().next().value);
+          }
+        }
+        try {await nativePlugin.acknowledgeSend({ownerId,requestId,accepted});}
+        catch { /* Android retains the draft until acknowledgment or timeout. */ }
+      });
+      await nativePlugin.setSendChannel({ownerId});
+    } catch { /* Older APKs stay on their documented draft-only handoff. */ }
+  }
+  void registerNativeSendChannel();
+
   function layoutWidget() {
     if (!isActive()) return;
     const maxX = Math.max(0, stage.clientWidth - widget.offsetWidth - 6);
@@ -483,6 +513,7 @@
       if(kind==='token'){
         state.status='';state.fullText+=String(data.token||'');
         window.AAiCompanionMotion?.activity('token');
+        if(document.hidden)nativeBubbleUpdate(); // RAF can pause in background.
         scheduleStreamRender();return;
       }
       if(kind==='done'){
