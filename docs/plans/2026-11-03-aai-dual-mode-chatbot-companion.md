@@ -314,3 +314,15 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 - ACK HTTP membuktikan permintaan diterima, **belum menjamin** streaming selesai atau pesan tersimpan utuh. Jika koneksi putus, lihat sesi chat sebelum mengirim ulang.
 - Belum ada kompilasi APK baru atau uji perangkat nyata dalam tahap ini. Perlu validasi di Android 11–15: tampilan di atas aplikasi lain, izin overlay, keyboard, Home/background, layar terkunci, penundaan server, stop/rekoneksi, logout/ganti akun, dua tap Send, dan balon yang disentuh ketika token mengalir. Wajib lolos sebelum PR di-merge atau rilis.
 - Perubahan mengikuti larangan membuat APK sampai animasi/UX dinilai layak; status PR tetap draft.
+
+
+## F1.E — APK pengujian Android Pendamping (5 November 2026)
+
+Keputusan terbaru dari Guh: **buat APK pengujian AAi Pendamping**. Ini menggantikan larangan membuat APK pada fase F1.D; penggabungan ke produksi masih menunggu uji HP.
+
+- Build memakai workflow GitHub Actions `AAi Companion Android Debug APK` pada cabang fitur. Workflow menguji JavaScript, memverifikasi URL Preview berisi event `overlaySend`, mengganti URL Capacitor **hanya di checkout runner**, menyinkronkan Capacitor, dan melakukan `assembleDebug`. URL produksi di `capacitor.config.json` dalam Git **tidak diubah**.
+- APK uji menunjuk ke Preview `feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev` yang harus dibangun dari commit fitur terbaru. **Jangan** membangun against Worker produksi yang belum memuat jembatan kirim native; hasilnya akan menampilkan tombol Send tanpa pendengar JS.
+- Android tetap `applicationIdSuffix ".qa"`, sehingga paket uji `id.aai.personal.qa` tidak menimpa `id.aai.personal` yang mungkin berisi data lokal. Nama launcher `AAi Pendamping (Uji)` supaya tidak tertukar dengan aplikasi lama. Ikon diambil dari `drawable-nodpi/aai_brand.png` (maskot kristal AAi asli yang baru, bukan ikon APK Vercel/Next).
+- Versi internal `versionCode 2`, `versionName 1.1.0-qa`; build memakai penandatanganan debug otomatis, bukan key release. Paket ZIP Actions berisi `app-debug.apk` dan checksum SHA-256; masa simpan 7 hari.
+- Repo tidak memiliki berkas `.apk` yang terlacak untuk dihapus. **APK lama yang terpasang di HP tidak dapat dihapus dari GitHub.** Setelah memeriksa data lokal dan riwayat, pengguna perlu uninstall AAi lawas melalui Pengaturan Android → Aplikasi → AAi → Uninstall. Jika QA lama memiliki tanda tangan debug berbeda, Android mungkin mewajibkan uninstall versi QA lawas juga sebelum install yang baru. Jangan menghapus data secara diam-diam.
+- APK ini adalah **uji internal**, bukan rilis publik; login username-only dan WebView background masih batas keamanan/ketersediaan. Preview bisa dihapus otomatis saat PR ditutup/digabung, sehingga APK uji bergantung pada keberadaan Preview.

@@ -175,3 +175,18 @@ test('native touch reaction restores the latest live answer without overriding c
   assert.match(service, /sendHandler\.postDelayed\(reactionRestore, 1800L\)/);
   assert.match(companion, /if\(document\.hidden\)nativeBubbleUpdate\(\)/);
 });
+
+test('Android test APK points to the updated Companion Preview and uses the crystal icon', () => {
+  const workflow=read('.github/workflows/aai-companion-android.yml');
+  const manifest=read('android/app/src/main/AndroidManifest.xml');
+  const gradle=read('android/app/build.gradle');
+  const strings=read('android/app/src/main/res/values/strings.xml');
+  assert.match(workflow,/feat-aai-companion-rig-motion-20261104-aai-v0\.aai-agents-yuiputra44\.workers\.dev/);
+  assert.match(workflow,/npx cap sync android/);
+  assert.match(workflow,/AAi-Pendamping-v1-debug-apk/);
+  assert.match(manifest,/android:icon="@drawable\/aai_brand"/);
+  assert.match(manifest,/android:roundIcon="@drawable\/aai_brand"/);
+  assert.match(gradle,/applicationIdSuffix "\.qa"/);
+  assert.match(gradle,/versionCode 2/);
+  assert.match(strings,/AAi Pendamping \(Uji\)/);
+});

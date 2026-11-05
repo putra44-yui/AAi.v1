@@ -1,6 +1,17 @@
 name: AAi Companion Android Debug APK
 
 on:
+  push:
+    branches:
+      - feat/aai-companion-rig-motion-20261104
+    paths:
+      - 'android/**'
+      - 'public/**'
+      - 'tests/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/aai-companion-android.yml'
   pull_request:
     branches: [design/aai-crystal-refresh]
     paths:
@@ -39,17 +50,43 @@ jobs:
           "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
       - name: Install JS deps
         run: npm ci
-      - name: Sync Capacitor Android using current Cloudflare website
+      - name: Test web and native bridge contracts
+        run: npm test
+      - name: Confirm AAi Preview contains the new Send bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 6 --retry-delay 8 --retry-all-errors \
+            'https://feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev/assets/js/aai-companion.js' \
+            | grep -Fq 'overlaySend'
+      - name: Point test APK to matching AAi Preview (never production)
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const file='capacitor.config.json';
+          const c=JSON.parse(fs.readFileSync(file,'utf8'));
+          const host='feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev';
+          c.server.url='https://'+host;
+          c.server.allowNavigation=[host];
+          fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n');
+          NODE
+      - name: Sync Capacitor Android with matching feature Preview
         run: npx cap sync android
       - name: Build debug APK (never requires release signing secrets)
         working-directory: android
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
-      - name: Save unsigned-in-production, debug-signed test APK
+      - name: Verify debug APK size and calculate checksum
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/AAi-Pendamping-debug.sha256
+      - name: Save debug-signed test APK (not a production release)
         uses: actions/upload-artifact@v4
         with:
-          name: AAi-Companion-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: AAi-Pendamping-v1-debug-apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/AAi-Pendamping-debug.sha256
           if-no-files-found: error
           retention-days: 7
