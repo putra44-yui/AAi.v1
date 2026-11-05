@@ -56,9 +56,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 6 --retry-delay 8 --retry-all-errors \
-            'https://feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev/assets/js/aai-companion.js' \
-            | grep -Fq 'overlaySend'
+          # Download fully before checking. grep -q on a curl pipe closes early and
+          # makes curl exit 23 under pipefail even when the marker exists.
+          preview_url='https://feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev/assets/js/aai-companion.js'
+          preview_file="${RUNNER_TEMP}/aai-companion-preview.js"
+          for attempt in {1..6}; do
+            if curl -fsSL --retry 2 --retry-delay 3 --retry-all-errors \
+              --output "$preview_file" "$preview_url" && grep -Fq 'overlaySend' "$preview_file"; then
+              echo "AAi Preview contains the Send bridge."
+              exit 0
+            fi
+            echo "AAi Preview is not ready (attempt ${attempt}/6)."
+            sleep 10
+          done
+          echo "::error::AAi Preview does not contain the expected Send bridge."
+          exit 1
       - name: Point test APK to matching AAi Preview (never production)
         run: |
           node - <<'NODE'
