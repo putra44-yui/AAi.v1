@@ -95,7 +95,7 @@ test('native overlay draft is consumed only when WebView is ready and user owner
   assert.match(plugin, /public void consumeDraft\(PluginCall call\)/);
   assert.match(plugin, /owner\.equals\(draftOwner\)/);
   assert.match(plugin, /age < 600000L/);
-  assert.match(service, /AAI_COMPANION_OWNER/);
+  assert.match(service, /AAiCompanionPlugin\.offerOverlaySend\(overlayOwnerId,requestId,draft\)/);
   assert.match(client, /await nativePlugin\.show\(\{showComposer:prefs\.composer,ownerId\}\)/);
   assert.match(client, /await nativePlugin\.consumeDraft\(\{userId:ownerId\}\)/);
   assert.match(client, /acceptNativeDraft\(draft\)/);
