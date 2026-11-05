@@ -73,3 +73,23 @@ test('web companion wires pixel-part renderer without changing canonical PNG or 
   assert.match(css,/\.aai-companion-mascot\.motion-ready img/);
   assert.doesNotMatch(rig,/aai-mascot\.jpg|vercel\.app/);
 });
+
+test('AAi Pendamping uses real alternative illustrated poses and never fakes a checking status',()=>{
+  const rig=read('public/assets/js/aai-companion-motion.js');
+  const companion=read('public/assets/js/aai-companion.js');
+  const lab=read('public/aai-motion-lab.html');
+  for(const name of ['sleep','think','talk']){
+    const path='public/assets/img/aai-companion-'+name+'-v2.webp';
+    const bytes=readFileSync(new URL('../'+path,import.meta.url));
+    assert.ok(bytes.length>20000,name+' is a real animation pose asset');
+    assert.equal(bytes.toString('ascii',0,4),'RIFF');
+    assert.equal(bytes.toString('ascii',8,12),'WEBP');
+    assert.ok(rig.includes('/assets/img/aai-companion-'+name+'-v2.webp'));
+  }
+  assert.match(rig,/function drawLayer\(/);
+  assert.match(rig,/TALK_ARMS/);
+  assert.match(rig,/phase==='wake'/);
+  assert.match(lab,/Tanpa akun|tanpa akun|tanpa akun/);
+  assert.doesNotMatch(companion,/state\.status='Aku cek dulu, ya\.'/);
+  assert.doesNotMatch(companion,/state\.status='Aku cek sumbernya dulu, ya\.'/);
+});

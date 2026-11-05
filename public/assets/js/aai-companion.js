@@ -494,19 +494,19 @@
         if (state.reactionAbort) state.reactionAbort.abort();
         state.streaming=true;state.currentRequestId=data.streamId||null;
         window.AAiCompanionMotion?.activity('begin');
-        state.fullText='';state.pages=[];state.index=0;state.status='Aku cek dulu, ya.';
+        state.fullText='';state.pages=[];state.index=0;state.status='';
         setPreviewText(data.userMessage||'');
         renderSpeech();
         return;
       }
       if(data.streamId && state.currentRequestId && data.streamId!==state.currentRequestId) return;
       if(kind==='status' && !state.fullText.trim()){
-        state.status=String(data.message||'Aku cek dulu, ya.').slice(0,200);
+        state.status=String(data.message||'').trim().slice(0,200);
         window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }
       if(kind==='reset'){
-        state.fullText='';state.pages=[];state.index=0;state.status='Aku cek sumbernya dulu, ya.';
+        state.fullText='';state.pages=[];state.index=0;state.status='';
         window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }

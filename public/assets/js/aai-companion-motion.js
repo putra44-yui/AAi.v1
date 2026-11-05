@@ -17,6 +17,26 @@
   let phase='sleep',phaseAt=0,lastAction=0,ready=false,started=false;
   let autoWake=true,fromPose=null,blendAt=0,currentPose=null;
   let timer=0,lastFrame=0,frameWidth=0,frameHeight=0;
+  // Real illustrated key poses from the same AAi master: no body-rotation substitute.
+  // Each pose still has independent ribbon/hair/hand articulation in drawLayer().
+  const altUrls = {
+    sleep:'/assets/img/aai-companion-sleep-v2.webp',
+    think:'/assets/img/aai-companion-think-v2.webp',
+    talk:'/assets/img/aai-companion-talk-v2.webp',
+  };
+  const altImages = {};
+  for (const [kind,url] of Object.entries(altUrls)) {
+    const picture = new Image();
+    picture.decoding='async';
+    picture.onload=()=>{if(ready)draw(now());};
+    picture.src=url;
+    altImages[kind]=picture;
+  }
+  let previousPhase='idle';
+  const TALK_ARMS = [
+    {name:'armLeft', pivot:[568,681], points:[[448,585],[516,593],[577,622],[597,694],[559,747],[497,742],[447,690]]},
+    {name:'armRight', pivot:[822,660], points:[[774,594],[845,577],[903,542],[971,513],[1054,540],[1058,636],[955,696],[822,741]]},
+  ];
   const reducedQuery=window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const live=()=>document.body.classList.contains('aai-companion-active')&&!stage.hidden;
   const reduced=()=>Boolean(reducedQuery?.matches)||document.body.classList.contains('aai-companion-low-motion');
@@ -72,48 +92,111 @@
     ctx.strokeStyle='rgba(171,87,116,.9)';ctx.lineWidth=4;ctx.lineCap='round';ctx.stroke();
     ctx.restore();
   }
+  function sprite(kind) {
+    const candidate=altImages[kind];
+    return candidate?.complete && candidate.naturalWidth>=500
+      && Math.abs(candidate.naturalWidth/candidate.naturalHeight-core.WIDTH/core.HEIGHT)<.02
+      ? candidate : img;
+  }
+  function kindFor(phaseName) {
+    return phaseName==='sleep'?'sleep'
+      : phaseName==='think'?'think'
+      : phaseName==='talk'?'talk':'original';
+  }
+  function drawLayer(t,kind,pose,opacity=1,articulate=true) {
+    const W=core.WIDTH,H=core.HEIGHT;
+    const source=kind==='original'?img:sprite(kind);
+    if(source===img)kind='original';
+    if(opacity<=.002)return;
+    const scale=Math.min(canvas.width/W,canvas.height/H);
+    const dx=(canvas.width-W*scale)/2,dy=(canvas.height-H*scale)/2;
+    ctx.save();
+    ctx.setTransform(scale,0,0,scale,dx,dy);
+    // Alternate artwork already depicts sleeping, thinking and speaking.
+    // Never tilt the entire picture by ~50deg to simulate sleep.
+    const drift=kind==='sleep'?1.35*Math.sin(t/950):pose.y*(kind==='original'?1:.2);
+    ctx.translate(W/2+pose.x*(kind==='original'?1:.2),H/2+drift);
+    ctx.rotate(kind==='original'?pose.angle:pose.angle*.1);
+    ctx.scale(kind==='original'?pose.scale:1+.004*Math.sin(t/1100),
+              kind==='original'?pose.scale:1+.004*Math.sin(t/1100));
+    ctx.translate(-W/2,-H/2);
+    ctx.globalAlpha=opacity;
+    ctx.drawImage(source,0,0,W,H);
+    if(articulate&&opacity>.995){
+      const parts=kind==='original'?core.PARTS
+        : core.PARTS.filter(p=>/^(ribbon|hair|skirt)/.test(p.name)).concat(kind==='talk'?TALK_ARMS:[]);
+      // Source-pixel cut-outs are articulated independently at their own joints.
+      // The torso/chest crystal always comes from its untouched source image.
+      const movement={...pose};
+      if(kind==='sleep'){
+        movement.ribbonLeft=.055*Math.sin(t/810);
+        movement.ribbonRight=-.065*Math.sin(t/810+.4);
+        movement.hairLeft=.015*Math.sin(t/960);
+        movement.hairRight=-.014*Math.sin(t/930);
+      }
+      if(kind==='think'){
+        movement.ribbonLeft=.08*Math.sin(t/840);
+        movement.ribbonRight=-.06*Math.sin(t/780);
+        movement.hairLeft=.026*Math.sin(t/1180);
+        movement.hairRight=-.03*Math.sin(t/1260);
+      }
+      if(kind==='talk'){
+        movement.armLeft=.07+.13*Math.sin(t/240);
+        movement.armRight=-.10+.19*Math.sin(t/290);
+        movement.ribbonLeft=.1*Math.sin(t/270);
+        movement.ribbonRight=-.12*Math.sin(t/270+.45);
+      }
+      const moving=parts.filter(p=>Math.abs(movement[p.name]||0)>.012);
+      ctx.save();ctx.globalCompositeOperation='destination-out';
+      for(const part of moving){path(part.points);ctx.fill();}
+      ctx.restore();
+      for(const part of moving){
+        const [px,py]=part.pivot;
+        ctx.save();ctx.translate(px,py);ctx.rotate(movement[part.name]);ctx.translate(-px,-py);
+        path(part.points);ctx.clip();ctx.drawImage(source,0,0,W,H);
+        ctx.restore();
+      }
+      if(kind==='original'){
+        if(Math.abs(pose.armLeft)>.08)circleSource(537,681,24);
+        if(Math.abs(pose.armRight)>.08)circleSource(804,744,26);
+        drawLids(pose.eyes);drawMouth(pose.mouth);
+      }
+    }
+    ctx.restore();
+  }
   function draw(t){
     if(!ready)return;
     resize();
-    const W=core.WIDTH,H=core.HEIGHT;
-    const ms=Math.max(0,t-phaseAt),s=ms/1000;
+    const s=Math.max(0,t-phaseAt)/1000;
     let pose=reduced()?core.poseFor('idle',0):core.poseFor(phase,s);
-    if(fromPose&&t-blendAt<450){
-      pose=core.poseMix(fromPose,pose,(t-blendAt)/450);
-    }else fromPose=null;
+    if(fromPose&&t-blendAt<450)pose=core.poseMix(fromPose,pose,(t-blendAt)/450);
+    else fromPose=null;
     currentPose=pose;
-    ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);
-    const scale=Math.min(canvas.width/W,canvas.height/H);
-    const dx=(canvas.width-W*scale)/2,dy=(canvas.height-H*scale)/2;
-    ctx.setTransform(scale,0,0,scale,dx,dy);
-    ctx.translate(W/2+pose.x,H/2+pose.y);
-    ctx.rotate(pose.angle);
-    ctx.scale(pose.scale,pose.scale);
-    ctx.translate(-W/2,-H/2);
-    ctx.drawImage(img,0,0,W,H);
-    // Move the actual pixels of each anatomical piece, rather than sliding
-    // the entire PNG. Erase each piece's resting pixels before redrawing it.
-    const moving=core.PARTS.filter(p=>Math.abs(pose[p.name]||0)>.012);
-    ctx.save();ctx.globalCompositeOperation='destination-out';
-    for(const part of moving){path(part.points);ctx.fill();}
-    ctx.restore();
-    for(const part of moving){
-      const [px,py]=part.pivot;
-      ctx.save();ctx.translate(px,py);ctx.rotate(pose[part.name]);ctx.translate(-px,-py);
-      path(part.points);ctx.clip();
-      ctx.drawImage(img,0,0,W,H);
-      ctx.restore();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Wake is an actual curled sleeper revealing the standing body; image
+    // crossfade stays short while arms/ribbons finish their joint motions.
+    if(phase==='wake'&&sprite('sleep')!==img){
+      const awake=core.ease((t-phaseAt)/1700);
+      drawLayer(t,'sleep',core.poseFor('sleep',s),1-awake,false);
+      drawLayer(t,'original',{...pose,angle:pose.angle*.08,scale:1+(pose.scale-1)*.1,y:pose.y*.3},awake,false);
+    }else{
+      const to=kindFor(phase);
+      const from=kindFor(previousPhase);
+      const blend=core.ease((t-blendAt)/320);
+      if(!reduced()&&to!==from&&blend<1&&phase!=='sleep'){
+        drawLayer(t,from,core.poseFor(previousPhase,0),1-blend,false);
+        drawLayer(t,to,pose,blend,false);
+      }else drawLayer(t,to,pose,1,!reduced());
     }
-    // Small source-pixel joint patches reduce holes near moved sleeves.
-    if(Math.abs(pose.armLeft)>.08)circleSource(537,681,24);
-    if(Math.abs(pose.armRight)>.08)circleSource(804,744,26);
-    drawLids(pose.eyes);drawMouth(pose.mouth);
     ctx.setTransform(1,0,0,1,0,0);
   }
   function setPhase(next){
     if(!core.validState(next))return;
     const t=now();
     if(phase===next)return;
+    previousPhase=phase;
     fromPose=currentPose||core.poseFor(phase,(t-phaseAt)/1000);
     blendAt=t;phase=next;phaseAt=t;
     widget.dataset.motion=next;
@@ -210,6 +293,7 @@
       autoWake=false;setPhase('fly');return true;
     },
     wake(){autoWake=true;setPhase('wake');},
+    sleep(){autoWake=false;setPhase('sleep');},
     getState(){return {phase,ready,reduced:reduced()};},
   };
   window.AAiCompanionMotion=api;
