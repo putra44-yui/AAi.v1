@@ -46,6 +46,7 @@
     <div id="motionStatus" role="status" aria-live="polite">Memuat gerak...</div>
   </main>
   <footer>Halaman QA visual pada cabang Preview. Tidak terhubung ke chat produksi.</footer>
+  <script>window.addEventListener('error',e=>{const el=document.getElementById('motionStatus');if(el)el.textContent='Galat animasi: '+e.message;});</script>
   <script src="/assets/js/aai-companion-motion-core.js"></script>
   <script src="/assets/js/aai-companion-motion.js"></script>
   <script>
@@ -63,6 +64,7 @@
       document.getElementById('motionStatus').textContent='Gerakan: '+labels[name];
     }
     document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>move(b.dataset.action)));
+    setInterval(()=>{const canvas=document.querySelector('#aaiCompanionMascot canvas');if(!canvas)return;const c=canvas.getContext('2d');try{const d=c.getImageData(canvas.width/2|0,canvas.height/2|0,1,1).data;const status=document.getElementById('motionStatus');status.dataset.centerAlpha=String(d[3]);let visible=0;const data=c.getImageData(0,0,canvas.width,canvas.height).data;for(let i=3;i<data.length;i+=64)if(data[i]>16)visible++;status.dataset.visiblePixels=String(visible);if(!visible)status.textContent='Renderer transparan — perlu perbaikan';}catch{}},1200);
   </script>
 </body>
 </html>

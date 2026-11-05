@@ -12,7 +12,7 @@
   canvas.className='aai-companion-rig';
   canvas.setAttribute('aria-hidden','true');
   canvas.setAttribute('role','presentation');
-  const ctx=canvas.getContext('2d',{alpha:true,desynchronized:true,willReadFrequently:true});
+  const ctx=canvas.getContext('2d',{alpha:true,willReadFrequently:true});
   if(!ctx) return; // Original accessible image remains the fallback.
   let phase='sleep',phaseAt=0,lastAction=0,ready=false,started=false;
   let autoWake=true,fromPose=null,blendAt=0,currentPose=null;
