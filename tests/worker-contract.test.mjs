@@ -335,6 +335,6 @@ test('Preview uses its own Worker backend and never forwards API traffic to prod
   assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
   assert.equal(config.previews.services, undefined);
   assert.doesNotMatch(worker, /AAI_PRODUCTION_API/);
-  assert.match(worker, /environment: env\\.AAI_ENVIRONMENT/);
+  assert.match(worker, /environment: env\.AAI_ENVIRONMENT/);
   assert.match(worker, /api_backend: 'local-worker'/);
 });
