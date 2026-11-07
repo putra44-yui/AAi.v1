@@ -1,56 +1,36 @@
-# AAi Worker Preview Backend
+# AAi Preview: current UI + existing account backend
 
-## Isolation contract
+## Purpose
 
-The branch Preview runs the same `src/worker.ts` code as production, but as its own Cloudflare Worker Preview.
+Use the branch Preview to test the latest AAi Pendamping interface while preserving the user's existing Teguh login, sessions, history, and account data. No paid Supabase development branch is created.
 
-- Preview API requests are handled by the Preview Worker itself.
-- Preview does not use an `AAI_PRODUCTION_API` service binding.
-- Preview does not inherit production variables or secrets.
-- `GET /api/status` identifies the runtime as `environment: "preview"` and `api_backend: "local-worker"`.
-- Preview rate-limit namespaces are separate from production.
-- Never put production Supabase credentials in a Preview.
+## Routing
 
-## Required Preview secrets
+- The Preview Worker serves static assets from this feature branch.
+- `GET /api/status` is handled locally and reports `environment: "preview"` and `api_backend: "production-service-binding"`.
+- `/api/companion/reaction` stays local to the Preview because it is a lightweight visual reaction endpoint.
+- Other `/api/*` requests (login, sessions, messages, chat, memory, and web-tool execution) are forwarded by the `AAI_PRODUCTION_API` service binding to the existing `aai-v0` production Worker.
+- The service binding does not deploy or modify the target Worker. It calls the already deployed production Worker.
+- Chat streaming responses are passed through without buffering so the Preview UI can use the normal SSE stream.
+- Preview-specific rate-limit namespaces remain separate for the local companion reaction endpoint.
 
-Create a separate Supabase development branch or test project first. It must have the AAi schema/migrations, but does not need production user data.
+## Important data behavior
 
-Create a local `.env.preview` file (already ignored by Git) containing the Preview-only values:
+This Preview intentionally uses the existing production account backend and Supabase database. Testing while signed in as Teguh can create normal chat/session history in that account, exactly as the user approved. Do not test destructive operations, change account settings, delete sessions, or alter production data during UI checks.
 
-```dotenv
-SUPABASE_URL=https://YOUR_PREVIEW_PROJECT.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=YOUR_PREVIEW_SERVICE_ROLE_KEY
-OPENROUTER_API_KEY=YOUR_OPENROUTER_KEY
-TAVILY_API_KEY=YOUR_TAVILY_KEY
-EXA_API_KEY=YOUR_EXA_KEY
-```
+## Verification
 
-At least one of `TAVILY_API_KEY` or `EXA_API_KEY` is needed for web search. The OpenRouter model can be selected with `OPENROUTER_MAIN_MODEL`; otherwise the code default is used.
+1. Run `npm test`.
+2. Run `npx wrangler deploy --dry-run` via the repository build command. This validates the bundle; it does not deploy production.
+3. Deploy the branch using `npx wrangler preview` only. Do not use `npx wrangler deploy` from this branch.
+4. Open the branch Preview and verify `/api/status` reports `environment: "preview"` and `api_backend: "production-service-binding"`.
+5. Sign in with the existing Teguh account, check sessions, send a normal chat, then explicitly enable web permission and test a web-search prompt.
+6. Confirm the Preview UI changes are visible while production frontend and Worker deployment remain unchanged.
 
-Upload these values to this Preview only. Run from the repository root with Wrangler authenticated:
+## Safety
 
-```sh
-npx wrangler preview secret bulk .env.preview \
-  --name feat/aai-companion-rig-motion-20261104 \
-  --worker-name aai-v0
-```
-
-This command creates a new deployment for that Preview. It does not change production or other Previews. Do not commit `.env.preview`.
-
-## Current Preview status
-
-- The Cloudflare Preview auto-build trigger is temporarily disabled to prevent repeated notifications while the isolated backend is being configured.
-- The Preview build's deploy command is temporarily a no-op. This permits tests and `wrangler deploy --dry-run` without deploying the Preview.
-- Latest verification: 125 tests passed; Wrangler dry-run completed successfully.
-- No APK was built and no Preview or production deployment was performed by that verification.
-
-## Activation checklist
-
-1. Create/choose a separate Supabase development branch or test project and apply the AAi schema/migrations. Production user data must not be copied.
-2. Upload Preview-only secrets using the command above.
-3. Restore the Cloudflare Preview deploy command to `npx wrangler preview`.
-4. Run a manual Preview build, then check `/api/status`; it must report `environment: "preview"` and `api_backend: "local-worker"`.
-5. Test login, chat, and an explicit web search. Confirm the Preview uses the development Supabase database and real Tavily/Exa results.
-6. Re-enable auto-build only after the Preview is verified.
-
-The Cloudflare Workers Build command runs tests and a Wrangler dry-run. It does not build an Android APK. Never use `wrangler deploy` from this feature branch; production deployment is a separate, explicit operation.
+- No new Supabase project or paid database branch is required.
+- No production secrets are copied into the Preview.
+- The Preview's only production connection is the explicit `AAI_PRODUCTION_API` service binding.
+- No APK build is part of this workflow.
+- Do not merge the branch or deploy the production Worker as part of Preview testing.
