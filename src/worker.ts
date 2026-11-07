@@ -3,11 +3,14 @@ import { handleCompanionMicro } from './companion-micro';
 import { handleSessionApi } from './session-api';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
-// Only /api/* and the /login alias run through this Worker.
+// Preview uses the latest frontend but intentionally proxies account/chat APIs to the existing production Worker.
+// This keeps the user's existing Teguh login and Supabase history without creating a paid database branch.
 type WorkerBindings = Record<string, unknown> & {
   ASSETS: { fetch(request: Request): Promise<Response> };
+  AAI_PRODUCTION_API?: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  AAI_ENVIRONMENT?: string;
 };
 
 type QueryValue = string | string[] | undefined;
@@ -129,13 +132,27 @@ export default {
     const path = url.pathname;
 
     if (path === '/api/status' && request.method === 'GET') {
-      return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
+      return Response.json({
+        ok: true,
+        runtime: 'cloudflare-worker',
+        environment: env.AAI_ENVIRONMENT || 'unknown',
+        api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker',
+      }, {
         headers: { 'cache-control': 'no-store' },
       });
     }
 
     if (path === '/api/companion/reaction') {
       return handleCompanionMicro(request, env);
+    }
+
+    // Keep the mascot's tiny local reaction endpoint on Preview; send login, sessions, chat,
+    // memory, and web-tool requests to the already-running production API.
+    if (path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview') {
+      if (!env.AAI_PRODUCTION_API) {
+        return jsonError(503, 'Preview API binding belum tersedia. Tidak ada request yang diteruskan ke backend lokal.');
+      }
+      return env.AAI_PRODUCTION_API.fetch(request);
     }
 
     if (path === '/api/chat' || path === '/api/chat/') {

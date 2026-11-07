@@ -33,6 +33,17 @@ test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () 
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
 });
 
+test('GLM 5.3 Flash is an explicit opt-in while Qwen Omni remains the default', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  assert.match(client, /val: 'main', label: '⚡ Qwen Omni Flash · utama'/);
+  assert.match(client, /val: 'glm-5\.3-flash'/);
+  assert.match(client, /savedModelPreference === 'free-auto' \|\| savedModelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /modelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /z-ai\/glm-5\.3-flash/);
+  assert.match(server, /modelPreference === 'free-auto'/);
+});
+
 test('PWA precache references real files and prefers network for updated app code', () => {
   const sw = read('public/sw.js');
   const list = sw.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/);
@@ -244,7 +255,7 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !hasVisionInput && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
 });
@@ -315,4 +326,38 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(server.includes('normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone))'));
   assert.ok(server.includes('buildAAiClockContext(requestBody.value.timeZone, history.length === 0)'));
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
+});
+
+test('Preview uses the branch UI and routes account APIs to the existing production Worker', () => {
+  const worker = read('src/worker.ts');
+  const config = JSON.parse(read('wrangler.jsonc'));
+  assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
+  assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.deepEqual(config.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(request)'));
+  assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker'"));
+  assert.ok(worker.includes("path === '/api/companion/reaction'"));
+  assert.ok(worker.includes('Preview API binding belum tersedia'));
+});
+
+test('web search chooses curated primary domains before widening to the general web', () => {
+  const server = read('src/chat.ts');
+  const web = read('src/aai-web.ts');
+  const tool = read('src/aai-tools.ts');
+  assert.ok(server.includes('resolveSourcePlan(message, query)'));
+  assert.ok(server.includes('source_category: outcome.sourcePlan.id'));
+  assert.ok(server.includes('broadened: outcome.broadened'));
+  assert.ok(server.includes('searched_domains: outcome.sourcePlan.domains'));
+  assert.ok(web.includes('include_domains: domains'));
+  assert.ok(web.includes('includeDomains: domains'));
+  assert.ok(web.includes('sourceMatchesDomains(source.url, domains)'));
+  assert.ok(web.includes('Sumber primer belum cukup'));
+  assert.ok(tool.includes('Sistem akan memilih domain sumber primer yang sesuai topik'));
+});
+
+test('Android debug APK workflow is manual-only until explicitly requested', () => {
+  const workflow = read('.github/workflows/aai-companion-android.yml');
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
 });

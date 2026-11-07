@@ -1,0 +1,32 @@
+name: AAi Companion motion build (no APK, no deploy)
+
+on:
+  pull_request:
+    branches:
+      - fix/aai-companion-no-double-icon-20261103
+    paths:
+      - 'public/**'
+      - 'tests/**'
+      - '.github/workflows/aai-companion-motion.yml'
+  push:
+    branches:
+      - feat/aai-companion-rig-motion-20261104
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-dry-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node --check public/assets/js/aai-companion-motion-core.js
+      - run: node --check public/assets/js/aai-companion-motion.js
+      - run: node --check public/assets/js/aai-companion.js
+      - run: npm test
+      - run: npx wrangler deploy --dry-run

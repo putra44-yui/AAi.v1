@@ -1511,6 +1511,7 @@ body.desktop-sidebar-hidden #topbarTitle {
       <label for="aaiCompanionUseMicro">Variasi ucapan cepat oleh AI
         <input id="aaiCompanionUseMicro" type="checkbox" />
       </label>
+      <button id="aaiCompanionFly" class="aai-companion-fly-button" type="button">✦ Coba AAi terbang</button>
       <button id="aaiCompanionAndroidOverlay" type="button" hidden>
         Aktifkan AAi di atas aplikasi lain
       </button>
@@ -1534,7 +1535,7 @@ body.desktop-sidebar-hidden #topbarTitle {
           <button type="button" role="menuitem" class="composer-menu-action"
                   onclick="runComposerAction('upload')">
             <span class="composer-action-icon"><i class="fas fa-paperclip" aria-hidden="true"></i></span>
-            <span class="composer-action-text"><strong>Kirim gambar</strong><small>Foto, screenshot · JPG, PNG, WebP</small></span>
+            <span class="composer-action-text"><strong>Kirim gambar/video</strong><small>JPG, PNG, WebP · video MP4 (maks. 8 MB)</small></span>
           </button>
           <button type="button" role="menuitemcheckbox" aria-checked="false"
                   class="composer-menu-action composer-web-permission" id="webPermissionBtn"
@@ -1556,7 +1557,7 @@ body.desktop-sidebar-hidden #topbarTitle {
                 placeholder="Tanya, cerita, atau mulai dari sebuah ide..."
                 onkeydown="handleKey(event)" oninput="autoResize(this);"></textarea>
       <input type="file" id="fileInput" multiple
-             accept="image/jpeg,image/png,image/webp" hidden>
+             accept="image/jpeg,image/png,image/webp,video/mp4" hidden>
       <button type="button" class="send-btn" id="sendBtn" onclick="handleSend()"
               title="Kirim pesan" aria-label="Kirim pesan">
         <i class="fas fa-arrow-up" aria-hidden="true"></i>
@@ -1569,6 +1570,8 @@ body.desktop-sidebar-hidden #topbarTitle {
 
 <script src="/assets/js/app.js?v=20261102-activity"></script>
 <script src="/assets/js/aai-companion-core.js?v=20261103-companion1"></script>
+<script src="/assets/js/aai-companion-motion-core.js?v=20261104-rig1"></script>
+<script src="/assets/js/aai-companion-motion.js?v=20261104-rig1"></script>
 <script src="/assets/js/aai-companion.js?v=20261103-companion1"></script>
 <script src="/assets/js/pwa.js"></script>
 </body>

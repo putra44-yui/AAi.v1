@@ -1,15 +1,7 @@
 name: AAi Companion Android Debug APK
 
+# APK builds are manual-only. Source/test commits must not start Android builds.
 on:
-  pull_request:
-    branches: [design/aai-crystal-refresh]
-    paths:
-      - 'android/**'
-      - 'public/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/aai-companion-android.yml'
   workflow_dispatch:
 
 permissions:
@@ -39,17 +31,55 @@ jobs:
           "$SDK_MANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
       - name: Install JS deps
         run: npm ci
-      - name: Sync Capacitor Android using current Cloudflare website
+      - name: Test web and native bridge contracts
+        run: npm test
+      - name: Confirm AAi Preview contains the new Send bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Download fully before checking. grep -q on a curl pipe closes early and
+          # makes curl exit 23 under pipefail even when the marker exists.
+          preview_url='https://feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev/assets/js/aai-companion.js'
+          preview_file="${RUNNER_TEMP}/aai-companion-preview.js"
+          for attempt in {1..6}; do
+            if curl -fsSL --retry 2 --retry-delay 3 --retry-all-errors \
+              --output "$preview_file" "$preview_url" && grep -Fq 'overlaySend' "$preview_file"; then
+              echo "AAi Preview contains the Send bridge."
+              exit 0
+            fi
+            echo "AAi Preview is not ready (attempt ${attempt}/6)."
+            sleep 10
+          done
+          echo "::error::AAi Preview does not contain the expected Send bridge."
+          exit 1
+      - name: Point test APK to matching AAi Preview (never production)
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const file='capacitor.config.json';
+          const c=JSON.parse(fs.readFileSync(file,'utf8'));
+          const host='feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev';
+          c.server.url='https://'+host;
+          c.server.allowNavigation=[host];
+          fs.writeFileSync(file,JSON.stringify(c,null,2)+'\n');
+          NODE
+      - name: Sync Capacitor Android with matching feature Preview
         run: npx cap sync android
       - name: Build debug APK (never requires release signing secrets)
         working-directory: android
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon :app:assembleDebug
-      - name: Save unsigned-in-production, debug-signed test APK
+      - name: Verify debug APK size and calculate checksum
+        run: |
+          test -s android/app/build/outputs/apk/debug/app-debug.apk
+          sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/AAi-Pendamping-debug.sha256
+      - name: Save debug-signed test APK (not a production release)
         uses: actions/upload-artifact@v4
         with:
-          name: AAi-Companion-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: AAi-Pendamping-v1-debug-apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/debug/AAi-Pendamping-debug.sha256
           if-no-files-found: error
           retention-days: 7

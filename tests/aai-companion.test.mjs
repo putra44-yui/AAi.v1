@@ -95,7 +95,7 @@ test('native overlay draft is consumed only when WebView is ready and user owner
   assert.match(plugin, /public void consumeDraft\(PluginCall call\)/);
   assert.match(plugin, /owner\.equals\(draftOwner\)/);
   assert.match(plugin, /age < 600000L/);
-  assert.match(service, /AAI_COMPANION_OWNER/);
+  assert.match(service, /AAiCompanionPlugin\.offerOverlaySend\(overlayOwnerId,requestId,draft\)/);
   assert.match(client, /await nativePlugin\.show\(\{showComposer:prefs\.composer,ownerId\}\)/);
   assert.match(client, /await nativePlugin\.consumeDraft\(\{userId:ownerId\}\)/);
   assert.match(client, /acceptNativeDraft\(draft\)/);
@@ -131,4 +131,74 @@ test('transparent pixels do not trigger mascot reactions in browser or Android',
   assert.match(native, /private float hitVisibleSprite\(MotionEvent event\)/);
   assert.match(native, /Color\.alpha\(canonicalSprite\.getPixel\(x,y\)\)<35/);
   assert.match(native, /if\(hitVisibleSprite\(event\)<0\) return false/);
+});
+
+test('native overlay Send uses the existing WebView session and waits for HTTP acceptance', () => {
+  const service=read('android/app/src/main/java/app/aai/capacitor/CompanionOverlayService.java');
+  const plugin=read('android/app/src/main/java/app/aai/capacitor/AAiCompanionPlugin.java');
+  const web=read('public/assets/js/app.js');
+  const companion=read('public/assets/js/aai-companion.js');
+  const composer=service.split('private void createBottomComposer() {')[1]
+    ?.split('private void updateComposerVisibility() {')[0] || '';
+  assert.match(composer, /send\.setText\("↑"\)/);
+  assert.match(composer, /AAiCompanionPlugin\.offerOverlaySend\(overlayOwnerId,requestId,draft\)/);
+  assert.doesNotMatch(composer, /startActivity\(/, 'Send must not open a second Chatbot');
+  assert.match(service, /ACTION_SEND_ACK/);
+  assert.match(service, /pendingOverlayRequestId\.equals\(intent\.getStringExtra\("requestId"\)\)/);
+  assert.match(service, /pendingOverlayDraft\.equals\(composerInput\.getText\(\)\.toString\(\)\.trim\(\)\)/);
+  assert.match(service, /Periksa riwayat sebelum mencoba lagi/);
+  assert.match(plugin, /notifyListeners\("overlaySend", payload\)/);
+  assert.match(plugin, /public void setSendChannel\(PluginCall call\)/);
+  assert.match(plugin, /public void acknowledgeSend\(PluginCall call\)/);
+  assert.match(companion, /await nativePlugin\.addListener\('overlaySend'/);
+  assert.match(companion, /await nativePlugin\.setSendChannel\(\{ownerId\}\)/);
+  assert.match(companion, /await nativePlugin\.acknowledgeSend\(\{ownerId,requestId,accepted\}\)/);
+  assert.match(companion, /await window\.AAiSendFromOverlay\?\.\(text,ownerId\)/);
+  assert.match(web, /window\.AAiSendFromOverlay = function/);
+  assert.match(web, /currentUser\.id!==ownerId/);
+  assert.match(web, /onRequestAccepted:\s*\(\)\s*=>\s*acknowledge\(true\)/);
+  assert.match(web, /onRequestRejected:\s*\(\)\s*=>\s*acknowledge\(false\)/);
+  assert.match(web, /await fetch\('\/api\/chat'/);
+  assert.doesNotMatch(plugin, /SUPABASE_SERVICE_ROLE|OPENROUTER_API_KEY/);
+  assert.doesNotMatch(service, /SUPABASE_SERVICE_ROLE|OPENROUTER_API_KEY/);
+});
+
+test('native touch reaction restores the latest live answer without overriding composer settings', () => {
+  const service=read('android/app/src/main/java/app/aai/capacitor/CompanionOverlayService.java');
+  const companion=read('public/assets/js/aai-companion.js');
+  const reaction=service.split('private void onMascotTap(float relativeY) {')[1]
+    ?.split('private void createBottomComposer() {')[0] || '';
+  assert.doesNotMatch(reaction, /composerVisible=true/);
+  assert.doesNotMatch(reaction, /streaming=false/);
+  assert.match(service, /latestModelText = text/);
+  assert.match(service, /setPages\(latestModelText\)/);
+  assert.match(service, /sendHandler\.postDelayed\(reactionRestore, 1800L\)/);
+  assert.match(companion, /if\(document\.hidden\)nativeBubbleUpdate\(\)/);
+});
+
+test('Android test APK points to the updated Companion Preview and uses the crystal icon', () => {
+  const workflow=read('.github/workflows/aai-companion-android.yml');
+  const manifest=read('android/app/src/main/AndroidManifest.xml');
+  const gradle=read('android/app/build.gradle');
+  const strings=read('android/app/src/main/res/values/strings.xml');
+  assert.match(workflow,/feat-aai-companion-rig-motion-20261104-aai-v0\.aai-agents-yuiputra44\.workers\.dev/);
+  assert.match(workflow,/npx cap sync android/);
+  assert.match(workflow,/AAi-Pendamping-v1-debug-apk/);
+  assert.match(manifest,/android:icon="@drawable\/aai_brand"/);
+  assert.match(manifest,/android:roundIcon="@drawable\/aai_brand"/);
+  assert.match(gradle,/applicationIdSuffix "\.qa"/);
+  assert.match(gradle,/versionCode 2/);
+  assert.match(strings,/AAi Pendamping \(Uji\)/);
+});
+
+test('Preview serves the branch UI while routing account APIs to the existing production Worker', () => {
+  const worker = read('src/worker.ts');
+  const wrangler = JSON.parse(read('wrangler.jsonc'));
+  assert.equal(wrangler.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.deepEqual(wrangler.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(request)'));
+  assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker'"));
+  assert.ok(worker.includes("path === '/api/companion/reaction'"));
+  assert.ok(worker.includes('Preview API binding belum tersedia'));
 });
