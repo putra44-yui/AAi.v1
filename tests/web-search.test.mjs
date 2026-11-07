@@ -23,6 +23,14 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.equal(cloudflare.id, 'cloudflare');
   assert.ok(cloudflare.domains.includes('developers.cloudflare.com'));
 
+  const node = resolveSourcePlan('Cek dokumentasi Node.js terbaru', 'Node.js documentation');
+  assert.equal(node.id, 'software-docs');
+  assert.ok(node.domains.includes('nodejs.org'));
+
+  const paper = resolveSourcePlan('Cari paper benchmark model bahasa', 'benchmark model bahasa');
+  assert.equal(paper.id, 'research');
+  assert.ok(paper.domains.includes('arxiv.org'));
+
   const general = resolveSourcePlan('Cari tren teknologi terbaru', 'tren teknologi terbaru');
   assert.equal(general.id, 'general');
   assert.deepEqual(general.domains, []);
