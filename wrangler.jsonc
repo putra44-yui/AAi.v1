@@ -3,6 +3,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-31",
   "keep_vars": true,
+  "vars": {
+    "AAI_ENVIRONMENT": "production"
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 0.25,
@@ -45,6 +48,9 @@
     }
   ],
   "previews": {
+    "vars": {
+      "AAI_ENVIRONMENT": "preview"
+    },
     "ratelimits": [
       {
         "name": "AAI_WEB_SEARCH_LIMITER",
@@ -61,12 +67,6 @@
           "limit": 8,
           "period": 60
         }
-      }
-    ],
-    "services": [
-      {
-        "binding": "AAI_PRODUCTION_API",
-        "service": "aai-v0"
       }
     ]
   }
