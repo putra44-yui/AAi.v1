@@ -68,6 +68,12 @@
           "period": 60
         }
       }
+    ],
+    "services": [
+      {
+        "binding": "AAI_PRODUCTION_API",
+        "service": "aai-v0"
+      }
     ]
   }
 }
