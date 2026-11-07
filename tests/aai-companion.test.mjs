@@ -191,15 +191,13 @@ test('Android test APK points to the updated Companion Preview and uses the crys
   assert.match(strings,/AAi Pendamping \(Uji\)/);
 });
 
-test('Preview forwards API to configured Worker without copying Supabase service secrets', () => {
+test('Preview runs its own API backend without a production service binding', () => {
   const worker = read('src/worker.ts');
   const wrangler = JSON.parse(read('wrangler.jsonc'));
-  const bindings = wrangler.previews.services || [];
-  assert.deepEqual(bindings, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
-  assert.ok(!wrangler.services, 'Production must not proxy into itself');
-  assert.match(worker, /path\.startsWith\('\/api\/'\)/);
-  assert.match(worker, /path !== '\/api\/companion\/reaction'/);
-  assert.match(worker, /env\.AAI_PRODUCTION_API/);
-  assert.match(worker, /return env\.AAI_PRODUCTION_API\.fetch\(request\)/);
+  assert.equal(wrangler.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.equal(wrangler.previews.services, undefined);
+  assert.doesNotMatch(worker, /AAI_PRODUCTION_API/);
+  assert.match(worker, /api_backend: 'local-worker'/);
+  assert.match(worker, /environment: env\.AAI_ENVIRONMENT/);
   assert.doesNotMatch(JSON.stringify(wrangler), /SUPABASE_SERVICE_ROLE_KEY|OPENROUTER_API_KEY/);
 });
