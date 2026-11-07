@@ -1,26 +1,7 @@
 name: AAi Companion Android Debug APK
 
+# APK builds are manual-only. Source/test commits must not start Android builds.
 on:
-  push:
-    branches:
-      - feat/aai-companion-rig-motion-20261104
-    paths:
-      - 'android/**'
-      - 'public/**'
-      - 'tests/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/aai-companion-android.yml'
-  pull_request:
-    branches: [design/aai-crystal-refresh]
-    paths:
-      - 'android/**'
-      - 'public/**'
-      - 'capacitor.config.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/aai-companion-android.yml'
   workflow_dispatch:
 
 permissions:
