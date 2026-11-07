@@ -37,12 +37,20 @@ npx wrangler preview secret bulk .env.preview \
 
 This command creates a new deployment for that Preview. It does not change production or other Previews. Do not commit `.env.preview`.
 
-## Verification
+## Current Preview status
 
-1. Run `npm test`.
-2. Run `npx wrangler deploy --dry-run` (the repository's `npm run build` does both).
-3. Deploy only with `npx wrangler preview`.
-4. Check `/api/status`; it must report `environment: "preview"` and `api_backend: "local-worker"`.
-5. Test login, chat, and an explicit web search. Confirm the Preview uses the development Supabase branch and real Tavily/Exa results.
+- The Cloudflare Preview auto-build trigger is temporarily disabled to prevent repeated notifications while the isolated backend is being configured.
+- The Preview build's deploy command is temporarily a no-op. This permits tests and `wrangler deploy --dry-run` without deploying the Preview.
+- Latest verification: 125 tests passed; Wrangler dry-run completed successfully.
+- No APK was built and no Preview or production deployment was performed by that verification.
 
-The Cloudflare Workers Build command runs tests and a Wrangler dry-run. It does not build an Android APK. The Preview deploy command is separate and must never be replaced with `wrangler deploy` for this branch.
+## Activation checklist
+
+1. Create/choose a separate Supabase development branch or test project and apply the AAi schema/migrations. Production user data must not be copied.
+2. Upload Preview-only secrets using the command above.
+3. Restore the Cloudflare Preview deploy command to `npx wrangler preview`.
+4. Run a manual Preview build, then check `/api/status`; it must report `environment: "preview"` and `api_backend: "local-worker"`.
+5. Test login, chat, and an explicit web search. Confirm the Preview uses the development Supabase database and real Tavily/Exa results.
+6. Re-enable auto-build only after the Preview is verified.
+
+The Cloudflare Workers Build command runs tests and a Wrangler dry-run. It does not build an Android APK. Never use `wrangler deploy` from this feature branch; production deployment is a separate, explicit operation.
