@@ -191,13 +191,14 @@ test('Android test APK points to the updated Companion Preview and uses the crys
   assert.match(strings,/AAi Pendamping \(Uji\)/);
 });
 
-test('Preview runs its own API backend without a production service binding', () => {
+test('Preview serves the branch UI while routing account APIs to the existing production Worker', () => {
   const worker = read('src/worker.ts');
   const wrangler = JSON.parse(read('wrangler.jsonc'));
   assert.equal(wrangler.previews.vars.AAI_ENVIRONMENT, 'preview');
-  assert.equal(wrangler.previews.services, undefined);
-  assert.doesNotMatch(worker, /AAI_PRODUCTION_API/);
-  assert.match(worker, /api_backend: 'local-worker'/);
-  assert.match(worker, /environment: env\.AAI_ENVIRONMENT/);
-  assert.doesNotMatch(JSON.stringify(wrangler), /SUPABASE_SERVICE_ROLE_KEY|OPENROUTER_API_KEY/);
+  assert.deepEqual(wrangler.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
+  assert.match(worker, /env\\.AAI_PRODUCTION_API\\.fetch\\(request\\)/);
+  assert.match(worker, /path\\.startsWith\\('\\/api\\/'\\) && env\\.AAI_ENVIRONMENT === 'preview'/);
+  assert.match(worker, /api_backend: env\\.AAI_ENVIRONMENT === 'preview' \\? 'production-service-binding' : 'local-worker'/);
+  assert.match(worker, /path === '\\/api\\/companion\\/reaction'/);
+  assert.match(worker, /Preview API binding belum tersedia/);
 });
