@@ -203,3 +203,36 @@ test('Tavily source-linked images are enabled and attached only to their matchin
     globalThis.fetch = oldFetch;
   }
 });
+
+test('Enough primary-domain results stop early without paying for an unnecessary Exa or broad search', async () => {
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), payload: JSON.parse(init.body) });
+    return {
+      ok: true,
+      json: async () => ({ results: [
+        { url: 'https://jdih.kpu.go.id/produk-hukum/one', title: 'Dokumen KPU', content: 'Sumber primer satu' },
+        { url: 'https://peraturan.bpk.go.id/Details/two', title: 'Peraturan BPK', content: 'Sumber primer dua' },
+      ] }),
+    };
+  };
+  try {
+    const decision = { search: true, query: 'PKPU Nomor 4 Tahun 2024', explicit: true };
+    const plan = resolveSourcePlan('Cari PKPU Nomor 4 Tahun 2024', decision.query);
+    const outcome = await collectWebSources(
+      decision,
+      { TAVILY_API_KEY: 'fake-tavily', EXA_API_KEY: 'fake-exa' },
+      () => {},
+      undefined,
+      plan,
+    );
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].payload.include_domains.includes('jdih.kpu.go.id'));
+    assert.equal(outcome.sources.length, 2);
+    assert.equal(outcome.broadened, false);
+    assert.deepEqual(outcome.attempts, [{ provider: 'tavily', scope: 'targeted', sourceCount: 2 }]);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
