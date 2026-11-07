@@ -328,13 +328,15 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
 });
 
-test('Preview uses its own Worker backend and never forwards API traffic to production', () => {
+test('Preview uses the branch UI and routes account APIs to the existing production Worker', () => {
   const worker = read('src/worker.ts');
   const config = JSON.parse(read('wrangler.jsonc'));
   assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
   assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
-  assert.equal(config.previews.services, undefined);
-  assert.doesNotMatch(worker, /AAI_PRODUCTION_API/);
-  assert.match(worker, /environment: env\.AAI_ENVIRONMENT/);
-  assert.match(worker, /api_backend: 'local-worker'/);
+  assert.deepEqual(config.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(request)'));
+  assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker'"));
+  assert.ok(worker.includes("path === '/api/companion/reaction'"));
+  assert.ok(worker.includes('Preview API binding belum tersedia'));
 });
