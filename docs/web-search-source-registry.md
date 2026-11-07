@@ -20,6 +20,7 @@ The system does not require both providers on every query. If the first provider
 | Topic | Initial priority domains |
 |---|---|
 | KPU / Pemilu / Pilkada | jdih.kpu.go.id, kpu.go.id, bawaslu.go.id, dkpp.go.id, mkri.id, peraturan.bpk.go.id, peraturan.go.id |
+| PBJ / procurement | jdih.lkpp.go.id, lkpp.go.id, peraturan.bpk.go.id, peraturan.go.id |
 | Indonesian laws and decisions | peraturan.bpk.go.id, peraturan.go.id, jdihn.go.id, jdih.setneg.go.id, mkri.id |
 | Cloudflare | developers.cloudflare.com, cloudflare.com, blog.cloudflare.com |
 | Supabase | supabase.com |
@@ -29,8 +30,9 @@ The system does not require both providers on every query. If the first provider
 | Research papers | arxiv.org, aclanthology.org, openreview.net, proceedings.mlr.press, dl.acm.org, ieeexplore.ieee.org, nature.com, sciencedirect.com |
 | General software docs | nodejs.org, react.dev, vite.dev, typescriptlang.org, developer.mozilla.org, postgresql.org, docs.python.org, doc.rust-lang.org, developer.android.com |
 | Education | kemendikdasmen.go.id, kemdikbud.go.id, kemendikti.go.id, jdih.kemdikbud.go.id, banpt.or.id |
-| Finance and economy | bi.go.id, ojk.go.id, bps.go.id, kemenkeu.go.id, idx.co.id |
+| Finance and economy | bi.go.id, ojk.go.id, bps.go.id, kemenkeu.go.id, idx.co.id, pajak.go.id |
 | Public health | kemkes.go.id, bpom.go.id, who.int, cdc.gov, nhs.uk |
+| Government / ASN | bkn.go.id, menpan.go.id, kemendagri.go.id, setkab.go.id, indonesia.go.id, jdih.setneg.go.id |
 | News | antaranews.com, reuters.com, apnews.com, bbc.com |
 
 The registry is an initial curated routing aid, not a complete catalogue and not a guarantee that every page on a listed domain is authoritative. Add a domain only after checking that it is relevant and controlled by the intended publisher. Topic matching order matters: specialist domains such as KPU take precedence over general legal/news categories.
