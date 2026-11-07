@@ -19,6 +19,10 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.ok(election.domains.includes('jdih.kpu.go.id'));
   assert.ok(election.domains.includes('peraturan.bpk.go.id'));
 
+  const pbj = resolveSourcePlan('Cari aturan PBJ dan swakelola terbaru', 'LKPP swakelola');
+  assert.equal(pbj.id, 'procurement');
+  assert.ok(pbj.domains.includes('jdih.lkpp.go.id'));
+
   const cloudflare = resolveSourcePlan('Bagaimana konfigurasi Cloudflare Workers?', 'Cloudflare Workers configuration');
   assert.equal(cloudflare.id, 'cloudflare');
   assert.ok(cloudflare.domains.includes('developers.cloudflare.com'));
