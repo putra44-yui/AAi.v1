@@ -196,9 +196,9 @@ test('Preview serves the branch UI while routing account APIs to the existing pr
   const wrangler = JSON.parse(read('wrangler.jsonc'));
   assert.equal(wrangler.previews.vars.AAI_ENVIRONMENT, 'preview');
   assert.deepEqual(wrangler.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
-  assert.match(worker, /env\\.AAI_PRODUCTION_API\\.fetch\\(request\\)/);
-  assert.match(worker, /path\\.startsWith\\('\\/api\\/'\\) && env\\.AAI_ENVIRONMENT === 'preview'/);
-  assert.match(worker, /api_backend: env\\.AAI_ENVIRONMENT === 'preview' \\? 'production-service-binding' : 'local-worker'/);
-  assert.match(worker, /path === '\\/api\\/companion\\/reaction'/);
-  assert.match(worker, /Preview API binding belum tersedia/);
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(request)'));
+  assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker'"));
+  assert.ok(worker.includes("path === '/api/companion/reaction'"));
+  assert.ok(worker.includes('Preview API binding belum tersedia'));
 });
