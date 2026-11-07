@@ -33,6 +33,17 @@ test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () 
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
 });
 
+test('GLM 5.3 Flash is an explicit opt-in while Qwen Omni remains the default', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  assert.match(client, /val: 'main', label: '⚡ Qwen Omni Flash · utama'/);
+  assert.match(client, /val: 'glm-5\.3-flash'/);
+  assert.match(client, /savedModelPreference === 'free-auto' \|\| savedModelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /modelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /z-ai\/glm-5\.3-flash/);
+  assert.match(server, /modelPreference === 'free-auto'/);
+});
+
 test('PWA precache references real files and prefers network for updated app code', () => {
   const sw = read('public/sw.js');
   const list = sw.match(/const PRECACHE_URLS = \[([\s\S]*?)\];/);
@@ -244,7 +255,7 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !hasVisionInput && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
 });
