@@ -41,6 +41,12 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     domains: ['jdih.kpu.go.id', 'kpu.go.id', 'bawaslu.go.id', 'dkpp.go.id', 'mkri.id', 'peraturan.bpk.go.id', 'peraturan.go.id'],
   },
   {
+    id: 'procurement',
+    label: 'sumber resmi pengadaan barang/jasa pemerintah',
+    match: /\b(?:pbj|pengadaan barang(?: dan)? jasa|lkpp|swakelola|pokja pemilihan|katalog elektronik|e-katalog|tender pengadaan|seleksi pengadaan)\b/i,
+    domains: ['jdih.lkpp.go.id', 'lkpp.go.id', 'peraturan.bpk.go.id', 'peraturan.go.id'],
+  },
+  {
     id: 'indonesia-law',
     label: 'basis data peraturan dan putusan Indonesia',
     match: /\b(?:undang[- ]undang|uu\s*\d|perppu|perpres|peraturan pemerintah|peraturan menteri|putusan mk|putusan mahkamah konstitusi|jdih|lembaran negara)\b/i,
@@ -98,13 +104,19 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: 'finance',
     label: 'otoritas dan data ekonomi Indonesia',
     match: /\b(?:bank indonesia|bi rate|ojk|rupiah|kurs|inflasi|suku bunga|pajak|kemenkeu|bursa efek indonesia|ihsg)\b/i,
-    domains: ['bi.go.id', 'ojk.go.id', 'bps.go.id', 'kemenkeu.go.id', 'idx.co.id'],
+    domains: ['bi.go.id', 'ojk.go.id', 'bps.go.id', 'kemenkeu.go.id', 'idx.co.id', 'pajak.go.id'],
   },
   {
     id: 'public-health',
     label: 'otoritas kesehatan publik',
     match: /\b(?:kesehatan publik|vaksin|imunisasi|bpom|kementerian kesehatan|kemkes|who|wabah|epidemi)\b/i,
     domains: ['kemkes.go.id', 'bpom.go.id', 'who.int', 'cdc.gov', 'nhs.uk'],
+  },
+  {
+    id: 'government',
+    label: 'situs resmi instansi pemerintah Indonesia',
+    match: /\b(?:asn|cpns|pppk|aparatur sipil negara|reformasi birokrasi|kebijakan pemerintah|layanan publik|kepegawaian)\b/i,
+    domains: ['bkn.go.id', 'menpan.go.id', 'kemendagri.go.id', 'setkab.go.id', 'indonesia.go.id', 'jdih.setneg.go.id'],
   },
   {
     id: 'news',
