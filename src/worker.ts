@@ -3,14 +3,12 @@ import { handleCompanionMicro } from './companion-micro';
 import { handleSessionApi } from './session-api';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
-// Only /api/* and the /login alias run through this Worker.
+// Every Preview executes this Worker directly; it never forwards API traffic to production.
 type WorkerBindings = Record<string, unknown> & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
-  // Present only in Preview. It forwards API calls to the already configured
-  // production Worker without copying privileged Supabase keys to a Preview.
-  AAI_PRODUCTION_API?: { fetch(request: Request): Promise<Response> };
+  AAI_ENVIRONMENT?: string;
 };
 
 type QueryValue = string | string[] | undefined;
@@ -131,19 +129,13 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Preview builds do not inherit production secrets. Reuse the existing
-    // production API through a same-account Worker service binding, preserving
-    // the user's sessions while keeping Preview-only UI/animation assets here.
-    // The binding is declared exclusively under wrangler.previews.services.
-    if (path.startsWith('/api/') &&
-        path !== '/api/status' &&
-        path !== '/api/companion/reaction' &&
-        env.AAI_PRODUCTION_API) {
-      return env.AAI_PRODUCTION_API.fetch(request);
-    }
-
     if (path === '/api/status' && request.method === 'GET') {
-      return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
+      return Response.json({
+        ok: true,
+        runtime: 'cloudflare-worker',
+        environment: env.AAI_ENVIRONMENT || 'unknown',
+        api_backend: 'local-worker',
+      }, {
         headers: { 'cache-control': 'no-store' },
       });
     }
