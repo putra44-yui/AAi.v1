@@ -16,7 +16,7 @@ export function shouldRunWebToolDecision(
 export function applyWebToolPermission(decision: WebSearchDecision, permission: WebToolPermission): WebSearchDecision {
   return permission === 'allow' ? decision : { search: false, query: '', explicit: false };
 }
-export type WebSearchProgress = (step: 'tavily' | 'exa' | 'found' | 'unavailable', count?: number) => void;
+export type WebSearchProgress = (step: 'tavily' | 'exa' | 'found' | 'unavailable' | 'report', count?: number, message?: string) => void;
 export type WebSearchScope = 'targeted' | 'general';
 export type WebSearchAttempt = { provider: 'tavily' | 'exa'; scope: WebSearchScope; sourceCount: number };
 export type WebSourcePlan = { id: string; label: string; domains: string[] };
@@ -56,7 +56,7 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: 'supabase',
     label: 'dokumentasi resmi Supabase',
     match: /\b(?:supabase|supabase-js|postgrest|supabase auth|supabase storage)\b/i,
-    domains: ['supabase.com', 'github.com/supabase'],
+    domains: ['supabase.com'],
   },
   {
     id: 'openai',
