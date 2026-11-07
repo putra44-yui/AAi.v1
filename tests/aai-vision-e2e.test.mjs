@@ -85,3 +85,80 @@ test('vision HTTP chat really streams a multimodal provider payload without pers
     globalThis.fetch = original;
   }
 });
+
+
+test('GLM selection sends MP4 video to OpenRouter and never persists its base64', async () => {
+  const original = globalThis.fetch;
+  const requests = [];
+  const providerPayloads = [];
+  const stored = [];
+  const mp4 = Buffer.alloc(16);
+  mp4.writeUInt32BE(16, 0);
+  mp4.write('ftyp', 4, 'ascii');
+  mp4.write('isom', 8, 'ascii');
+  const videoData = 'data:video/mp4;base64,' + mp4.toString('base64');
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      const method = (init.method || 'GET').toUpperCase();
+      requests.push({ path: url.pathname, method });
+      if (url.host === 'openrouter.ai') {
+        const payload = JSON.parse(String(init.body || '{}'));
+        providerPayloads.push(payload);
+        if (payload.stream === false) return Response.json({ choices: [{ message: { content: 'Ringkasan video' } }] });
+        const stream = 'data: ' + JSON.stringify({
+          model: payload.model,
+          choices: [{ delta: { content:'Video menunjukkan seorang anak sedang bermain.' } }],
+        }) + '\n\ndata: [DONE]\n\n';
+        return new Response(stream, { headers: { 'content-type':'text/event-stream' } });
+      }
+      if (url.pathname === '/rest/v1/sessions') {
+        if (method === 'POST') return Response.json({ id:UUID_S });
+        if (method === 'PATCH') return Response.json([]);
+      }
+      if (url.pathname === '/rest/v1/messages') {
+        if (method === 'GET') return Response.json([]);
+        if (method === 'POST') {
+          const row = JSON.parse(String(init.body || '{}'));
+          stored.push(row);
+          return Response.json({ id:row.role === 'user' ? UUID_U : UUID_R });
+        }
+      }
+      if (url.pathname === '/rest/v1/users') return Response.json({ id:UUID_A, username:'fixture', person_id:null });
+      if (url.pathname === '/rest/v1/persons') return Response.json([]);
+      throw new Error('Unhandled mock request: ' + method + ' ' + url.pathname);
+    };
+
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method:'POST', headers:{'content-type':'application/json'},
+      body:JSON.stringify({
+        user_id:UUID_A,
+        message:'Ceritakan apa yang terjadi di video ini.',
+        model_preference:'glm-5.3-flash',
+        web_permission:'allow',
+        files:[{name:'clip.mp4',type:'video/mp4',base64:videoData}],
+      }),
+    }), {
+      SUPABASE_URL:'https://fixture.supabase.co',
+      SUPABASE_SERVICE_ROLE_KEY:'fixture-secret',
+      OPENROUTER_API_KEY:'fixture-api-key',
+      OPENROUTER_MAIN_MODEL:'fixture/main-model',
+      TAVILY_API_KEY:'fixture-search-key',
+    });
+    const sse = await response.text();
+    assert.equal(response.status, 200, sse);
+    assert.match(sse, /Video menunjukkan seorang anak sedang bermain/);
+    const streamedPayload = providerPayloads.find(item => item.stream === true);
+    assert.ok(streamedPayload);
+    assert.equal(streamedPayload.model, 'z-ai/glm-5.3-flash');
+    assert.equal(streamedPayload.tools, undefined, 'video must not expose web tools');
+    const user = streamedPayload.messages.findLast(item => item.role === 'user');
+    assert.equal(user.content[0].text, 'Ceritakan apa yang terjadi di video ini.');
+    assert.deepEqual(user.content[1], {type:'video_url',video_url:{url:videoData}});
+    assert.ok(stored.some(row => row.role === 'user' && row.content.includes('[🎞️ Lampiran video: 1')));
+    assert.ok(stored.every(row => !JSON.stringify(row).includes(videoData)), 'video base64 must never appear in DB writes');
+    assert.equal(requests.filter(req => req.path.includes('search')).length, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
