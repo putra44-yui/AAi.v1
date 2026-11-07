@@ -327,3 +327,14 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(server.includes('buildAAiClockContext(requestBody.value.timeZone, history.length === 0)'));
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
 });
+
+test('Preview uses its own Worker backend and never forwards API traffic to production', () => {
+  const worker = read('src/worker.ts');
+  const config = JSON.parse(read('wrangler.jsonc'));
+  assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
+  assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.equal(config.previews.services, undefined);
+  assert.doesNotMatch(worker, /AAI_PRODUCTION_API/);
+  assert.match(worker, /environment: env\\.AAI_ENVIRONMENT/);
+  assert.match(worker, /api_backend: 'local-worker'/);
+});
