@@ -355,3 +355,9 @@ test('web search chooses curated primary domains before widening to the general 
   assert.ok(web.includes('Sumber primer belum cukup'));
   assert.ok(tool.includes('Sistem akan memilih domain sumber primer yang sesuai topik'));
 });
+
+test('Android debug APK workflow is manual-only until explicitly requested', () => {
+  const workflow = read('.github/workflows/aai-companion-android.yml');
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
+});
