@@ -340,3 +340,18 @@ test('Preview uses the branch UI and routes account APIs to the existing product
   assert.ok(worker.includes("path === '/api/companion/reaction'"));
   assert.ok(worker.includes('Preview API binding belum tersedia'));
 });
+
+test('web search chooses curated primary domains before widening to the general web', () => {
+  const server = read('src/chat.ts');
+  const web = read('src/aai-web.ts');
+  const tool = read('src/aai-tools.ts');
+  assert.ok(server.includes('resolveSourcePlan(message, query)'));
+  assert.ok(server.includes('source_category: outcome.sourcePlan.id'));
+  assert.ok(server.includes('broadened: outcome.broadened'));
+  assert.ok(server.includes('searched_domains: outcome.sourcePlan.domains'));
+  assert.ok(web.includes('include_domains: domains'));
+  assert.ok(web.includes('includeDomains: domains'));
+  assert.ok(web.includes('sourceMatchesDomains(source.url, domains)'));
+  assert.ok(web.includes('Sumber primer belum cukup'));
+  assert.ok(tool.includes('Sistem akan memilih domain sumber primer yang sesuai topik'));
+});
