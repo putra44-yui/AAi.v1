@@ -4029,7 +4029,8 @@ async function prepareAAiVideo(file) {
   if (currentModelPreference !== 'glm-5.3-flash') {
     throw new Error('Untuk membaca video, pilih GLM 5.3 Flash di menu Model AI dulu, ya.');
   }
-  if (!AAI_SUPPORTED_VIDEO_TYPES.has(file.type)) {
+  const mime = file.type || (/\.mp4$/i.test(file.name) ? 'video/mp4' : '');
+  if (!AAI_SUPPORTED_VIDEO_TYPES.has(mime)) {
     throw new Error('Untuk saat ini AAi menerima video MP4. Video MOV/WebM menyusul.');
   }
   if (file.size > AAI_MAX_VIDEO_BYTES) {
