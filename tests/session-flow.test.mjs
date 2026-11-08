@@ -13,6 +13,51 @@ const env = {
   OPENROUTER_API_KEY: 'fixture-not-a-secret',
 };
 
+async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
+  const oldFetch = globalThis.fetch;
+  const providerCalls = [];
+  const dbCalls = [];
+  try {
+    globalThis.fetch = async (input, init = {}) => {
+      const url = String(input);
+      const method = init.method || 'GET';
+      if (url.includes('openrouter.ai')) {
+        providerCalls.push(JSON.parse(init.body));
+        return new Response('data: {"choices":[{"delta":{"content":"Halo dari model terpilih."}}]}\\n\\ndata: [DONE]\\n\\n', {
+          status: 200, headers: { 'content-type': 'text/event-stream' },
+        });
+      }
+      assert.match(url, /fixture\\.supabase\\.co\\/rest\\/v1\\//);
+      const resource = new URL(url).pathname.split('/').at(-1);
+      const parsedBody = init.body ? JSON.parse(init.body) : null;
+      dbCalls.push({ resource, method, body: parsedBody });
+      if (resource === 'users' && method === 'GET') {
+        return Response.json({ id: userId, username: 'teguh', person_id: null });
+      }
+      if (resource === 'persons' && method === 'GET') return Response.json([]);
+      if (resource === 'ai_personas' && method === 'GET') return Response.json([]);
+      if (resource === 'sessions' && method === 'POST') return Response.json({ id: sessionId }, { status: 201 });
+      if (resource === 'sessions' && method === 'PATCH') return new Response(null, { status: 204 });
+      if (resource === 'messages' && method === 'GET') return Response.json([]);
+      if (resource === 'messages' && method === 'POST') {
+        return Response.json({ id: parsedBody.role === 'user' ? userMessageId : assistantMessageId }, { status: 201 });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+    const response = await POST(new Request('https://aai.example/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...requestHeaders },
+      body: JSON.stringify(body),
+    }), runtimeEnv);
+    const stream = await response.text();
+    const events = stream.split('\\n\\n').filter((line) => line.startsWith('data: '))
+      .map((line) => JSON.parse(line.slice(6))).filter((event) => typeof event === 'object');
+    return { status: response.status, providerCalls, dbCalls, events };
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+}
+
 test('session context follows the active parent chain, ignoring sibling replies', () => {
   const rows = [
     { id: 'u1', role: 'user', content: 'Halo', parent_id: null },
@@ -112,6 +157,42 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
   } finally {
     globalThis.fetch = oldFetch;
   }
+});
+
+
+test('browser extension explicit model selection wins over DeepSeek environment defaults', async () => {
+  const result = await captureChatRequest({
+    message: 'Uji model browser',
+    user_id: userId,
+    model_id: 'qwen/qwen3.8-omni-flash',
+  }, {
+    'x-aai-client': 'browser-extension',
+  }, {
+    ...env,
+    OPENROUTER_MAIN_MODEL: 'deepseek/deepseek-v4.1-flash-1017',
+    OPENROUTER_VISION_MODEL: 'deepseek/deepseek-v4.1-flash-1017',
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.providerCalls[0].model, 'qwen/qwen3.8-omni-flash');
+  assert.equal(result.events.find((event) => event.phase === 'init')?.model_requested, 'qwen/qwen3.8-omni-flash');
+  assert.equal(result.events.find((event) => event.done)?.model_used, 'qwen/qwen3.8-omni-flash');
+});
+
+test('browser extension defaults to Qwen 3.8 Flash when model_id is missing', async () => {
+  const result = await captureChatRequest({
+    message: 'Uji default browser',
+    user_id: userId,
+  }, {
+    'x-aai-client': 'browser-extension',
+  }, {
+    ...env,
+    OPENROUTER_MAIN_MODEL: 'deepseek/deepseek-v4.1-flash-1017',
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.providerCalls[0].model, 'qwen/qwen3.8-flash');
+  assert.equal(result.events.find((event) => event.phase === 'init')?.model_requested, 'qwen/qwen3.8-flash');
 });
 
 test('session API requires a user ID for deleting a session', async () => {
