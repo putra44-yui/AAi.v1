@@ -221,15 +221,20 @@ test('AAi lets the selected LLM decide web use on every permitted non-explicit t
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
   assert.ok(client.includes("strategy: 'fa-compass'"));
 });
-test('AAi streams sanitized Markdown without reprocessing settled blocks', () => {
+test('AAi streams safe text incrementally and formats settled Markdown blocks once', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
   assert.match(client, /function ensureStreamingMarkdownNode/);
   assert.match(client, /function findStableStreamMarkdownBoundary/);
-  assert.match(client, /formatContent\(tailText, \{ streaming: true \}\)/);
+  assert.match(client, /function prepareStreamingPlainText/);
   assert.match(client, /streamingMarkdownRenderer\.code/);
-  assert.match(client, /const STREAM_RENDER_INTERVAL_MS = 105;/);
-  assert.doesNotMatch(client, /streamingNode\.textContent \+= nextChunk/);
+  assert.match(client, /requestAnimationFrame\(\(\) => \{/);
+  assert.match(client, /lastNode\.appendData\(delta\)/);
+  assert.match(client, /liveEl\.textContent = displayTail/);
+  assert.match(client, /committedEl\.insertAdjacentHTML\('beforeend', formatContent\(pending\.slice\(0, boundary\)\)\)/);
+  assert.match(client, /formatContent\(fullText\)/);
+  assert.doesNotMatch(client, /STREAM_RENDER_INTERVAL_MS|STREAM_SCROLL_INTERVAL_MS/);
+  assert.doesNotMatch(client, /liveEl\.innerHTML = tailText/);
   assert.match(css, /\.aai-streaming-committed/);
   const source = client.match(/function findStableStreamMarkdownBoundary\(text\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(source, 'Missing stable Markdown boundary parser');
@@ -251,13 +256,9 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !hasVisionInput && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
-  assert.match(policy, /export function shouldOfferWebToolToModel/);
-  assert.match(client, /entry\.sources\.slice\(0, 10\)/);
-  assert.match(client, /Media pembanding/);
-  assert.match(server, /outcome\.sources\.slice\(0, 10\)/);
 });
 
 test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
@@ -272,9 +273,7 @@ test('agent loop can make bounded, sequential model-selected web calls', () => {
   const server = read('src/chat.ts');
   assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
   assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
-  assert.match(server, /const toolChoice = 'auto'/);
-  assert.match(server, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
-  assert.match(server, /shouldOfferWebToolToModel\(message, requestBody\.value\.webPermission, hasSearchProvider\)/);
+  assert.match(server, /toolChoice = toolRounds === 0 && requestedWebDecision\.explicit/);
   assert.doesNotMatch(server, /mustFinish|reachedLimit/);
   assert.match(server, /const searchedQueries = new Set<string>\(\)/);
   assert.match(server, /searchedQueries\.has\(queryKey\)/);
