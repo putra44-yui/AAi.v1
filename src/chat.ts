@@ -355,7 +355,7 @@ async function verifyBrowserContinuation(token: string, env: RuntimeEnv): Promis
     if (value.webPermission !== 'allow' && value.webPermission !== 'deny') return null;
     if (value.timeZone !== null && typeof value.timeZone !== 'string') return null;
     if (typeof value.isNewSession !== 'boolean') return null;
-    if (!Number.isInteger(value.toolRound) || (value.toolRound as number) < 1 || (value.toolRound as number) > 12) return null;
+    if (!Number.isInteger(value.toolRound) || (value.toolRound as number) < 1 || (value.toolRound as number) > 32) return null;
     if (value.debugSessionId !== null && typeof value.debugSessionId !== 'string') return null;
     if (!Array.isArray(value.messages) || value.messages.length > 80) return null;
     if (!value.messages.every(item => isJsonObject(item) &&
@@ -1471,7 +1471,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             const searchedQueries = new Set<string>();
             let toolRounds = browserContinuation?.state.toolRound || 0;
             let previousSearchFound = 0;
-            const maxToolRounds = isBrowserExtension ? 12 : MAX_WEB_TOOL_ROUNDS;
+            const maxToolRounds = isBrowserExtension ? 32 : MAX_WEB_TOOL_ROUNDS;
             const agentStartedAt = Date.now();
             while (!streamCanceled && toolRounds < maxToolRounds
               && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
