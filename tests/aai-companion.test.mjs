@@ -24,6 +24,19 @@ test('companion is a second view, with original mascot not generic stock or lega
   assert.doesNotMatch(js, /aai-mascot\.jpg|a-ai-rust\.vercel\.app/);
 });
 
+test('Companion mode is disabled for this release while its code and canonical assets remain', () => {
+  const html = read('public/index.html');
+  const css = read('public/assets/css/aai-companion.css');
+  const js = read('public/assets/js/aai-companion.js');
+  assert.match(html, /id="aaiCompanionSwitch" hidden/);
+  assert.match(css, /\.aai-companion-switch\[hidden\]\s*\{\s*display:none !important/);
+  assert.match(js, /const COMPANION_MODE_ENABLED = false/);
+  assert.match(js, /window\.AAiCompanionMotion/);
+  assert.match(js, /nativePlugin\?\.hide/);
+  assert.match(html, /id="aaiCompanionStage"/);
+  assert.match(html, /aai-companion-motion\.js/);
+});
+
 test('comic pages use previous / next inside one balloon and preserve complete answer for Chatbot', () => {
   const sample = 'Masalahnya bukan tools. Riwayat itu ada, tetapi disimpan di sesi lain. '
     + 'Kita membutuhkan pencarian yang aman ke riwayat akun sendiri. '
