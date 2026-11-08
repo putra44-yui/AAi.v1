@@ -248,7 +248,11 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     id: 'news',
     label: 'media berita utama',
     match: /\b(?:berita|breaking news|berita terbaru|kabar(?:\s+(?:terbaru|tentang|soal))?|apa kabar|peristiwa hari ini|update terbaru|news)\b/i,
-    priorityDomains: ['antaranews.com', 'kompas.com', 'tempo.co', 'detik.com', 'cnnindonesia.com'],
+    priorityDomains: [
+      'antaranews.com', 'kompas.com', 'tempo.co', 'detik.com', 'cnnindonesia.com',
+      'liputan6.com', 'tribunnews.com', 'tvonenews.com', 'sindonews.com',
+      'kumparan.com', 'suara.com', 'tirto.id', 'idntimes.com', 'bisnis.com',
+    ],
     relatedDomains: ['reuters.com', 'apnews.com', 'bbc.com'],
   },
 ];
@@ -486,21 +490,33 @@ export async function collectWebSources(
     progress(selectedProvider);
     attempted = true;
     const resultLimit = 10;
+    const newsComparison = scope === 'comparison' && sourcePlan.categories.includes('news');
+    const providerQuery = newsComparison
+      ? [
+          decision.query,
+          sourcePlan.categories.includes('kpu-election') ? 'Komisi Pemilihan Umum Indonesia' : '',
+          'berita terbaru media nasional',
+        ].filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 380)
+      : decision.query;
+    const newsWindowDays = 30;
+    const newsStartDate = new Date(Date.now() - newsWindowDays * 24 * 60 * 60 * 1000).toISOString();
     const payload = selectedProvider === 'tavily'
       ? {
-          query: decision.query,
-          search_depth: /(?:sumber resmi|kapan|tanggal|peraturan|undang-undang|uu\s*\d|pkpu|versi|rilis|terbaru)/i.test(decision.query) ? 'advanced' : 'basic',
+          query: providerQuery,
+          search_depth: newsComparison || /(?:sumber resmi|kapan|tanggal|peraturan|undang-undang|uu\s*\d|pkpu|versi|rilis|terbaru)/i.test(decision.query) ? 'advanced' : 'basic',
           max_results: resultLimit,
           include_answer: false,
           include_raw_content: false,
           include_images: true,
+          ...(newsComparison ? { topic: 'news', days: newsWindowDays } : {}),
           ...(domains.length ? { include_domains: domains } : {}),
         }
       : {
-          query: decision.query,
+          query: providerQuery,
           type: 'auto',
           numResults: resultLimit,
           contents: { highlights: true },
+          ...(newsComparison ? { category: 'news', startPublishedDate: newsStartDate } : {}),
           ...(domains.length ? { includeDomains: domains } : {}),
         };
     const endpoint = selectedProvider === 'tavily'
@@ -636,6 +652,11 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
       + (comparisonDomains.length
         ? 'Urutan pembanding yang diminta: setelah domain utama, periksa ' + comparisonDomains.join(', ') + '. '
           + (comparisonUsed ? 'Tahap pembanding sudah dijalankan setelah pencarian utama. ' : 'Tahap pembanding belum dijalankan. ')
+          + (comparisonUsed
+            ? 'Hasil tiap provider pada tahap pembanding (setelah filter domain): '
+              + attempts.filter(attempt => attempt.scope === 'comparison')
+                .map(attempt => attempt.provider + ' ' + attempt.sourceCount + ' hasil').join('; ') + '. '
+            : '')
         : '')
       + (relatedDomainsUsed
         ? 'Sumber utama belum cukup; pencarian dilanjutkan ke domain rujukan terkait: ' + relatedDomains.join(', ') + '. '
