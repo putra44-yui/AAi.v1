@@ -320,7 +320,7 @@ test('inline source citations blend with prose instead of rendering as buttons',
   assert.ok(css.includes("font-size: .94em"));
   assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
-  assert.ok(index.includes("aai-studio.css?v=20261101-tables"));
+  assert.ok(index.includes("aai-studio.css?v=20261108-stream-render1"));
   assert.match(sw, /aai-shell-v[0-9]+/);
 });
 
