@@ -24,6 +24,16 @@ test('essential API routes still have Worker handlers', () => {
   assert.match(worker, /Konfigurasi Supabase belum tersedia/);
 });
 
+test('Companion micro-model endpoint is disabled by default without deleting its handler', () => {
+  const worker = read('src/worker.ts');
+  const wrangler = JSON.parse(read('wrangler.jsonc'));
+  assert.match(worker, /import \{ handleCompanionMicro \}/);
+  assert.match(worker, /AAI_COMPANION_ENABLED !== 'true'/);
+  assert.match(worker, /return handleCompanionMicro\(request, env\)/);
+  assert.equal(wrangler.vars.AAI_COMPANION_ENABLED, 'false');
+  assert.equal(wrangler.previews.vars.AAI_COMPANION_ENABLED, 'false');
+});
+
 test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
