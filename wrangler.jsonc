@@ -4,7 +4,8 @@
   "compatibility_date": "2026-10-31",
   "keep_vars": true,
   "vars": {
-    "AAI_ENVIRONMENT": "production"
+    "AAI_ENVIRONMENT": "production",
+    "AAI_COMPANION_ENABLED": "false"
   },
   "observability": {
     "enabled": true,
@@ -50,6 +51,7 @@
   "previews": {
     "vars": {
       "AAI_ENVIRONMENT": "preview",
+      "AAI_COMPANION_ENABLED": "false",
       "AAI_PREVIEW_API_VERSION_ID": "33b4164f-11bb-4fbc-8896-c95dd03466bc"
     },
     "ratelimits": [
