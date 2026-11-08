@@ -17,7 +17,7 @@ export function applyWebToolPermission(decision: WebSearchDecision, permission: 
   return permission === 'allow' ? decision : { search: false, query: '', explicit: false };
 }
 export type WebSearchProgress = (step: 'tavily' | 'exa' | 'found' | 'unavailable' | 'report', count?: number, message?: string) => void;
-export type WebSearchScope = 'priority' | 'related' | 'general';
+export type WebSearchScope = 'priority' | 'comparison' | 'related' | 'general';
 export type WebSearchAttempt = {
   provider: 'tavily' | 'exa';
   scope: WebSearchScope;
@@ -31,6 +31,9 @@ export type WebSourcePlan = {
   domains: string[];
   priorityDomains: string[];
   relatedDomains: string[];
+  /** Domains that must be searched after the primary domains when the user explicitly requests a comparison stage. */
+  comparisonDomains?: string[];
+  comparisonLabel?: string;
 };
 export type WebSearchOutcome = {
   sources: WebSource[];
@@ -255,21 +258,44 @@ function uniqueDomains(domains: string[]): string[] {
 }
 
 export function resolveSourcePlan(userMessage: string, query: string): WebSourcePlan {
-  const text = (String(userMessage || '') + ' ' + String(query || '')).replace(/\s+/g, ' ').trim();
+  const userText = String(userMessage || '').replace(/\s+/g, ' ').trim();
+  const text = (userText + ' ' + String(query || '')).replace(/\s+/g, ' ').trim();
   const matches = SOURCE_REGISTRY.filter(entry => entry.match.test(text)).slice(0, 3);
   if (!matches.length) {
-    return { id: 'general', label: 'web umum', categories: [], domains: [], priorityDomains: [], relatedDomains: [] };
+    return {
+      id: 'general', label: 'web umum', categories: [], domains: [],
+      priorityDomains: [], relatedDomains: [], comparisonDomains: [],
+    };
   }
-  const priorityDomains = uniqueDomains(matches.flatMap(entry => entry.priorityDomains));
-  const relatedDomains = uniqueDomains(matches.flatMap(entry => entry.relatedDomains))
-    .filter(domain => !priorityDomains.includes(domain));
+
+  const election = matches.find(entry => entry.id === 'kpu-election');
+  const news = matches.find(entry => entry.id === 'news');
+  // Preserve an explicit source order from the user. In particular, "official KPU
+  // first, then compare with news media" must not merge official and media domains
+  // into one unordered priority allowlist.
+  const officialFirst = /\b(?:utamakan|prioritaskan|dahulukan|mulai\s+dari|prioritas(?:kan)?)\b[\s\S]{0,120}\b(?:sumber|situs|kanal)\s+resmi\b/i.test(userText);
+  const mediaAfter = /\b(?:kemudian|lalu|setelah\s+itu|baru|selanjutnya|bandingkan|dibandingkan)\b[\s\S]{0,120}\b(?:media|berita|pers)\b/i.test(userText);
+  const stagedOfficialMedia = Boolean(election && news && officialFirst && mediaAfter);
+
+  const orderedMatches = stagedOfficialMedia ? [election!, news!] : matches;
+  const primaryMatches = stagedOfficialMedia ? [election!] : orderedMatches;
+  const priorityDomains = uniqueDomains(primaryMatches.flatMap(entry => entry.priorityDomains));
+  const comparisonDomains = stagedOfficialMedia ? uniqueDomains(news!.priorityDomains) : [];
+  const relatedDomains = uniqueDomains(orderedMatches.flatMap(entry => entry.relatedDomains))
+    .filter(domain => !priorityDomains.includes(domain) && !comparisonDomains.includes(domain));
+  const labels = stagedOfficialMedia
+    ? [election!.label, news!.label]
+    : orderedMatches.map(entry => entry.label);
+
   return {
-    id: matches[0].id,
-    label: matches.map(entry => entry.label).join(' dan '),
-    categories: matches.map(entry => entry.id),
-    domains: uniqueDomains([...priorityDomains, ...relatedDomains]),
+    id: orderedMatches[0].id,
+    label: stagedOfficialMedia ? labels[0] + ', kemudian ' + labels[1] : labels.join(' dan '),
+    categories: orderedMatches.map(entry => entry.id),
+    domains: uniqueDomains([...priorityDomains, ...comparisonDomains, ...relatedDomains]),
     priorityDomains,
     relatedDomains,
+    comparisonDomains,
+    ...(stagedOfficialMedia ? { comparisonLabel: news!.label } : {}),
   };
 }
 
@@ -493,6 +519,17 @@ export async function collectWebSources(
     return accepted;
   };
 
+  const availableProviders: Array<'tavily' | 'exa'> = [
+    ...(tavilyKey ? ['tavily' as const] : []),
+    ...(exaKey ? ['exa' as const] : []),
+  ];
+  const nextProvider = (): 'tavily' | 'exa' => {
+    if (availableProviders.length === 1) return availableProviders[0];
+    const count = (name: 'tavily' | 'exa') => attempts.filter(item => item.provider === name).length;
+    const last = attempts[attempts.length - 1]?.provider;
+    return [...availableProviders].sort((a, b) => count(a) - count(b)
+      || (a === last ? 1 : b === last ? -1 : a === 'tavily' ? -1 : 1))[0];
+  };
   const preferredProvider = (): 'tavily' | 'exa' => {
     const tavilyCount = attempts.filter(item => item.provider === 'tavily').reduce((sum, item) => sum + item.sourceCount, 0);
     const exaCount = attempts.filter(item => item.provider === 'exa').reduce((sum, item) => sum + item.sourceCount, 0);
@@ -507,9 +544,42 @@ export async function collectWebSources(
       sources = mergeWebSources(sources, await runProvider('exa', sourcePlan.priorityDomains, 'priority'));
     }
 
-    // One controlled expansion: related official sources / reputable publishers.
-    // If no related domains exist, fall back to the general web once instead.
-    if (sources.length < 2 && !signal?.aborted) {
+    const comparisonDomains = sourcePlan.comparisonDomains || [];
+    if (comparisonDomains.length && !signal?.aborted) {
+      // An explicitly requested comparison is a required second stage: run it
+      // even when the primary stage already returned two or more sources.
+      broadened = true;
+      progress('report', undefined,
+        'Sumber utama sudah diperiksa. Sekarang aku bandingkan dengan ' + (sourcePlan.comparisonLabel || 'sumber pembanding') + '.');
+      const beforeComparison = sources.length;
+      const comparisonProvider = nextProvider();
+      sources = mergeWebSources(sources, await runProvider(comparisonProvider, comparisonDomains, 'comparison'));
+      const comparisonAdded = sources.length - beforeComparison;
+
+      // If the comparison provider returned nothing, use the other provider when
+      // a request slot remains. The overall per-tool-call cap stays at three.
+      if (comparisonAdded === 0 && attempts.length < 3 && availableProviders.length > 1 && !signal?.aborted) {
+        const alternate = nextProvider();
+        if (alternate !== comparisonProvider) {
+          sources = mergeWebSources(sources, await runProvider(alternate, comparisonDomains, 'comparison'));
+        }
+      }
+
+      // Only spend a remaining request on related authorities if evidence is still
+      // sparse; do not replace a requested media comparison with a broad search.
+      if (sources.length < 2 && attempts.length < 3 && !signal?.aborted) {
+        broadened = true;
+        if (sourcePlan.relatedDomains.length) {
+          progress('report', undefined, 'Pembanding masih terbatas. Aku periksa otoritas terkait dulu.');
+          sources = mergeWebSources(sources, await runProvider(nextProvider(), sourcePlan.relatedDomains, 'related'));
+        } else {
+          progress('report', undefined, 'Pembanding masih terbatas. Aku perluas pencarian ke web umum.');
+          sources = mergeWebSources(sources, await runProvider(nextProvider(), [], 'general'));
+        }
+      }
+    } else if (sources.length < 2 && !signal?.aborted) {
+      // Default behavior for a single source profile or an unordered multi-profile
+      // request remains unchanged.
       broadened = true;
       if (sourcePlan.relatedDomains.length) {
         progress('report', undefined, 'Sumber utama belum cukup. Aku periksa situs rujukan terkait dulu.');
@@ -552,6 +622,8 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
   const attempts = Array.isArray(outcome.attempts) ? outcome.attempts : [];
   const priorityDomains = Array.isArray(plan?.priorityDomains) ? plan.priorityDomains : [];
   const relatedDomains = Array.isArray(plan?.relatedDomains) ? plan.relatedDomains : [];
+  const comparisonDomains = Array.isArray(plan?.comparisonDomains) ? plan.comparisonDomains : [];
+  const comparisonUsed = attempts.some(attempt => attempt.scope === 'comparison');
   const hasTargetDomains = priorityDomains.length > 0;
   const relatedDomainsUsed = attempts.some(attempt => attempt.scope === 'related');
   const generalSearchUsed = attempts.some(attempt => attempt.scope === 'general');
@@ -561,6 +633,10 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
       + (hasTargetDomains
         ? 'Domain utama yang diperiksa: ' + priorityDomains.join(', ') + '. '
         : 'Tidak ada domain khusus yang cocok; pencarian menggunakan web umum. ')
+      + (comparisonDomains.length
+        ? 'Urutan pembanding yang diminta: setelah domain utama, periksa ' + comparisonDomains.join(', ') + '. '
+          + (comparisonUsed ? 'Tahap pembanding sudah dijalankan setelah pencarian utama. ' : 'Tahap pembanding belum dijalankan. ')
+        : '')
       + (relatedDomainsUsed
         ? 'Sumber utama belum cukup; pencarian dilanjutkan ke domain rujukan terkait: ' + relatedDomains.join(', ') + '. '
         : '')
@@ -590,6 +666,9 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
     + 'Jangan menebak tanggal atau nomor versi. Jika tanggal persis tidak tertulis di sumber, katakan belum bisa memastikan, bukan menebak bulannya. '
     + 'Jawab hanya pertanyaan yang diminta; jangan menambahkan klaim kronologi lain tanpa bukti. '
     + 'Prioritaskan halaman resmi dibanding blog/komunitas bila tersedia. '
+    + (comparisonDomains.length
+      ? 'Ikuti urutan sumber yang diminta pengguna: bedakan sumber utama/resmi dari sumber pembanding/media, dan jangan menyebut media sebagai sumber resmi. '
+      : '')
     + 'Untuk tiap klaim faktual penting, tautkan URL persis dari daftar dengan nama sumber singkat, contohnya [Node.js](https://nodejs.org/...), bukan URL polos atau sitasi angka [1]. '
     + 'Jangan menyebut Wikipedia, blog, atau sumber komunitas sebagai sumber resmi. Jika diminta sumber resmi tetapi tidak ada dalam hasil, katakan terus terang bahwa sumber resmi belum ditemukan. '
     + 'Jika sumber bertentangan, nyatakan perbedaannya secara jujur. '
