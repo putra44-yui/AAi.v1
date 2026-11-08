@@ -333,6 +333,7 @@ test('Preview routes account APIs to a pinned backend version and fails closed w
   const config = JSON.parse(read('wrangler.jsonc'));
   assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
   assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.match(config.previews.vars.AAI_PREVIEW_API_VERSION_ID, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(config.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
   assert.ok(worker.includes('AAI_PREVIEW_API_VERSION_ID'));
   assert.ok(worker.includes('Cloudflare-Workers-Version-Overrides'));
