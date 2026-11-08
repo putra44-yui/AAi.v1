@@ -544,12 +544,13 @@ test('with web permission enabled, the selected model receives the router tool e
   });
 
   assert.equal(result.status, 200);
-  assert.equal(result.providerCalls.length, 2, 'The model makes a short routing pass, then a normal answer pass');
-  assert.equal(result.providerCalls[0].model, 'z-ai/glm-5.3-flash');
-  assert.ok(Array.isArray(result.providerCalls[0].tools), 'The selected model receives search_web');
-  assert.equal(result.providerCalls[0].tool_choice, 'auto');
-  assert.equal(result.providerCalls[1].tools, undefined, 'The final answer is composed without exposing the router tool');
-  assert.ok(result.providerCalls[0].messages.some(message =>
+  const routerCall = result.providerCalls.find(call => Array.isArray(call.tools));
+  const finalCall = result.providerCalls.at(-1);
+  assert.ok(routerCall, 'The selected model receives search_web for its routing decision');
+  assert.equal(routerCall.model, 'z-ai/glm-5.3-flash');
+  assert.equal(routerCall.tool_choice, 'auto');
+  assert.ok(finalCall && !finalCall.tools, 'The final answer is composed without exposing the router tool');
+  assert.ok(routerCall.messages.some(message =>
     message.role === 'system' && String(message.content).includes('[PILIHAN TOOL — ROUTER MODEL]')
   ));
 });

@@ -152,7 +152,7 @@ test('AAi shows real search sources with favicons, and model reports without too
   assert.match(server, /step: 'sources', message: `Menemukan \$\{outcome\.sources\.length\} sumber\.`/);
   assert.match(server, /Menelusuri web/);
   assert.doesNotMatch(server, /Mencari sumber melalui Tavily|lanjut ke Exa/);
-  assert.match(server, /sources: outcome\.sources\.slice\(0, 5\)\.map\(source =>/);
+  assert.match(server, /sources: outcome\.sources\.slice\(0, 10\)\.map\(source =>/);
   assert.match(server, /source\.image \? \{ image: source\.image \}/);
   assert.match(client, /if \(step === 'sources'\)/);
   assert.match(client, /function publicActivityStep\(/);

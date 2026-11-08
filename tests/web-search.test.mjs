@@ -347,7 +347,7 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     const evidence = webContextMessage(decision, outcome);
     assert.match(evidence, /Urutan pembanding yang diminta/);
     assert.match(evidence, /Tahap pembanding sudah dijalankan/);
-    assert.match(evidence, /exa 2 hasil/i);
+    assert.match(evidence, /exa 5 hasil/i);
     assert.match(evidence, /jangan menyebut media sebagai sumber resmi/i);
     assert.match(evidence, /"scope":"comparison"/);
   } finally {

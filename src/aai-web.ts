@@ -6,9 +6,8 @@ export type WebSource = {
 export type WebSearchDecision = { search: boolean; query: string; explicit: boolean };
 export type WebToolPermission = 'allow' | 'deny';
 
-// A cheap intent gate keeps stable, everyday requests on the direct streaming
-// path. For requests needing fresh/public evidence, the model still decides
-// whether to call search_web. Permission and credentials remain separate gates.
+// Deterministic fast path for explicit user requests. Implicit search decisions
+// are delegated to the selected model through shouldOfferWebToolToModel.
 export function shouldRunWebToolDecision(
   decision: WebSearchDecision, permission: WebToolPermission, providerAvailable: boolean,
 ): boolean {

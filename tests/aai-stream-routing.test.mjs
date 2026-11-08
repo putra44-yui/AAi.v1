@@ -24,7 +24,7 @@ test('the selected model decides on every permitted turn, without keyword trigge
     assert.equal(shouldOfferWebToolToModel(message, 'allow', true), true, message);
   }
   assert.equal(shouldOfferWebToolToModel('Jangan cari web, jawab dari bobot saja.', 'allow', true), false);
-  assert.equal(shouldOfferWebToolToModel('Aku pulang kerja dan Ayaka minta bermain, bagaimana ya?', 'allow', true), false);
+  assert.equal(shouldOfferWebToolToModel('Apa yang kamu ingat tentang istriku?', 'allow', true), false);
   assert.equal(shouldOfferWebToolToModel('Apa kabar KPU sekarang?', 'deny', true), false);
   assert.equal(shouldOfferWebToolToModel('Apa kabar KPU sekarang?', 'allow', false), false);
 });
