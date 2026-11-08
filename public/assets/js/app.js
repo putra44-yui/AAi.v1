@@ -1455,6 +1455,30 @@ function prepareAssistantRowForStreaming(aiRow, streamId) {
   return { bubbleEl, actionsEl };
 }
 
+// Render unfinished Markdown as a safe text node. Completed blocks are parsed
+// and sanitized once they cross a stable blank-line boundary.
+function prepareStreamingPlainText(text) {
+  let value = String(text || '');
+  const hiddenMarkers = [
+    '[SUGGEST-FRIEND:',
+    '[MEMORY:',
+    '[MEMORY_FORGET:',
+    '[type=pattern;'
+  ];
+  let cutoff = value.length;
+  for (const marker of hiddenMarkers) {
+    const start = value.lastIndexOf(marker);
+    if (start >= 0 && value.indexOf(']', start) === -1) {
+      cutoff = Math.min(cutoff, start);
+    }
+  }
+  value = value.slice(0, cutoff);
+  return value
+    .replace(/\\[SUGGEST-FRIEND:[^\\]]*\\]/gi, 'Teman baru terdeteksi')
+    .replace(/\\[MEMORY(?:_FORGET)?(?::[^\\]]*)?\\]/gi, '')
+    .replace(/\\[type=pattern;category=[^\\]]*;key=[^\\]]*;value=[^\\]]*\\]/gi, '');
+}
+
 function ensureStreamingMarkdownNode(bubbleEl) {
   if (!bubbleEl) return null;
 
@@ -1556,6 +1580,7 @@ function getFriendlyProviderErrorMessage(rawMessage) {
 }
 
 function renderStreamErrorUI(streamId, errorMessage, retryMeta = null) {
+  document.getElementById('chatArea')?.classList.remove('is-streaming');
   const bubbleEl = document.getElementById(`bubble_${streamId}`);
   if (!bubbleEl) return;
 
@@ -1942,19 +1967,10 @@ async function processStream(response, streamId, onDone) {
   let renderScheduled = false;
   let streamingNode = null;
   let streamingCommittedLength = 0;
-  let renderTimer = null;
+  let streamingLiveText = '';
   let renderFrame = null;
-  let lastRenderAt = 0;
-  const STREAM_RENDER_INTERVAL_MS = 105;
-  let streamScrollFrame = null;
-  let lastStreamScrollAt = 0;
-  const STREAM_SCROLL_INTERVAL_MS = 90;
 
   function clearStreamingRenderSchedule() {
-    if (renderTimer) {
-      clearTimeout(renderTimer);
-      renderTimer = null;
-    }
     if (renderFrame) {
       cancelAnimationFrame(renderFrame);
       renderFrame = null;
@@ -1962,26 +1978,10 @@ async function processStream(response, streamId, onDone) {
     renderScheduled = false;
   }
 
+  // scrollBottom already coalesces work into one animation frame.
+  // Do not add a second throttle or a second animation-frame queue here.
   function scheduleStreamScroll(force = false) {
-    if (force) {
-      if (streamScrollFrame) {
-        cancelAnimationFrame(streamScrollFrame);
-        streamScrollFrame = null;
-      }
-      lastStreamScrollAt = 0;
-      scrollBottom(true);
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastStreamScrollAt < STREAM_SCROLL_INTERVAL_MS) return;
-    if (streamScrollFrame) return;
-
-    streamScrollFrame = requestAnimationFrame(() => {
-      streamScrollFrame = null;
-      lastStreamScrollAt = Date.now();
-      scrollBottom();
-    });
+    scrollBottom(force);
   }
 
   function clearPreviewAnimation() {
@@ -2083,33 +2083,49 @@ async function processStream(response, streamId, onDone) {
   function flushStreamingRender(finalRender = false) {
     if (!bubbleEl) return;
 
+    const chatArea = document.getElementById('chatArea');
     if (finalRender) {
+      chatArea?.classList.remove('is-streaming');
       clearStreamingRenderSchedule();
       bubbleEl.innerHTML = formatContent(fullText);
       bubbleEl.classList.remove('stream-cursor');
       streamingNode = null;
       streamingCommittedLength = 0;
+      streamingLiveText = '';
     } else {
+      chatArea?.classList.add('is-streaming');
       streamingNode = streamingNode || ensureStreamingMarkdownNode(bubbleEl);
       if (streamingNode) {
         const committedEl = streamingNode.querySelector('.aai-streaming-committed');
         const liveEl = streamingNode.querySelector('.aai-streaming-live');
         const pending = fullText.slice(streamingCommittedLength);
         const boundary = findStableStreamMarkdownBoundary(pending);
+        let committedBoundary = false;
+
         if (boundary > 0 && committedEl) {
           committedEl.insertAdjacentHTML('beforeend', formatContent(pending.slice(0, boundary)));
           streamingCommittedLength += boundary;
+          committedBoundary = true;
         }
+
         if (liveEl) {
           const tailText = fullText.slice(streamingCommittedLength);
-          // Lightweight, sanitized Markdown. No syntax highlighting per token.
-          // Failure must never stop the SSE reader or lose the accumulated reply.
-          try {
-            liveEl.innerHTML = tailText ? formatContent(tailText, { streaming: true }) : '';
-          } catch (error) {
-            console.warn('[AAi stream] Markdown preview failed:', error);
-            liveEl.textContent = tailText;
+          const displayTail = prepareStreamingPlainText(tailText);
+
+          // Append only the new characters to one text node. This avoids running
+          // Marked + DOMPurify against the entire unfinished paragraph every frame.
+          if (committedBoundary || !displayTail.startsWith(streamingLiveText)) {
+            liveEl.textContent = displayTail;
+          } else if (displayTail.length > streamingLiveText.length) {
+            const delta = displayTail.slice(streamingLiveText.length);
+            const lastNode = liveEl.lastChild;
+            if (lastNode && lastNode.nodeType === 3) {
+              lastNode.appendData(delta);
+            } else {
+              liveEl.appendChild(document.createTextNode(delta));
+            }
           }
+          streamingLiveText = displayTail;
         }
       }
       bubbleEl.classList.add('stream-cursor');
@@ -2118,34 +2134,16 @@ async function processStream(response, streamId, onDone) {
     scheduleStreamScroll(finalRender);
   }
 
+  // Coalesce incoming provider chunks to the next paint, not a 105 ms timer.
+  // The stream reader keeps accumulating text while the browser renders at its own frame rate.
   function scheduleStreamingRender() {
     if (renderScheduled) return;
-
-    const runRender = () => {
-      renderScheduled = false;
-      lastRenderAt = Date.now();
-      if (!gotDone) flushStreamingRender(false);
-    };
-
     renderScheduled = true;
-    const elapsed = Date.now() - lastRenderAt;
-    const waitMs = Math.max(0, STREAM_RENDER_INTERVAL_MS - elapsed);
-
-    if (waitMs === 0) {
-      renderFrame = requestAnimationFrame(() => {
-        renderFrame = null;
-        runRender();
-      });
-      return;
-    }
-
-    renderTimer = setTimeout(() => {
-      renderTimer = null;
-      renderFrame = requestAnimationFrame(() => {
-        renderFrame = null;
-        runRender();
-      });
-    }, waitMs);
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = null;
+      renderScheduled = false;
+      if (!gotDone) flushStreamingRender(false);
+    });
   }
 
   function processLine(line) {
@@ -2195,6 +2193,8 @@ async function processStream(response, streamId, onDone) {
       updateActivityLive('Aku cek sumbernya dulu...');
       streamingNode = null;
       streamingCommittedLength = 0;
+      streamingLiveText = '';
+      document.getElementById('chatArea')?.classList.remove('is-streaming');
       if (bubbleEl) {
         bubbleEl.classList.add('stream-cursor');
         bubbleEl.innerHTML = '<div style="display:flex;gap:5px;align-items:center;padding:6px 0;opacity:0.8;">'
@@ -2296,6 +2296,7 @@ async function processStream(response, streamId, onDone) {
         updateActivityClock();
         streamingNode = null;
         streamingCommittedLength = 0;
+        streamingLiveText = '';
         firstToken = false;
         stopPreviewTicker('', true);
       }
