@@ -363,4 +363,5 @@ test('streamed provider tokens are batched and the Worker has a safe CPU budget'
   assert.match(server, /setTimeout\(flushTokenBuffer, 24\)/);
   assert.match(server, /flushTokenBuffer\(\);\s*writeEvent\(event\)/);
   assert.match(server, /flushTokenBuffer\(\);\s*streamClosed = true/);
+  assert.match(server, /if \(trailing\) enqueueEvent\(\{ token: trailing \}\);\s*\/\/ Persist first-token timing only after flushing the last buffered delta\.\s*flushTokenBuffer\(\);\s*const rawReply/);
 });
