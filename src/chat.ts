@@ -1133,8 +1133,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 titleState.promise = generateSessionTitle(message, env, apiKey, modelName, traceId);
               }
               replyParts.push(token);
-              // A tool-enabled response may contain a search query or an unverified
-              // preface. Never flash either as a public answer before seeing tool calls.
+              // Buffer only a freshness-sensitive first decision pass. Other replies
+              // stream immediately; tool_switch clears any provisional opening if a tool is chosen.
               if (!bufferUntilToolDecision) {
                 const visible = displayFilter.push(token);
                 if (visible) enqueueEvent({ token: visible });
@@ -1258,9 +1258,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                 message: toolRounds === 0 ? 'Memeriksa apakah perlu mencari informasi terbaru...'
                   : 'Memeriksa apakah sumber yang ada sudah cukup...' });
               logTiming('tool_decision_start', { round: toolRounds + 1 });
-              // Keep the tool pass short and private. It chooses the next action,
-              // never generates the public final answer. Once it declines another
-              // search, a separate no-tools completion streams immediately.
+              // One tool-capable completion either calls search_web or answers directly.
+              // This avoids a hidden router generation followed by a duplicate answer generation.
               const decisionMessages = [...providerPayload.messages];
               // Current/freshness-sensitive questions are buffered until the model
               // chooses search or direct answer. Ordinary conversation streams live.

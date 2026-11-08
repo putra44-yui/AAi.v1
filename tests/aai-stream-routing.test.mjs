@@ -13,7 +13,7 @@ const { decideWebSearch, shouldRunWebToolDecision, shouldOfferWebToolToModel } =
 
 const chatSource = readFileSync(new URL('../src/chat.ts', import.meta.url), 'utf8');
 
-test('the selected model decides on every permitted turn, without keyword triggers', () => {
+test('the model router is offered for information requests, not ordinary statements', () => {
   const messages = [
     'Halo AAi, kamu lagi apa?',
     'Jelaskan dengan sederhana cara kerja kompas dalam enam paragraf.',
@@ -49,8 +49,8 @@ test('tool routing preserves normal conversation and streams the selected model 
   assert.match(chatSource, /if \(shouldRunModelToolDecision\) \{/);
   assert.match(chatSource, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
   assert.match(chatSource, /const shouldRunModelToolDecision = !visionImages\.length[\s\S]*?shouldOfferWebToolToModel\(message, requestBody\.value\.webPermission, hasSearchProvider\)[\s\S]*?!requestedWebDecision\.explicit/);
-  assert.match(chatSource, /tanggal dan waktu lokal yang tersedia di konteks sistem/);
-  assert.match(chatSource, /jangan menunggu pengguna mengucapkan kata/);
+  assert.match(chatSource, /Gunakan tanggal dan waktu lokal pada konteks sistem/);
+  assert.match(chatSource, /Jangan mencari hanya karena topik yang sama pernah dicari/);
   assert.match(chatSource, /\[ROUTER DAN JAWABAN STREAMING\]/);
   assert.match(chatSource, /pernyataan, koreksi, pengalaman langsung, informasi internal/);
   assert.match(chatSource, /const bufferUntilToolDecision = toolRounds === 0 && requestedWebDecision\.search/);

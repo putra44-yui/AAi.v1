@@ -211,7 +211,9 @@ test('AAi lets the selected LLM decide web use on every permitted non-explicit t
   assert.ok(server.includes("shouldOfferWebToolToModel(message, requestBody.value.webPermission, hasSearchProvider)"));
   assert.ok(server.includes("if (shouldRunToolDecision && requestedWebDecision.explicit)"));
   assert.ok(server.includes("const toolChoice = 'auto'"));
-  assert.ok(server.includes("tanggal dan waktu lokal yang tersedia di konteks sistem"));
+  assert.ok(server.includes("Gunakan tanggal dan waktu lokal pada konteks sistem"));
+  assert.ok(server.includes("Jangan mencari hanya karena topik yang sama pernah dicari"));
+  assert.ok(server.includes("const bufferUntilToolDecision = toolRounds === 0 && requestedWebDecision.search"));
   assert.ok(server.includes("const finalPayload: ProviderRequestBody"));
   assert.ok(!server.includes("tool_choice: 'none'"));
   assert.ok(server.includes("phase: 'tool_switch'"));

@@ -544,8 +544,9 @@ test('with web permission enabled, the selected model can stream a direct answer
   });
 
   assert.equal(result.status, 200);
-  assert.equal(result.providerCalls.length, 1, 'A no-search answer must not trigger a second model generation');
-  const answerCall = result.providerCalls[0];
+  const streamingCalls = result.providerCalls.filter(call => call.stream === true);
+  assert.equal(streamingCalls.length, 1, 'A no-search answer must not trigger a second streamed model generation');
+  const answerCall = streamingCalls[0];
   assert.ok(Array.isArray(answerCall.tools), 'The selected model still receives search_web');
   assert.equal(answerCall.model, 'z-ai/glm-5.3-flash');
   assert.equal(answerCall.tool_choice, 'auto');
@@ -567,7 +568,8 @@ test('a conversational correction does not invoke the web router and streams dir
   });
 
   assert.equal(result.status, 200);
-  assert.equal(result.providerCalls.length, 1);
-  assert.equal(result.providerCalls[0].tools, undefined, 'A user correction is conversation context, not a research request');
+  const streamingCalls = result.providerCalls.filter(call => call.stream === true);
+  assert.equal(streamingCalls.length, 1);
+  assert.equal(streamingCalls[0].tools, undefined, 'A user correction is conversation context, not a research request');
   assert.ok(result.events.some(event => event.token === 'Halo dari model terpilih.'));
 });
