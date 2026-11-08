@@ -14,7 +14,7 @@ AAi chooses where to look before searching broadly. The goal is not to maximize 
    - **Related domains**: other authorities, repositories, or reputable publishers that can cross-check the first results.
 5. Tavily searches the priority domains first with `include_domains`. The server checks returned hostnames against that allowlist again.
 6. If fewer than two distinct priority-domain sources are found, Exa searches the same priority domains with `includeDomains`.
-7. When an explicit comparison stage exists, it is searched next even if the primary stage already found two sources. Comparison results are appended after primary results, preserving the requested order. If a comparison provider returns nothing, the other provider may be tried when a request slot remains.
+7. When an explicit comparison stage exists, it is searched next even if the primary stage already found two sources. Comparison results are appended after primary results, preserving the requested order. If the comparison is news, Tavily uses `topic: news` with a 30-day window and Exa uses `category: news` with a matching `startPublishedDate`. The query is enriched with the entity context (for KPU, "Komisi Pemilihan Umum Indonesia"). If a comparison provider returns nothing, the other provider may be tried when a request slot remains. Provider result counts are included in the evidence/audit context.
 8. If evidence is still sparse and a request slot remains, one additional provider request searches related domains. If no related domains are defined, that request broadens to the general web instead.
 9. The final model receives the source profile, which domain tier was actually searched, provider attempts, and verified snippets. If no source was found, the model also receives the failed-attempt summary and must state the limitation honestly.
 
@@ -50,7 +50,7 @@ The server makes at most three provider requests per model tool call. It does no
 | Finance and economy | bi.go.id, ojk.go.id, bps.go.id, kemenkeu.go.id | idx.co.id, pajak.go.id |
 | Public health | kemkes.go.id, bpom.go.id | who.int, cdc.gov, nhs.uk |
 | Government / ASN | bkn.go.id, menpan.go.id, kemendagri.go.id, setkab.go.id | indonesia.go.id, jdih.setneg.go.id |
-| News | antaranews.com, kompas.com, tempo.co, detik.com, cnnindonesia.com | reuters.com, apnews.com, bbc.com |
+| News | antaranews.com, kompas.com, tempo.co, detik.com, cnnindonesia.com, liputan6.com, tribunnews.com, tvonenews.com, sindonews.com, kumparan.com, suara.com, tirto.id, idntimes.com, bisnis.com | reuters.com, apnews.com, bbc.com |
 
 A question can match more than one profile, up to three. For example, "berita KPU" combines the election and news profiles, while "riset Qwen" combines research repositories and Qwen-owned sources. The highest-priority matching profile remains the primary category for audit display. Without an explicit source order, matching profiles retain the existing combined-domain behavior. With an explicit order, such as official KPU first and news media afterward, the KPU profile remains the primary stage and the news profile becomes a mandatory comparison stage.
 
