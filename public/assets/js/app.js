@@ -1474,9 +1474,9 @@ function prepareStreamingPlainText(text) {
   }
   value = value.slice(0, cutoff);
   return value
-    .replace(/\\[SUGGEST-FRIEND:[^\\]]*\\]/gi, 'Teman baru terdeteksi')
-    .replace(/\\[MEMORY(?:_FORGET)?(?::[^\\]]*)?\\]/gi, '')
-    .replace(/\\[type=pattern;category=[^\\]]*;key=[^\\]]*;value=[^\\]]*\\]/gi, '');
+    .replace(/\[SUGGEST-FRIEND:[^\]]*\]/gi, 'Teman baru terdeteksi')
+    .replace(/\[MEMORY(?:_FORGET)?(?::[^\]]*)?\]/gi, '')
+    .replace(/\[type=pattern;category=[^\]]*;key=[^\]]*;value=[^\]]*\]/gi, '');
 }
 
 function ensureStreamingMarkdownNode(bubbleEl) {
