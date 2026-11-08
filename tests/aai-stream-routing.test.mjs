@@ -52,7 +52,7 @@ test('tool routing preserves normal conversation and streams the selected model 
   assert.match(chatSource, /Gunakan tanggal dan waktu lokal pada konteks sistem/);
   assert.match(chatSource, /Jangan mencari hanya karena topik yang sama pernah dicari/);
   assert.match(chatSource, /\[ROUTER DAN JAWABAN STREAMING\]/);
-  assert.match(chatSource, /pernyataan, koreksi, pengalaman langsung, informasi internal/);
+  assert.match(chatSource, /pernyataan, koreksi, pengalaman langsung, informasi internal/i);
   assert.match(chatSource, /const bufferUntilToolDecision = toolRounds === 0 && requestedWebDecision\.search/);
   assert.doesNotMatch(chatSource, /max_tokens: 320/);
   assert.match(chatSource, /await receiveProviderResponse\(result\.response, nativeCalls, bufferUntilToolDecision\)/);
