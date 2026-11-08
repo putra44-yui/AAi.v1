@@ -323,6 +323,9 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     assert.ok(!calls[0].payload.include_domains.includes('antaranews.com'));
     assert.ok(calls[1].payload.includeDomains.includes('antaranews.com'));
     assert.ok(calls[1].payload.includeDomains.includes('kompas.com'));
+    assert.equal(calls[1].payload.category, 'news');
+    assert.ok(calls[1].payload.startPublishedDate);
+    assert.match(calls[1].payload.query, /Komisi Pemilihan Umum Indonesia/);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'comparison']);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.provider), ['tavily', 'exa']);
     assert.equal(outcome.sources.length, 4);
@@ -334,7 +337,57 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     const evidence = webContextMessage(decision, outcome);
     assert.match(evidence, /Urutan pembanding yang diminta/);
     assert.match(evidence, /Tahap pembanding sudah dijalankan/);
+    assert.match(evidence, /exa 2 hasil/i);
     assert.match(evidence, /jangan menyebut media sebagai sumber resmi/i);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test('News comparison uses news indexes and retries Tavily when Exa returns no media results', async () => {
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const payload = JSON.parse(init.body);
+    calls.push({ url: String(url), payload });
+    if (String(url).includes('tavily')) {
+      if (payload.include_domains?.includes('jdih.kpu.go.id')) {
+        return { ok: true, json: async () => ({ results: [
+          { url: 'https://jdih.kpu.go.id/produk-hukum/keputusan/one', title: 'Keputusan KPU', content: 'Sumber resmi KPU' },
+          { url: 'https://www.kpu.go.id/berita/one', title: 'Berita KPU RI', content: 'Informasi resmi KPU' },
+        ] }) };
+      }
+      assert.equal(payload.topic, 'news');
+      assert.equal(payload.days, 30);
+      return { ok: true, json: async () => ({ results: [
+        { url: 'https://www.antaranews.com/berita/one', title: 'ANTARA', content: 'Liputan media nasional', publishedDate: '2026-11-08' },
+        { url: 'https://nasional.kompas.com/read/one', title: 'Kompas', content: 'Pembanding media nasional', publishedDate: '2026-11-07' },
+      ] }) };
+    }
+    if (String(url).includes('exa')) {
+      assert.equal(payload.category, 'news');
+      assert.ok(payload.startPublishedDate);
+      return { ok: true, json: async () => ({ results: [] }) };
+    }
+    throw new Error('Unexpected provider URL: ' + url);
+  };
+  try {
+    const message = 'Cari berita terbaru tentang KPU hari ini. Utamakan sumber resmi KPU, kemudian bandingkan dengan media berita.';
+    const decision = { search: true, query: 'berita terbaru KPU hari ini', explicit: true };
+    const plan = resolveSourcePlan(message, decision.query);
+    const outcome = await collectWebSources(
+      decision, { TAVILY_API_KEY: 'fake-tavily', EXA_API_KEY: 'fake-exa' }, () => {}, undefined, plan,
+    );
+    assert.equal(calls.length, 3);
+    assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'comparison', 'comparison']);
+    assert.deepEqual(outcome.attempts.map(attempt => attempt.provider), ['tavily', 'exa', 'tavily']);
+    assert.equal(outcome.attempts[1].sourceCount, 0);
+    assert.equal(outcome.attempts[2].sourceCount, 2);
+    assert.equal(outcome.sources.length, 4);
+    assert.ok(outcome.sources.some(source => source.url.includes('antaranews.com')));
+    assert.ok(outcome.sources.some(source => source.url.includes('kompas.com')));
+    const evidence = webContextMessage(decision, outcome);
+    assert.match(evidence, /exa 0 hasil; tavily 2 hasil/i);
   } finally {
     globalThis.fetch = oldFetch;
   }
