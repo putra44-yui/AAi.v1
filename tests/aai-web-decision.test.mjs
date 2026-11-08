@@ -8,7 +8,7 @@ const source = readFileSync(new URL('../src/aai-web.ts', import.meta.url), 'utf8
 const transpiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
-const { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission, isAllowedPublicWebQuery } = await import(
+const { decideWebSearch, hasWebSearchOptOut, applyWebToolPermission, isAllowedPublicWebQuery, shouldOfferWebToolToModel } = await import(
   'data:text/javascript;base64,' + Buffer.from(transpiled).toString('base64')
 );
 
@@ -82,6 +82,13 @@ test('model-generated web queries are validated before leaving AAi', () => {
   assert.equal(isAllowedPublicWebQuery('Cari sumber publik', 'api key milikku: sk-example123456789'), false);
   assert.equal(isAllowedPublicWebQuery('Cari sumber resmi', '  '), false);
   assert.equal(isAllowedPublicWebQuery('Cari sumber resmi', 'nomor rekening 123456789012'), false);
+  assert.equal(isAllowedPublicWebQuery('Cari berita tentang istri Presiden', 'berita istri Presiden terbaru'), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita tentang anak Presiden', 'berita anak Presiden terbaru'), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'berita tanggal 20261108'), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'x'.repeat(300)), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'x'.repeat(501)), false);
+  assert.equal(shouldOfferWebToolToModel('Siapa yang menyadap WA Presiden?', 'allow', true), true);
+  assert.equal(shouldOfferWebToolToModel('Apa yang kamu ingat tentang istriku?', 'allow', true), false);
 });
 
 test('an explicit web permission gate is fail-closed before any provider call', () => {

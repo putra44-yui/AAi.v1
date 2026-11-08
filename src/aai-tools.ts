@@ -9,11 +9,11 @@ export const SEARCH_WEB_TOOL = {
   type: 'function',
   function: {
     name: 'search_web',
-    description: 'Model menentukan sendiri apakah informasi publik perlu diverifikasi; jangan menunggu kata pemicu seperti "cari" atau "web". Gunakan tanggal/waktu lokal pada konteks sistem. Cari untuk berita dan peristiwa terkini, status/jabatan yang dapat berubah, aturan yang masih berlaku, jadwal, harga, kurs, cuaca, ketersediaan, pengumuman, versi/rilis, dokumentasi yang berubah, atau fakta setelah pengetahuan model. Jangan cari untuk pengetahuan stabil, hitungan, penulisan kreatif, obrolan pribadi, atau memori keluarga. Buat query spesifik berisi entitas dan detail (nomor/tahun dokumen, versi, tanggal, pasal, atau fakta). Sistem memilih domain resmi atau penerbit relevan dan mempertahankan urutan sumber resmi lalu media pembanding bila diminta. Jangan kirim nama pribadi, memori, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
+    description: 'Model menentukan sendiri apakah informasi publik perlu diverifikasi; jangan menunggu kata pemicu seperti "cari" atau "web". Gunakan tanggal/waktu lokal pada konteks sistem. Cari untuk berita dan peristiwa terkini, status/jabatan yang dapat berubah, aturan yang masih berlaku, jadwal, harga, kurs, cuaca, ketersediaan, pengumuman, versi/rilis, dokumentasi yang berubah, atau fakta setelah pengetahuan model. Berita publik tentang pejabat, termasuk dugaan penyadapan, peretasan, atau kebocoran komunikasi yang telah diberitakan, tetap boleh dicari dari sumber terbuka; jangan mencoba masuk ke akun atau mengambil isi pesan nonpublik. Jangan cari untuk pengetahuan stabil, hitungan, penulisan kreatif, atau pertanyaan yang hanya meminta ingatan pribadi pengguna. Buat query spesifik berisi entitas dan detail (nomor/tahun dokumen, versi, tanggal, pasal, atau fakta). Sistem memilih domain resmi atau penerbit relevan dan mempertahankan urutan sumber resmi lalu media pembanding bila diminta. Jangan kirim identitas pribadi dari memori AAi, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Query pencarian publik yang ringkas dan bebas data pribadi (3–240 karakter).' },
+        query: { type: 'string', description: 'Query pencarian publik yang ringkas dan bebas kredensial/data pribadi (3–500 karakter).' },
       },
       required: ['query'],
       additionalProperties: false,
@@ -60,7 +60,7 @@ export function extractSearchWebQuery(call: NativeToolCall): string | null {
     const args = parsed as Record<string, unknown>;
     if (Object.keys(args).some(key => key !== 'query')) return null;
     const query = typeof args.query === 'string' ? args.query.replace(/\s+/g, ' ').trim() : '';
-    return query.length >= 3 && query.length <= 240 ? query : null;
+    return query.length >= 3 && query.length <= 500 ? query : null;
   } catch { return null; }
 }
 

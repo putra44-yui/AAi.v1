@@ -251,7 +251,7 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
   {
     id: 'news',
     label: 'media berita utama',
-    match: /\b(?:berita|breaking news|berita terbaru|kabar(?:\s+(?:terbaru|tentang|soal))?|apa kabar|peristiwa hari ini|update terbaru|news)\b/i,
+    match: /\b(?:berita|breaking news|berita terbaru|kabar(?:\s+(?:terbaru|tentang|soal))?|apa kabar|peristiwa hari ini|update terbaru|news|penyadapan|disadap|sadap|whatsapp|wa\s+(?:presiden|menteri|gubernur)|bocor|kebocoran|peretasan|diretas|diberitakan|pemberitaan|media)\b/i,
     priorityDomains: [
       'antaranews.com', 'kompas.com', 'tempo.co', 'detik.com', 'cnnindonesia.com',
       'liputan6.com', 'tribunnews.com', 'tvonenews.com', 'sindonews.com',
@@ -309,7 +309,9 @@ export function resolveSourcePlan(userMessage: string, query: string): WebSource
 
 const PROVIDER_TIMEOUT_MS = 8500;
 const BLOCKED_SECRETS = /(?:sk-[a-z0-9_-]{8,}|tvly-[a-z0-9_-]{8,}|bearer\s+[a-z0-9_.-]{8,}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:password|kata sandi|token rahasia|api key milikku|api key saya|\.env(?:\.local)?)[\s:=])/i;
-const PRIVATE_TOPIC = /(?:istri(?:ku| saya)?|suami(?:ku| saya)?|anak(?:ku| saya)?|memori(?:ku| saya)?|profil pribadiku|keluargaku|ayahku|ibuku)/i;
+// Only first-person family references are private; public reporting about officials is not.
+const PRIVATE_FAMILY_REQUEST = /\b(?:istriku|suamiku|anakku|keluargaku|ayahku|ibuku|istri saya|suami saya|anak saya|keluarga saya|ayah saya|ibu saya)\b/i;
+const SENSITIVE_IDENTIFIER = /\b(?:nik|ktp|nip|npwp|nomor rekening|rekening|nomor telepon|no\.?\s*(?:hp|telepon|telp))\s*[:#-]?\s*\d{8,}\b/i;
 // A negative instruction wins over auto-freshness and any search verb detected
 // inside it. "Jangan mencari web" contains "cari web" but is NOT a search request.
 const NO_WEB_RESTRICTIONS = [
@@ -328,17 +330,17 @@ export function hasWebSearchOptOut(message: string): boolean {
   return NO_WEB_RESTRICTIONS.some(pattern => pattern.test(normalized));
 }
 
-// The model may choose a search query, but only public, non-sensitive text is eligible.
-// Check BOTH the user's message and the generated query to avoid exporting private context.
+// The model may choose a search query. Keep explicit opt-outs, credentials and the user's own family references private,
+// but do not block public reporting merely because it mentions a public figure's family or communications.
 export function isAllowedPublicWebQuery(userMessage: string, query: string): boolean {
   const clean = String(query || '').replace(/\s+/g, ' ').trim();
-  if (clean.length < 3 || clean.length > 240) return false;
+  if (clean.length < 3 || clean.length > 500) return false;
   return !hasWebSearchOptOut(userMessage)
     && !BLOCKED_SECRETS.test(userMessage)
     && !BLOCKED_SECRETS.test(clean)
-    && !PRIVATE_TOPIC.test(userMessage)
-    && !PRIVATE_TOPIC.test(clean)
-    && !/\b\d{8,}\b/.test(clean)
+    && !PRIVATE_FAMILY_REQUEST.test(userMessage)
+    && !PRIVATE_FAMILY_REQUEST.test(clean)
+    && !SENSITIVE_IDENTIFIER.test(clean)
     && !/[\r\n]/.test(clean);
 }
 
@@ -351,7 +353,7 @@ export function shouldOfferWebToolToModel(
   return permission === 'allow' && providerAvailable
     && !hasWebSearchOptOut(normalized)
     && !BLOCKED_SECRETS.test(normalized)
-    && !PRIVATE_TOPIC.test(normalized);
+    && !PRIVATE_FAMILY_REQUEST.test(normalized);
 }
 const EXPLICIT_SEARCH = /(?:cari(?:kan)?\s+(?:di\s+)?(?:web|internet|google|online|sumber|referensi|berita|informasi|aturan|dokumentasi\s+resmi|artikel\s+ilmiah|jurnal|paper|tautan|link|situs\s+resmi)|(?:search|browse|googling|telusuri)\s+(?:di\s+)?(?:web|internet|online|tentang|dokumentasi)|(?:cek|periksa|verifikasi|carikan)\s+(?:sumber resmi|berita terbaru|di web|di internet)|(?:tolong|coba)\s+(?:cari|telusuri)\s+(?:sumber|referensi|berita|dokumentasi)|(?:temukan|find)\s+(?:dokumentasi\s+resmi|artikel\s+ilmiah|jurnal|paper|sumber resmi))/i;
 // Catch conversational requests that explicitly ask to look something up,
@@ -369,9 +371,8 @@ export function decideWebSearch(message: string): WebSearchDecision {
     return { search: false, query: '', explicit: false };
   }
   const explicit = EXPLICIT_SEARCH.test(normalized) || EXPLICIT_CONVERSATIONAL_LOOKUP.test(normalized);
-  // Private family/memory questions must stay inside AAi unless the user is asking
-  // for genuinely public information in a separate, anonymized query.
-  if (PRIVATE_TOPIC.test(normalized)) return { search: false, query: '', explicit };
+  // Personal references to the user's own family stay local; public-figure reporting remains searchable.
+  if (PRIVATE_FAMILY_REQUEST.test(normalized)) return { search: false, query: '', explicit };
   const auto = FRESH_QUERY.test(normalized) && INFO_REQUEST.test(normalized);
   const cleanedQuery = normalized
     .replace(/^aai[,!]?\s*/i, '')
@@ -379,7 +380,7 @@ export function decideWebSearch(message: string): WebSearchDecision {
     .replace(/^(?:cari(?:kan)?(?:\s+di\s+(?:web|internet|google|online))?\s+(?:sumber\s+resmi|referensi|berita|informasi)?\s*[:—-]?\s*)/i, '')
     .replace(/\s*(?:sertakan|berikan|cantumkan)\s+(?:(?:tautan|link)(?:\s+sumber(?:nya)?)?|sumber(?:nya)?)[.!]?$/i, '')
     .trim() || normalized;
-  return { search: explicit || auto, query: cleanedQuery.slice(0, 300), explicit };
+  return { search: explicit || auto, query: cleanedQuery.slice(0, 500), explicit };
 }
 
 function readSecret(env: Record<string, unknown>, name: string): string | null {

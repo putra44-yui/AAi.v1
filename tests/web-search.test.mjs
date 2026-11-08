@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decideWebSearch, resolveSourcePlan, normalizeWebSources, collectWebSources, webContextMessage } from '../src/aai-web.ts';
+import { decideWebSearch, resolveSourcePlan, normalizeWebSources, collectWebSources, webContextMessage, isAllowedPublicWebQuery, shouldOfferWebToolToModel } from '../src/aai-web.ts';
 
 test('Automatic search follows freshness and explicit web intent, respecting privacy', () => {
   assert.equal(decideWebSearch('Tolong cari di web tentang PKPU terbaru').search, true);
@@ -55,6 +55,10 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.ok(orderedElectionNews.comparisonDomains?.includes('antaranews.com'));
   assert.ok(orderedElectionNews.comparisonDomains?.includes('kompas.com'));
   assert.match(orderedElectionNews.label, /kemudian/);
+
+  const publicFigureCommunication = resolveSourcePlan('Siapa yang menyadap WA Presiden?', 'penyadapan WhatsApp Presiden');
+  assert.equal(publicFigureCommunication.id, 'news');
+  assert.ok(publicFigureCommunication.priorityDomains.includes('antaranews.com'));
 
   const casualNews = resolveSourcePlan('Apa kabar soal Gibran hari ini?', 'Gibran latest news today');
   assert.equal(casualNews.id, 'news');
@@ -468,4 +472,27 @@ test('Provider HTTP errors are distinguished from successful empty searches', as
   } finally {
     globalThis.fetch = oldFetch;
   }
+});
+
+test('Public reporting is not blocked by generic family or communications words', () => {
+  const publicQueries = [
+    ['Siapa yang menyadap WA Presiden?', 'penyadapan WhatsApp Presiden'],
+    ['Cari berita tentang istri Presiden', 'berita tentang istri Presiden'],
+    ['Cari berita tentang anak Presiden', 'berita tentang anak Presiden'],
+  ];
+  for (const [message, query] of publicQueries) {
+    assert.equal(isAllowedPublicWebQuery(message, query), true, query);
+    assert.equal(shouldOfferWebToolToModel(message, 'allow', true), true, message);
+  }
+  assert.equal(shouldOfferWebToolToModel('Apa yang kamu ingat tentang istriku?', 'allow', true), false);
+  assert.equal(isAllowedPublicWebQuery('Bagaimana kabar istriku sekarang?', 'berita keluarga'), false);
+});
+
+test('Public query validation allows dates and normal query length but still protects credentials', () => {
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'berita terbaru tanggal 20261108'), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'x'.repeat(300)), true);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'x'.repeat(501)), false);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'nomor rekening 123456789012'), false);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru', 'token rahasia sk-exampleSecret123'), false);
+  assert.equal(isAllowedPublicWebQuery('Cari berita terbaru, email saya user@example.com', 'berita KPU terbaru'), false);
 });

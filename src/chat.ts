@@ -1162,11 +1162,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             if (!isAllowedPublicWebQuery(message, query)) {
               enqueueEvent({
                 phase: 'progress', step: 'unavailable',
-                message: 'Query ditahan demi privasi; tidak ada data pribadi yang dicari.',
+                message: 'Query tidak valid atau memuat data pribadi/kredensial; tidak dikirim ke web.',
               });
               providerPayload.messages.splice(context.systemMessages.length, 0, {
                 role: 'system',
-                content: '[PENCARIAN DITAHAN] Query tidak memenuhi batasan privasi. Tidak ada pencarian yang dijalankan. Jangan mengaku sudah mencari.',
+                content: '[QUERY TIDAK VALID] Query tidak valid atau memuat data pribadi/kredensial. Tidak ada pencarian yang dijalankan. Jangan mengaku sudah mencari.',
               });
             } else {
               const limiter = env.AAI_WEB_SEARCH_LIMITER as {
@@ -1335,8 +1335,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               const queryKey = query?.toLocaleLowerCase('id-ID') || '';
               let toolResult: string;
               if (!query || !isAllowedPublicWebQuery(message, query)) {
-                toolResult = JSON.stringify({ ok: false, error: 'Query tidak memenuhi batasan privasi atau schema. Tidak ada pencarian yang dijalankan.' });
-                enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Query ditahan demi privasi; tidak ada data pribadi yang dicari.' });
+                toolResult = JSON.stringify({ ok: false, error: 'Query tidak valid, terlalu panjang, atau memuat data pribadi/kredensial. Tidak ada pencarian yang dijalankan.' });
+                enqueueEvent({ phase: 'progress', step: 'unavailable', message: 'Query tidak valid atau memuat data pribadi/kredensial; tidak dikirim ke web.' });
               } else if (searchedQueries.has(queryKey)) {
                 toolResult = JSON.stringify({ ok: false, error: 'Query sama sudah dicari. Jika perlu, ubah query atau simpulkan hasil.' });
                 enqueueEvent({ phase: 'progress', step: 'strategy', message: 'Pencarian itu sudah dilakukan. Menilai hasil atau cara lain...' });

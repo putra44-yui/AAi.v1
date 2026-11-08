@@ -32,9 +32,10 @@ test('OpenRouter streamed tool-call fragments are accumulated and parsed', () =>
 
 test('malformed, unsupported, and oversized tool arguments never produce a query', () => {
   const base = { id: 'call_x', type: 'function', function: { name: 'search_web', arguments: '' } };
-  for (const args of ['not-json', '{}', '{"query":1}', '{"query":"ok"}', '{"query":"okay","extra":true}', '{"query":"' + 'x'.repeat(300) + '"}']) {
+  for (const args of ['not-json', '{}', '{"query":1}', '{"query":"ok"}', '{"query":"okay","extra":true}', '{"query":"' + 'x'.repeat(501) + '"}']) {
     assert.equal(extractSearchWebQuery({ ...base, function: { ...base.function, arguments: args } }), null);
   }
+  assert.equal(extractSearchWebQuery({ ...base, function: { ...base.function, arguments: '{"query":"' + 'x'.repeat(300) + '"}' } }), 'x'.repeat(300));
   assert.equal(extractSearchWebQuery({ ...base, function: { name: 'delete_file', arguments: '{"query":"Node.js"}' } }), null);
   assert.deepEqual(completedNativeToolCalls(new Map()), []);
 });
