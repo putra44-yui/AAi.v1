@@ -37,7 +37,9 @@ test('reject unsupported formats, MIME spoof, malformed data and oversized image
 
 test('the chat handler never sends images to web search or permanent memory', () => {
   const server = readFileSync(new URL('../src/chat.ts', import.meta.url), 'utf8');
-  assert.match(server, /visionImages\.length\s*\?\s*\(readEnv\('OPENROUTER_VISION_MODEL'/);
+  assert.match(server, /visionImages\.length\s*\?\s*'qwen\/qwen3\.8-omni-flash'/);
+  assert.doesNotMatch(server, /readEnv\('OPENROUTER_VISION_MODEL'/);
+  assert.doesNotMatch(server, /readEnv\('OPENROUTER_MAIN_MODEL'/);
   assert.match(server, /buildVisionContent\(message, visionImages\)/);
   assert.match(server, /shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(server, /if \(!visionImages\.length\) \{\s*await persistAAiMemory/);

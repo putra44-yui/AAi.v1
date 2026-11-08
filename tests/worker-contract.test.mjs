@@ -24,12 +24,14 @@ test('essential API routes still have Worker handlers', () => {
   assert.match(worker, /Konfigurasi Supabase belum tersedia/);
 });
 
-test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () => {
+test('legacy free-auto is explicit; the web app sends a concrete model selection', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.match(server, /DEFAULT_FREE_MODEL = 'openrouter\/free'/);
   assert.match(server, /modelPreference === 'free-auto'/);
-  assert.match(client, /model_preference: currentModelPreference/);
+  assert.match(client, /model_preference: 'main'/);
+  assert.match(client, /model_id: currentModelSelection/);
+  assert.doesNotMatch(client, /currentModelPreference|free-auto/);
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
 });
 

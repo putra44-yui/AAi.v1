@@ -393,7 +393,7 @@ test('News comparison uses news indexes and retries Tavily when Exa returns no m
     assert.ok(outcome.sources.some(source => source.url.includes('antaranews.com')));
     assert.ok(outcome.sources.some(source => source.url.includes('kompas.com')));
     const evidence = webContextMessage(decision, outcome);
-    assert.match(evidence, /exa 0 hasil; tavily 2 hasil/i);
+    assert.match(evidence, /exa 0 hasil; query:.*; tavily 2 hasil; query:/i);
   } finally {
     globalThis.fetch = oldFetch;
   }
@@ -431,6 +431,8 @@ test('Enough priority-domain results stop early without paying for an unnecessar
       scope: 'priority',
       domains: plan.priorityDomains,
       sourceCount: 2,
+      query: 'PKPU Nomor 4 Tahun 2024',
+      httpStatus: 200,
     }]);
   } finally {
     globalThis.fetch = oldFetch;
