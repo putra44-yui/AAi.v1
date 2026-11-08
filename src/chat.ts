@@ -1018,7 +1018,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         const replyParts: string[] = [];
         let displayFilter = createAAiMemoryStreamFilter();
 
-        const enqueueEvent = (event: StreamEvent): void => {
+        const writeEvent = (event: StreamEvent): void => {
           if (streamClosed || streamCanceled) {
             return;
           }
@@ -1051,11 +1051,43 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           controller.enqueue(encoder.encode(serializeEvent(event)));
         };
 
+        // Coalesce provider token deltas into short batches. This keeps the
+        // extension's stream smooth while avoiding one JSON/SSE write per token.
+        let pendingTokenText = '';
+        let tokenFlushTimer: ReturnType<typeof setTimeout> | null = null;
+        const flushTokenBuffer = (): void => {
+          if (tokenFlushTimer !== null) {
+            clearTimeout(tokenFlushTimer);
+            tokenFlushTimer = null;
+          }
+          if (!pendingTokenText) return;
+          const token = pendingTokenText;
+          pendingTokenText = '';
+          writeEvent({ token });
+        };
+
+        const enqueueEvent = (event: StreamEvent): void => {
+          if (streamClosed || streamCanceled) return;
+          if ('token' in event && typeof event.token === 'string') {
+            if (!event.token) return;
+            pendingTokenText += event.token;
+            if (pendingTokenText.length >= 64) {
+              flushTokenBuffer();
+            } else if (tokenFlushTimer === null) {
+              tokenFlushTimer = setTimeout(flushTokenBuffer, 24);
+            }
+            return;
+          }
+          flushTokenBuffer();
+          writeEvent(event);
+        };
+
         const closeStream = (): void => {
           if (streamClosed || streamCanceled) {
             return;
           }
 
+          flushTokenBuffer();
           streamClosed = true;
           controller.close();
         };
