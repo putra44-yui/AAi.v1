@@ -385,7 +385,7 @@ function parseRequestBody(input: string): ParseRequestResult {
   if (action === 'browser_tool_continue') {
     const continuationToken = readTrimmedString(parsedValue.continuation_token);
     const toolResult = readTrimmedString(parsedValue.tool_result);
-    if (!continuationToken || continuationToken.length > 180_000 || !toolResult || toolResult.length > 12_000) {
+    if (!continuationToken || continuationToken.length > 180_000 || !toolResult || toolResult.length > 40_000) {
       return { ok: false, message: 'Data lanjutan browser tool tidak valid atau terlalu besar.' };
     }
     return { ok: true, value: { kind: 'browser_tool_continue', continuationToken, toolResult } };
