@@ -204,7 +204,9 @@ test('a public preface remains visible while the details panel stays collapsed',
 test('AAi lets the selected LLM decide web use on every permitted non-explicit turn', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
-  assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
+  assert.ok(server.includes('tools: ['));
+  assert.ok(server.includes('...(isBrowserExtension ? [...BROWSER_TOOLS] : [])'));
+  assert.ok(server.includes('...(webPermissionGranted && hasSearchProvider && !webSearchOptedOut ? [SEARCH_WEB_TOOL] : [])'));
   assert.ok(server.includes("tool_choice: toolChoice"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
   assert.ok(server.includes('answerReady = true'));
