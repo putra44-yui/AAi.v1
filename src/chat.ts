@@ -1578,6 +1578,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           }
           const trailing = displayFilter.finish();
           if (trailing) enqueueEvent({ token: trailing });
+          // Persist first-token timing only after flushing the last buffered delta.
+          flushTokenBuffer();
 
           const rawReply = replyParts.join('');
           const parsedReply = extractAAiMemoryTags(rawReply);
