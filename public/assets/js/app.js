@@ -2216,6 +2216,24 @@ async function processStream(response, streamId, onDone) {
     // A streamed first-pass answer can turn into a real tool request.
     // Move its public opening into the compact process panel, then start a
     // clean final reply after the tool result arrives.
+    if (parsed.phase === 'replace') {
+      companionEvent('reset');
+      clearStreamingRenderSchedule();
+      fullText = '';
+      firstToken = true;
+      hasAnswerToken = false;
+      waitingForModel = false;
+      firstVisibleTokenMs = null;
+      streamingNode = null;
+      streamingCommittedLength = 0;
+      if (bubbleEl) {
+        bubbleEl.classList.add('stream-cursor');
+        bubbleEl.innerHTML = '';
+      }
+      scrollBottom();
+      return;
+    }
+
     if (parsed.phase === 'tool_switch') {
       companionEvent('reset');
       clearStreamingRenderSchedule();
@@ -2223,6 +2241,7 @@ async function processStream(response, streamId, onDone) {
       firstToken = true;
       hasAnswerToken = false;
       waitingForModel = false;
+      firstVisibleTokenMs = null;
       updateActivityLive('Aku cek sumbernya dulu...');
       streamingNode = null;
       streamingCommittedLength = 0;

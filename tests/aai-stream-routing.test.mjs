@@ -16,13 +16,16 @@ const chatSource = readFileSync(new URL('../src/chat.ts', import.meta.url), 'utf
 test('the selected model decides on every permitted turn, without keyword triggers', () => {
   const messages = [
     'Halo AAi, kamu lagi apa?',
-    'Buat cerita enam paragraf tentang robot kecil merawat taman.',
     'Jelaskan dengan sederhana cara kerja kompas dalam enam paragraf.',
     'Apa kabar KPU sekarang?',
+    'Siapa yang menyadap WA Presiden?',
+    'Berita tentang istri Presiden',
   ];
   for (const message of messages) {
     assert.equal(shouldOfferWebToolToModel(message, 'allow', true), true, message);
   }
+  assert.equal(shouldOfferWebToolToModel('Buat cerita enam paragraf tentang robot kecil merawat taman.', 'allow', true), false);
+  assert.equal(shouldOfferWebToolToModel('Tidak, kami di kabupaten tetap normal, tapi tidak di KPU RI.', 'allow', true), false);
   assert.equal(shouldOfferWebToolToModel('Jangan cari web, jawab dari bobot saja.', 'allow', true), false);
   assert.equal(shouldOfferWebToolToModel('Apa yang kamu ingat tentang istriku?', 'allow', true), false);
   assert.equal(shouldOfferWebToolToModel('Siapa yang menyadap WA Presiden?', 'allow', true), true);
@@ -41,16 +44,20 @@ test('web permission and providers gate actual searches even for fresh questions
   assert.equal(shouldRunWebToolDecision(decideWebSearch('Cari dokumentasi resmi Cloudflare tentang streaming response di Workers.'), 'allow', true), true);
 });
 
-test('a tool-decision response never becomes a single buffered public answer', () => {
+test('tool routing preserves normal conversation and streams the selected model answer in the same request', () => {
   assert.match(chatSource, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(chatSource, /if \(shouldRunModelToolDecision\) \{/);
   assert.match(chatSource, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
   assert.match(chatSource, /const shouldRunModelToolDecision = !visionImages\.length[\s\S]*?shouldOfferWebToolToModel\(message, requestBody\.value\.webPermission, hasSearchProvider\)[\s\S]*?!requestedWebDecision\.explicit/);
   assert.match(chatSource, /tanggal dan waktu lokal yang tersedia di konteks sistem/);
   assert.match(chatSource, /jangan menunggu pengguna mengucapkan kata/);
-  assert.match(chatSource, /\[KEPUTUSAN TOOL SAJA\]/);
-  assert.match(chatSource, /max_tokens: 320/);
-  assert.match(chatSource, /await receiveProviderResponse\(result\.response, nativeCalls, true\)/);
+  assert.match(chatSource, /\[ROUTER DAN JAWABAN STREAMING\]/);
+  assert.match(chatSource, /pernyataan, koreksi, pengalaman langsung, informasi internal/);
+  assert.match(chatSource, /const bufferUntilToolDecision = toolRounds === 0 && requestedWebDecision\.search/);
+  assert.doesNotMatch(chatSource, /max_tokens: 320/);
+  assert.match(chatSource, /await receiveProviderResponse\(result\.response, nativeCalls, bufferUntilToolDecision\)/);
+  assert.match(chatSource, /answerReady = true/);
+  assert.match(chatSource, /phase: 'replace'/);
   assert.match(chatSource, /replyParts\.length = 0;\s*emittedTokenCount = 0;\s*displayFilter = createAAiMemoryStreamFilter\(\);/);
   assert.doesNotMatch(chatSource, /displayFilter\.push\(candidate\)/);
   assert.match(chatSource, /await receiveProviderResponse\(final\.response\)/);

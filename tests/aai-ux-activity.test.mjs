@@ -60,6 +60,7 @@ test('activity shows factual streaming milestones, not the raw JSON log', () => 
   assert.match(html, /Sedang bekerja/); // Placeholder is hidden until a real public activity begins.
   assert.doesNotMatch(app, /JSON aktivitas|aai-activity-json|activity_json_/);
   assert.match(app, /function publicActivityStep\(/);
+  assert.match(app, /parsed\.phase === 'replace'/);
   assert.match(app, /if \(publicStep && activityEl && activityListEl\)/);
   assert.match(app, /if \(activityEl && !activityEl\.hidden\) activityEl\.open = false/);
   assert.doesNotMatch(app, /updateActivityLive\('Jawaban sedang ditulis/);

@@ -532,7 +532,7 @@ test('explicit web requests search directly before the selected model composes t
 });
 
 
-test('with web permission enabled, the selected model receives the router tool even without search keywords', async () => {
+test('with web permission enabled, the selected model can stream a direct answer in the same tool-capable request', async () => {
   const result = await captureChatRequest({
     message: 'Jelaskan secara sederhana apa itu demokrasi.',
     user_id: userId,
@@ -544,13 +544,30 @@ test('with web permission enabled, the selected model receives the router tool e
   });
 
   assert.equal(result.status, 200);
-  const routerCall = result.providerCalls.find(call => Array.isArray(call.tools));
-  const finalCall = result.providerCalls.at(-1);
-  assert.ok(routerCall, 'The selected model receives search_web for its routing decision');
-  assert.equal(routerCall.model, 'z-ai/glm-5.3-flash');
-  assert.equal(routerCall.tool_choice, 'auto');
-  assert.ok(finalCall && !finalCall.tools, 'The final answer is composed without exposing the router tool');
-  assert.ok(routerCall.messages.some(message =>
-    message.role === 'system' && String(message.content).includes('[PILIHAN TOOL — ROUTER MODEL]')
+  assert.equal(result.providerCalls.length, 1, 'A no-search answer must not trigger a second model generation');
+  const answerCall = result.providerCalls[0];
+  assert.ok(Array.isArray(answerCall.tools), 'The selected model still receives search_web');
+  assert.equal(answerCall.model, 'z-ai/glm-5.3-flash');
+  assert.equal(answerCall.tool_choice, 'auto');
+  assert.ok(answerCall.messages.some(message =>
+    message.role === 'system' && String(message.content).includes('[ROUTER DAN JAWABAN STREAMING]')
   ));
+  assert.ok(result.events.some(event => event.token === 'Halo dari model terpilih.'), 'The first model response streams directly to the user');
+});
+
+test('a conversational correction does not invoke the web router and streams directly', async () => {
+  const result = await captureChatRequest({
+    message: 'Tidak, kami di kabupaten tetap normal, tapi tidak di KPU RI.',
+    user_id: userId,
+    model_id: 'z-ai/glm-5.3-flash',
+    web_permission: 'allow',
+  }, {}, {
+    ...env,
+    TAVILY_API_KEY: 'fixture-search-key',
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.providerCalls.length, 1);
+  assert.equal(result.providerCalls[0].tools, undefined, 'A user correction is conversation context, not a research request');
+  assert.ok(result.events.some(event => event.token === 'Halo dari model terpilih.'));
 });

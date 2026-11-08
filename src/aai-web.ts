@@ -350,7 +350,8 @@ export function shouldOfferWebToolToModel(
   userMessage: string, permission: WebToolPermission, providerAvailable: boolean,
 ): boolean {
   const normalized = String(userMessage || '').replace(/\s+/g, ' ').trim();
-  return permission === 'allow' && providerAvailable
+  const asksForInformation = INFO_REQUEST.test(normalized) || FRESH_QUERY.test(normalized);
+  return permission === 'allow' && providerAvailable && asksForInformation
     && !hasWebSearchOptOut(normalized)
     && !BLOCKED_SECRETS.test(normalized)
     && !PRIVATE_FAMILY_REQUEST.test(normalized);
@@ -360,7 +361,7 @@ const EXPLICIT_SEARCH = /(?:cari(?:kan)?\s+(?:di\s+)?(?:web|internet|google|onli
 // even when the subject comes before the instruction: "BOAT coba cari dulu".
 // Do not treat creative requests such as "cari ide cerita" as web searches.
 const EXPLICIT_CONVERSATIONAL_LOOKUP = /(?:\b(?:coba|tolong|mohon)\s+(?:cari|telusuri|cek)\s+(?:dulu|lagi|sebentar|di\s+web|di\s+internet|tentang)\b|\b(?:cari|telusuri|cek)\s+(?:dulu|lagi|lebih\s+dalam)\b|\b(?:buka|lihat)\s+(?:web|internet|sumber\s+resmi)\b)/i;
-const FRESH_QUERY = /(?:terbaru|terkini|hari ini|kemarin|sekarang|saat ini|minggu ini|bulan ini|tahun ini|update terbaru|rilis terbaru|masih berlaku|sudah berubah|jadwal|harga|tarif|kurs|cuaca|berita|peraturan|undang-undang|pkpu|putusan mk|siapa (?:presiden|menteri|gubernur|kepala)|pengumuman terbaru)/i;
+const FRESH_QUERY = /(?:terbaru|terkini|hari ini|kemarin|sekarang|saat ini|minggu ini|bulan ini|tahun ini|update(?: terbaru)?|perkembangan|rilis terbaru|masih berlaku|sudah berubah|jadwal|harga|tarif|kurs|cuaca|berita|peraturan|undang-undang|pkpu|putusan mk|siapa (?:presiden|menteri|gubernur|kepala)|pengumuman terbaru|menyadap|penyadapan|disadap|sadap|peretasan|diretas|bocor|kebocoran)/i;
 const INFO_REQUEST = /(?:\b(?:apa|siapa|berapa|kapan|dimana|bagaimana|apakah|cek|tolong|cari|jelaskan|daftar|bandingkan|verifikasi)\b|\?)/i;
 
 export function decideWebSearch(message: string): WebSearchDecision {
