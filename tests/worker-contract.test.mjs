@@ -365,3 +365,30 @@ test('streamed provider tokens are batched without requesting a paid CPU overrid
   assert.match(server, /flushTokenBuffer\(\);\s*streamClosed = true/);
   assert.match(server, /if \(trailing\) enqueueEvent\(\{ token: trailing \}\);\s*\/\/ Persist first-token timing only after flushing the last buffered delta\.\s*flushTokenBuffer\(\);\s*const rawReply/);
 });
+
+test('Browser extension tools are model-directed, allowlisted, and resumed through signed continuation', () => {
+  const server = read('src/chat.ts');
+  const tools = read('src/aai-tools.ts');
+  assert.match(server, /isBrowserExtension \|\|/);
+  assert.match(server, /tools: \[/);
+  assert.match(server, /phase: 'browser_tool_call'/);
+  assert.match(server, /signBrowserContinuation\(/);
+  assert.match(server, /verifyBrowserContinuation\(/);
+  assert.match(server, /action === 'browser_tool_continue'/);
+  assert.match(server, /role: 'tool'/);
+  assert.match(tools, /name: 'inspect_page'/);
+  assert.match(tools, /name: 'type_text'/);
+  assert.match(tools, /parseBrowserToolCall\(/);
+  assert.match(tools, /target_id/);
+  assert.match(tools, /additionalProperties: false/);
+  assert.doesNotMatch(tools, /name: 'click_element'/);
+});
+
+test('Browser tool handoff is limited to the browser extension and has bounded state', () => {
+  const server = read('src/chat.ts');
+  assert.match(server, /isBrowserExtension\s*\?/);
+  assert.match(server, /expiresAt: Date\.now\(\) \+ 120_000/);
+  assert.match(server, /payload\.byteLength > 100_000/);
+  assert.match(server, /toolResult\.length > 40_000/);
+  assert.match(server, /toolRound: toolRounds \+ 1/);
+});
