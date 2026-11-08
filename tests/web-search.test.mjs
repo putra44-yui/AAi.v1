@@ -28,37 +28,62 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.ok(cloudflare.domains.includes('developers.cloudflare.com'));
 
   const node = resolveSourcePlan('Cek dokumentasi Node.js terbaru', 'Node.js documentation');
-  assert.equal(node.id, 'software-docs');
+  assert.equal(node.id, 'nodejs');
   assert.ok(node.domains.includes('nodejs.org'));
 
   const paper = resolveSourcePlan('Cari paper benchmark model bahasa', 'benchmark model bahasa');
   assert.equal(paper.id, 'research');
   assert.ok(paper.domains.includes('arxiv.org'));
 
+  const electionNews = resolveSourcePlan('Cari berita terbaru tentang KPU', 'berita KPU terbaru');
+  assert.equal(electionNews.id, 'kpu-election');
+  assert.ok(electionNews.categories.includes('kpu-election'));
+  assert.ok(electionNews.categories.includes('news'));
+  assert.ok(electionNews.priorityDomains.includes('jdih.kpu.go.id'));
+  assert.ok(electionNews.priorityDomains.includes('kompas.com'));
+
+  const qwenResearch = resolveSourcePlan('Cari riset Qwen terbaru', 'paper Qwen');
+  assert.equal(qwenResearch.id, 'research');
+  assert.ok(qwenResearch.categories.includes('research'));
+  assert.ok(qwenResearch.categories.includes('qwen'));
+  assert.ok(qwenResearch.priorityDomains.includes('arxiv.org'));
+  assert.ok(qwenResearch.priorityDomains.includes('qwen.ai'));
+
+  const englishWho = resolveSourcePlan('Who is the current CEO?', 'Who is the current CEO?');
+  assert.equal(englishWho.id, 'general', 'The English word "who" must not route to public health');
+
   const general = resolveSourcePlan('Cari tren teknologi terbaru', 'tren teknologi terbaru');
   assert.equal(general.id, 'general');
   assert.deepEqual(general.domains, []);
 });
 
-test('Domain search checks primary sources first, rejects off-domain hits, then broadens only if sparse', async () => {
+test('Domain search checks priority sources first, filters before truncation, then checks related domains', async () => {
   const oldFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
     const payload = JSON.parse(init.body);
     calls.push({ url: String(url), payload });
-    if (String(url).includes('tavily') && payload.include_domains) {
+    if (String(url).includes('tavily') && payload.include_domains?.includes('jdih.kpu.go.id')) {
       return { ok: true, json: async () => ({ results: [
-        { url: 'https://jdih.kpu.go.id/produk-hukum/one', title: 'Dokumen KPU', content: 'Sumber primer KPU' },
-        { url: 'https://random-blog.example/article', title: 'Blog tidak terkait', content: 'Hasil di luar domain prioritas' },
+        { url: 'https://random-blog.example/one', title: 'Blog satu', content: 'Di luar domain' },
+        { url: 'https://random-blog.example/two', title: 'Blog dua', content: 'Di luar domain' },
+        { url: 'https://random-blog.example/three', title: 'Blog tiga', content: 'Di luar domain' },
+        { url: 'https://random-blog.example/four', title: 'Blog empat', content: 'Di luar domain' },
+        { url: 'https://random-blog.example/five', title: 'Blog lima', content: 'Di luar domain' },
+        { url: 'https://jdih.kpu.go.id/produk-hukum/one', title: 'Dokumen KPU', content: 'Sumber resmi KPU' },
       ] }) };
     }
     if (String(url).includes('exa')) {
       return { ok: true, json: async () => ({ results: [] }) };
     }
-    return { ok: true, json: async () => ({ results: [
-      { url: 'https://peraturan.bpk.go.id/Details/one', title: 'Peraturan BPK', content: 'Pembanding peraturan' },
-      { url: 'https://news.example.org/kpu', title: 'Liputan media', content: 'Pembanding berita' },
-    ] }) };
+    if (String(url).includes('tavily') && payload.include_domains?.includes('bawaslu.go.id')) {
+      return { ok: true, json: async () => ({ results: [
+        { url: 'https://peraturan.bpk.go.id/Details/one', title: 'Peraturan BPK', content: 'Pembanding peraturan' },
+        { url: 'https://bawaslu.go.id/berita/one', title: 'Bawaslu', content: 'Rujukan terkait' },
+        { url: 'https://random-blog.example/six', title: 'Blog enam', content: 'Di luar domain' },
+      ] }) };
+    }
+    return { ok: true, json: async () => ({ results: [] }) };
   };
   try {
     const decision = { search: true, query: 'PKPU Nomor 4 Tahun 2024', explicit: true };
@@ -78,17 +103,24 @@ test('Domain search checks primary sources first, rejects off-domain hits, then 
       'https://api.exa.ai/search',
       'https://api.tavily.com/search',
     ]);
+    assert.equal(calls[0].payload.max_results, 10);
     assert.ok(calls[0].payload.include_domains.includes('jdih.kpu.go.id'));
+    assert.equal(calls[1].payload.numResults, 10);
     assert.ok(calls[1].payload.includeDomains.includes('jdih.kpu.go.id'));
-    assert.equal(calls[2].payload.include_domains, undefined);
-    assert.equal(calls[2].payload.includeDomains, undefined);
+    assert.ok(calls[2].payload.include_domains.includes('bawaslu.go.id'));
+    assert.ok(calls[2].payload.include_domains.includes('peraturan.bpk.go.id'));
+    assert.ok(!calls[2].payload.include_domains.includes('jdih.kpu.go.id'));
+
     assert.equal(outcome.sourcePlan.id, 'kpu-election');
+    assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'priority', 'related']);
     assert.equal(outcome.broadened, true);
     assert.equal(outcome.attempts.length, 3);
     assert.equal(outcome.sources.length, 3);
     assert.ok(outcome.sources.some(source => source.url.includes('jdih.kpu.go.id')));
+    assert.ok(outcome.sources.some(source => source.url.includes('peraturan.bpk.go.id')));
+    assert.ok(outcome.sources.some(source => source.url.includes('bawaslu.go.id')));
     assert.ok(!outcome.sources.some(source => source.url.includes('random-blog.example')));
-    assert.ok(steps.some(step => step.step === 'report' && /sumber primer/i.test(step.message)));
+    assert.ok(steps.some(step => step.step === 'report' && /situs rujukan terkait/i.test(step.message)));
     assert.ok(steps.some(step => step.step === 'found' && step.count === 3));
   } finally {
     globalThis.fetch = oldFetch;
@@ -104,6 +136,12 @@ test('External sources are validated, shortened and deduplicated', () => {
     {url:'https://example.org/b',title:'B',highlights:['Bagian penting'],image:'javascript:alert(1)'},
   ]);
   assert.equal(sources.length, 2);
+  assert.equal(normalizeWebSources(Array.from({ length: 8 }, (_, index) => ({
+    url: 'https://limit.example/' + index, title: 'Source ' + index, content: 'Text',
+  }))).length, 5, 'The default result cap remains five');
+  assert.equal(normalizeWebSources(Array.from({ length: 8 }, (_, index) => ({
+    url: 'https://limit.example/' + index, title: 'Source ' + index, content: 'Text',
+  })), 8).length, 8, 'Provider filtering can inspect more than five results');
   assert.equal(sources[0].image, 'https://cdn.example.org/article.jpg');
   assert.equal(sources[1].snippet, 'Bagian penting');
   assert.equal(sources[1].image, undefined);
