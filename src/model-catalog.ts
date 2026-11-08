@@ -24,7 +24,7 @@ export const MODEL_CATALOG = [
 export type ModelSelectionId = typeof MODEL_CATALOG[number]['id'];
 
 const MODEL_SELECTIONS = new Map<string, string>(
-  MODEL_CATALOG.map((model) => [model.id, model.model_id]),
+  MODEL_CATALOG.map((model) => [model.id, model.model_id] as const),
 );
 
 export function parseModelSelection(value: unknown):
