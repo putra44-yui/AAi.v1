@@ -482,3 +482,17 @@ test('a previously saved process trail is included when the same session opens o
     globalThis.fetch = previousFetch;
   }
 });
+
+
+test('legacy web clients default to Qwen 3.8 Flash despite a stale DeepSeek main-model secret', async () => {
+  const result = await captureChatRequest({
+    message: 'Uji default web lama',
+    user_id: userId,
+  }, {}, {
+    ...env,
+    OPENROUTER_MAIN_MODEL: 'deepseek/deepseek-v4.1-flash-1017',
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.providerCalls[0].model, 'qwen/qwen3.8-flash');
+  assert.equal(result.events.find(event => event.phase === 'init')?.model_requested, 'qwen/qwen3.8-flash');
+});

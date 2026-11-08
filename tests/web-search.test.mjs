@@ -323,9 +323,11 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     assert.ok(!calls[0].payload.include_domains.includes('antaranews.com'));
     assert.ok(calls[1].payload.includeDomains.includes('antaranews.com'));
     assert.ok(calls[1].payload.includeDomains.includes('kompas.com'));
+    assert.ok(calls[1].payload.includeDomains.includes('mediaindonesia.com'));
     assert.equal(calls[1].payload.category, 'news');
     assert.ok(calls[1].payload.startPublishedDate);
     assert.match(calls[1].payload.query, /Komisi Pemilihan Umum Indonesia/);
+    assert.doesNotMatch(calls[1].payload.query, /sumber resmi|utamakan|kemudian|bandingkan/i);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'comparison']);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.provider), ['tavily', 'exa']);
     assert.equal(outcome.sources.length, 4);
@@ -359,6 +361,8 @@ test('News comparison uses news indexes and retries Tavily when Exa returns no m
       }
       assert.equal(payload.topic, 'news');
       assert.equal(payload.days, 30);
+      assert.match(payload.query, /Komisi Pemilihan Umum Indonesia/);
+      assert.doesNotMatch(payload.query, /sumber resmi|utamakan|kemudian|bandingkan/i);
       return { ok: true, json: async () => ({ results: [
         { url: 'https://www.antaranews.com/berita/one', title: 'ANTARA', content: 'Liputan media nasional', publishedDate: '2026-11-08' },
         { url: 'https://nasional.kompas.com/read/one', title: 'Kompas', content: 'Pembanding media nasional', publishedDate: '2026-11-07' },
@@ -367,6 +371,8 @@ test('News comparison uses news indexes and retries Tavily when Exa returns no m
     if (String(url).includes('exa')) {
       assert.equal(payload.category, 'news');
       assert.ok(payload.startPublishedDate);
+      assert.match(payload.query, /Komisi Pemilihan Umum Indonesia/);
+      assert.doesNotMatch(payload.query, /sumber resmi|utamakan|kemudian|bandingkan/i);
       return { ok: true, json: async () => ({ results: [] }) };
     }
     throw new Error('Unexpected provider URL: ' + url);
@@ -426,6 +432,28 @@ test('Enough priority-domain results stop early without paying for an unnecessar
       domains: plan.priorityDomains,
       sourceCount: 2,
     }]);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+
+test('Provider HTTP errors are distinguished from successful empty searches', async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error: 'unauthorized' }) });
+  try {
+    const decision = { search: true, query: 'test query', explicit: true };
+    const plan = {
+      id: 'general', label: 'web umum', categories: [], domains: [],
+      priorityDomains: [], relatedDomains: [], comparisonDomains: [],
+    };
+    const outcome = await collectWebSources(
+      decision, { TAVILY_API_KEY: 'fake-tavily' }, () => {}, undefined, plan,
+    );
+    assert.equal(outcome.sources.length, 0);
+    assert.equal(outcome.attempts[0].httpStatus, 401);
+    assert.equal(outcome.attempts[0].error, 'http_error');
+    assert.match(webContextMessage(decision, outcome), /HTTP 401/);
   } finally {
     globalThis.fetch = oldFetch;
   }

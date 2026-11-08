@@ -62,7 +62,8 @@ test('vision HTTP chat really streams a multimodal provider payload without pers
       SUPABASE_URL:'https://fixture.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY:'fixture-secret',
       OPENROUTER_API_KEY:'fixture-api-key',
-      OPENROUTER_MAIN_MODEL:'fixture/text-only',
+      OPENROUTER_MAIN_MODEL:'deepseek/deepseek-v4.1-flash-1017',
+      OPENROUTER_VISION_MODEL:'deepseek/deepseek-v4.1-flash-1017',
       TAVILY_API_KEY:'fixture-search-key',
     });
     const sse = await response.text();
@@ -72,7 +73,7 @@ test('vision HTTP chat really streams a multimodal provider payload without pers
 
     const streamedPayload = providerPayloads.find(item => item.stream === true);
     assert.ok(streamedPayload);
-    assert.equal(streamedPayload.model, 'deepseek/deepseek-v4.1-flash-1017');
+    assert.equal(streamedPayload.model, 'qwen/qwen3.8-omni-flash');
     assert.equal(streamedPayload.tools, undefined, 'vision must not expose web tools');
     const user = streamedPayload.messages.findLast(item => item.role === 'user');
     assert.equal(user.content[0].text, 'Apa isi screenshot ini?');

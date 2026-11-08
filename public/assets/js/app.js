@@ -17,7 +17,14 @@ let currentSessionId = null;
 let currentSessionMeta = null;
 let sessionLoadSerial = 0;
 const currentPersona = 'Auto'; // Single adaptive AAi voice; legacy persona preferences ignored.
-let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
+const AAI_MODEL_SELECTION_KEY = 'aai_model_selection';
+const FALLBACK_AAI_MODEL_CATALOG = [
+  { id: 'auto', label: 'Auto · Qwen 3.8 Flash', model_id: 'qwen/qwen3.8-flash', description: 'Model bawaan AAi.' },
+  { id: 'qwen/qwen3.8-omni-flash', label: 'Qwen 3.8 Omni Flash', model_id: 'qwen/qwen3.8-omni-flash', description: 'Untuk gambar dan percakapan multimodal.' },
+  { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash', model_id: 'z-ai/glm-5.3-flash', description: 'Model alternatif.' }
+];
+let aaiModelCatalog = FALLBACK_AAI_MODEL_CATALOG.slice();
+let currentModelSelection = localStorage.getItem(AAI_MODEL_SELECTION_KEY) || 'auto';
 // External search requires an affirmative, persisted user choice (off by default).
 let currentWebPermission = localStorage.getItem('aai_web_tool_permission') === 'allow' ? 'allow' : 'deny';
 const currentMemoryExperimentMode = 'context-heavy';
@@ -754,7 +761,18 @@ function logDebug(msg, color = '#2a7a9e') {
 function updateModeLabel() {
   const modeLabel = document.getElementById('modeLabel');
   if (!modeLabel) return;
-  modeLabel.textContent = ''; // Model selection remains in Settings, never on the chat header.
+  const selected = aaiModelCatalog.find(model => model.id === currentModelSelection) || aaiModelCatalog[0];
+  const shortLabel = selected.id === 'auto'
+    ? 'Qwen 3.8 Flash'
+    : selected.id === 'qwen/qwen3.8-omni-flash'
+      ? 'Qwen Omni Flash'
+      : selected.label;
+  modeLabel.textContent = shortLabel;
+  const button = modeLabel.closest('button.settings-btn');
+  if (button) {
+    button.title = 'Pengaturan model · aktif: ' + selected.label;
+    button.setAttribute('aria-label', 'Pengaturan model. Model aktif: ' + selected.label);
+  }
 }
 
 function updateCompactStatus(forceValue = null) {
@@ -2460,7 +2478,8 @@ async function sendMessage(text, files = []) {
         session_id: currentSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        model_preference: currentModelPreference,
+        model_preference: 'main',
+        model_id: currentModelSelection,
         web_permission: currentWebPermission,
         time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
@@ -2620,7 +2639,8 @@ async function executeRegenerate(text, userMessageId = null, assistantMessageId 
         session_id: effectiveSessionId,
         user_id: currentUser.id,
         persona_name: frozenPersona,
-        model_preference: currentModelPreference,
+        model_preference: 'main',
+        model_id: currentModelSelection,
         web_permission: currentWebPermission,
         time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
@@ -2786,7 +2806,8 @@ async function sendMessageBranched(text, parentId = null, editedMessageId = null
         session_id: editedSessionId,
         user_id: currentUser.id,
         persona_name: currentPersona,
-        model_preference: currentModelPreference,
+        model_preference: 'main',
+        model_id: currentModelSelection,
         web_permission: currentWebPermission,
         time_zone: getAAiDeviceTimeZone(),
         memory_experiment_mode: currentMemoryExperimentMode,
@@ -3821,25 +3842,51 @@ function toggleSettingsMenu() {
   if (menu.classList.contains('show')) renderSettingsMenu();
 }
 function renderSettingsMenu() {
-  let html = '<div class="settings-header">Model AI · pilih manual</div>';
-  const models = [
-    { val: 'main', label: '⚡ Qwen · utama' },
-    { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' }
-  ];
-  models.forEach(m => {
-    html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
-      <span>${m.label}</span><i class="fas fa-check check"></i>
+  const selected = aaiModelCatalog.find(model => model.id === currentModelSelection) || aaiModelCatalog[0];
+  let html = '<div class="settings-header">Model AI · pilih model</div>';
+  for (const model of aaiModelCatalog) {
+    const active = currentModelSelection === model.id;
+    html += `<button type="button" class="settings-item ${active ? 'active' : ''}" onclick="selectModelUI('${escHtml(model.id)}')">
+      <span>${escHtml(model.label)}<small style="display:block;margin-top:3px;font-size:10px;font-weight:500;opacity:.68">${escHtml(model.model_id)}</small></span>
+      <i class="fas fa-check check" aria-hidden="true"></i>
     </button>`;
-  });
-  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Rute gratis dipilih otomatis oleh OpenRouter; ketersediaan dapat berubah.</p>';
+  }
+  html += `<p class="model-test-note">Aktif: <strong>${escHtml(selected.label)}</strong>. ID model dikirim langsung ke server; bukan alias "utama" yang dapat menunjuk ke model lain.</p>`;
   document.getElementById('settingsMenu').innerHTML = html;
 }
 function selectModelUI(val) {
-  if (val !== 'main' && val !== 'free-auto') return;
-  currentModelPreference = val;
-  localStorage.setItem('aai_model_preference', val);
+  if (!aaiModelCatalog.some(model => model.id === val)) return;
+  currentModelSelection = val;
+  localStorage.setItem(AAI_MODEL_SELECTION_KEY, val);
   updateModeLabel();
   renderSettingsMenu();
+}
+async function loadAAiModelCatalog() {
+  try {
+    const response = await fetch('/api/models', { cache: 'no-store' });
+    if (!response.ok) throw new Error('Katalog model belum tersedia.');
+    const data = await response.json();
+    const incoming = Array.isArray(data.models) ? data.models : [];
+    const normalized = incoming
+      .filter(model => model && typeof model.id === 'string'
+        && typeof model.label === 'string' && typeof model.model_id === 'string')
+      .map(model => ({
+        id: model.id,
+        label: model.label,
+        model_id: model.model_id,
+        description: String(model.description || '')
+      }));
+    if (normalized.some(model => model.id === 'auto')) aaiModelCatalog = normalized;
+  } catch (error) {
+    console.info('[AAi] Menggunakan katalog model lokal:', error.message);
+  }
+  if (!aaiModelCatalog.some(model => model.id === currentModelSelection)) {
+    currentModelSelection = 'auto';
+  }
+  localStorage.setItem(AAI_MODEL_SELECTION_KEY, currentModelSelection);
+  updateModeLabel();
+  const menu = document.getElementById('settingsMenu');
+  if (menu && menu.classList.contains('show')) renderSettingsMenu();
 }
 
 
@@ -4357,6 +4404,8 @@ async function bootstrapSessionState() {
 
 function initApp() {
   initComposerUI();
+  updateModeLabel();
+  void loadAAiModelCatalog();
   newChat({ preserveStoredSession: true });
   requestAnimationFrame(() => {
     void bootstrapSessionState();

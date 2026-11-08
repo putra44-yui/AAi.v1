@@ -23,6 +23,9 @@ export type WebSearchAttempt = {
   scope: WebSearchScope;
   domains: string[];
   sourceCount: number;
+  query?: string;
+  httpStatus?: number;
+  error?: string;
 };
 export type WebSourcePlan = {
   id: string;
@@ -251,7 +254,7 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
     priorityDomains: [
       'antaranews.com', 'kompas.com', 'tempo.co', 'detik.com', 'cnnindonesia.com',
       'liputan6.com', 'tribunnews.com', 'tvonenews.com', 'sindonews.com',
-      'kumparan.com', 'suara.com', 'tirto.id', 'idntimes.com', 'bisnis.com',
+      'kumparan.com', 'suara.com', 'tirto.id', 'idntimes.com', 'bisnis.com', 'mediaindonesia.com',
     ],
     relatedDomains: ['reuters.com', 'apnews.com', 'bbc.com'],
   },
@@ -439,7 +442,11 @@ export function normalizeWebSources(input: unknown, maxResults = 5): WebSource[]
   return output;
 }
 
-async function postSearch(url: string, token: string, payload: object, signal?: AbortSignal): Promise<unknown> {
+type ProviderSearchResponse = { data: unknown; status: number | null; error?: string };
+
+async function postSearch(
+  url: string, token: string, payload: object, signal?: AbortSignal,
+): Promise<ProviderSearchResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
   const abortParent = () => controller.abort();
@@ -451,14 +458,34 @@ async function postSearch(url: string, token: string, payload: object, signal?: 
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
+    const status = typeof response.status === 'number' ? response.status : 200;
+    if (!response.ok) return { data: null, status, error: 'http_error' };
+    return { data: await response.json(), status };
+  } catch (error) {
+    const name = error instanceof Error ? error.name : '';
+    return {
+      data: null,
+      status: null,
+      error: name === 'AbortError' ? 'timeout' : name === 'SyntaxError' ? 'invalid_json' : 'network_error',
+    };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abortParent);
   }
+}
+
+function buildNewsComparisonQuery(query: string, categories: string[]): string {
+  // Do not carry "official source first" language into the media stage. Search
+  // media for the same subject, not for official KPU pages all over again.
+  const topic = String(query || '')
+    .replace(/\b(?:sumber|situs|kanal)\s+resmi\b/gi, ' ')
+    .replace(/\b(?:utamakan|prioritaskan|dahulukan|kemudian|lalu|setelah\s+itu|selanjutnya|bandingkan|dibandingkan|media|berita|news|terbaru|hari\s+ini|sekarang|saat\s+ini)\b/gi, ' ')
+    .replace(/\bKPU\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const entity = categories.includes('kpu-election') ? 'Komisi Pemilihan Umum Indonesia' : '';
+  return [entity, topic, 'berita terbaru Indonesia']
+    .filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 380);
 }
 
 export async function collectWebSources(
@@ -492,11 +519,7 @@ export async function collectWebSources(
     const resultLimit = 10;
     const newsComparison = scope === 'comparison' && sourcePlan.categories.includes('news');
     const providerQuery = newsComparison
-      ? [
-          decision.query,
-          sourcePlan.categories.includes('kpu-election') ? 'Komisi Pemilihan Umum Indonesia' : '',
-          'berita terbaru media nasional',
-        ].filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 380)
+      ? buildNewsComparisonQuery(decision.query, sourcePlan.categories)
       : decision.query;
     const newsWindowDays = 30;
     const newsStartDate = new Date(Date.now() - newsWindowDays * 24 * 60 * 60 * 1000).toISOString();
@@ -522,15 +545,24 @@ export async function collectWebSources(
     const endpoint = selectedProvider === 'tavily'
       ? 'https://api.tavily.com/search'
       : 'https://api.exa.ai/search';
-    const result = await postSearch(endpoint, token, payload, signal) as { results?: unknown } | null;
+    const providerResponse = await postSearch(endpoint, token, payload, signal);
+    const result = providerResponse.data as { results?: unknown } | null;
     // Normalize the full provider response first, then apply the domain allowlist.
     // Do not truncate to five before filtering: off-domain results must not hide
-    // a valid official result that appears later in the provider response.
+    // a valid source that appears later in the provider response.
     const normalized = normalizeWebSources(result?.results, 20);
     const accepted = (domains.length
       ? normalized.filter(source => sourceMatchesDomains(source.url, domains))
       : normalized).slice(0, 5);
-    attempts.push({ provider: selectedProvider, scope, domains: [...domains], sourceCount: accepted.length });
+    attempts.push({
+      provider: selectedProvider,
+      scope,
+      domains: [...domains],
+      sourceCount: accepted.length,
+      query: providerQuery,
+      httpStatus: providerResponse.status ?? undefined,
+      ...(providerResponse.error ? { error: providerResponse.error } : {}),
+    });
     if (accepted.length) provider = selectedProvider;
     return accepted;
   };
@@ -579,6 +611,15 @@ export async function collectWebSources(
         if (alternate !== comparisonProvider) {
           sources = mergeWebSources(sources, await runProvider(alternate, comparisonDomains, 'comparison'));
         }
+      }
+      const comparisonSummary = attempts.filter(attempt => attempt.scope === 'comparison').map(attempt => {
+        const resultLabel = attempt.error
+          ? 'gagal ' + attempt.error + (attempt.httpStatus ? ' HTTP ' + attempt.httpStatus : '')
+          : attempt.sourceCount + ' hasil';
+        return attempt.provider + ': ' + resultLabel;
+      }).join('; ');
+      if (comparisonSummary) {
+        progress('report', undefined, 'Hasil pencarian media: ' + comparisonSummary + '.');
       }
 
       // Only spend a remaining request on related authorities if evidence is still
@@ -655,7 +696,9 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
           + (comparisonUsed
             ? 'Hasil tiap provider pada tahap pembanding (setelah filter domain): '
               + attempts.filter(attempt => attempt.scope === 'comparison')
-                .map(attempt => attempt.provider + ' ' + attempt.sourceCount + ' hasil').join('; ') + '. '
+                .map(attempt => attempt.provider + ' ' + attempt.sourceCount + ' hasil'
+                  + (attempt.error ? ' (' + attempt.error + (attempt.httpStatus ? ' HTTP ' + attempt.httpStatus : '') + ')' : '')
+                  + (attempt.query ? '; query: ' + attempt.query : '')).join('; ') + '. '
             : '')
         : '')
       + (relatedDomainsUsed
@@ -671,7 +714,9 @@ export function webContextMessage(decision: WebSearchDecision, outcome: WebSearc
   if (!outcome.sources.length) {
     const attemptSummary = attempts.length
       ? 'Percobaan: ' + attempts.map(attempt =>
-          attempt.provider + ' (' + attempt.scope + ', ' + attempt.sourceCount + ' hasil)'
+          attempt.provider + ' (' + attempt.scope + ', ' + attempt.sourceCount + ' hasil'
+            + (attempt.error ? ', ' + attempt.error + (attempt.httpStatus ? ' HTTP ' + attempt.httpStatus : '') : '')
+            + (attempt.query ? ', query: ' + attempt.query : '') + ')'
         ).join('; ') + '. '
       : '';
     const unavailable = outcome.attempted

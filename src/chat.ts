@@ -919,18 +919,21 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // can route to text-only providers and silently lose the image.
     const visionImages = requestBody.value.visionImages;
     const isBrowserExtension = request.headers.get('x-aai-client') === 'browser-extension';
-    // An explicit user selection always wins, including image messages. The
-    // browser extension also gets its own Qwen default if an older client
-    // temporarily omits model_id; it must never inherit the site's DeepSeek env.
+    // An explicit user selection always wins. "Auto" uses Qwen 3.8 Flash for
+    // text and Qwen Omni Flash for images. Legacy clients without model_id also
+    // default to Qwen; old OPENROUTER_MAIN_MODEL / VISION_MODEL secrets must not
+    // silently route a button labelled Qwen to DeepSeek.
     const modelName = requestBody.value.modelSelection !== null
-      ? resolveModelSelection(requestBody.value.modelSelection)
+      ? requestBody.value.modelSelection === 'auto' && visionImages.length
+        ? 'qwen/qwen3.8-omni-flash'
+        : resolveModelSelection(requestBody.value.modelSelection)
       : isBrowserExtension
         ? DEFAULT_MODEL
         : visionImages.length
-          ? (readEnv('OPENROUTER_VISION_MODEL', env) || 'deepseek/deepseek-v4.1-flash-1017')
+          ? 'qwen/qwen3.8-omni-flash'
           : requestBody.value.modelPreference === 'free-auto'
             ? DEFAULT_FREE_MODEL
-            : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
+            : DEFAULT_MODEL;
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
