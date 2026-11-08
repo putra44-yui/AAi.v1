@@ -166,6 +166,9 @@ interface InitEvent {
   phase: 'init';
   session_id: string;
   user_message_id: string;
+  model_requested?: string;
+  vision_image_count?: number;
+  client?: 'browser-extension' | 'web-app';
 }
 
 interface TokenEvent {
@@ -915,13 +918,19 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // Keep image requests on a confirmed vision-capable model. "free-auto"
     // can route to text-only providers and silently lose the image.
     const visionImages = requestBody.value.visionImages;
-    const modelName = visionImages.length
-      ? (readEnv('OPENROUTER_VISION_MODEL', env) || 'deepseek/deepseek-v4.1-flash-1017')
-      : requestBody.value.modelSelection !== null
-        ? resolveModelSelection(requestBody.value.modelSelection)
-        : requestBody.value.modelPreference === 'free-auto'
-          ? DEFAULT_FREE_MODEL
-          : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
+    const isBrowserExtension = request.headers.get('x-aai-client') === 'browser-extension';
+    // An explicit user selection always wins, including image messages. The
+    // browser extension also gets its own Qwen default if an older client
+    // temporarily omits model_id; it must never inherit the site's DeepSeek env.
+    const modelName = requestBody.value.modelSelection !== null
+      ? resolveModelSelection(requestBody.value.modelSelection)
+      : isBrowserExtension
+        ? DEFAULT_MODEL
+        : visionImages.length
+          ? (readEnv('OPENROUTER_VISION_MODEL', env) || 'deepseek/deepseek-v4.1-flash-1017')
+          : requestBody.value.modelPreference === 'free-auto'
+            ? DEFAULT_FREE_MODEL
+            : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
@@ -1048,7 +1057,14 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         };
 
         try {
-          enqueueEvent({ phase: 'init', session_id: sessionId, user_message_id: userMessageId });
+          enqueueEvent({
+            phase: 'init',
+            session_id: sessionId,
+            user_message_id: userMessageId,
+            model_requested: modelName,
+            vision_image_count: visionImages.length,
+            client: isBrowserExtension ? 'browser-extension' : 'web-app',
+          });
           if (sessionRecall) {
             enqueueEvent({ phase: 'preface', message: sessionRecall.excerpts.length
               ? 'Nah, ada bagian obrolan sebelumnya yang nyambung. Aku cocokkan dulu, ya.'
