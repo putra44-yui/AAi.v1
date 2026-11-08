@@ -42,6 +42,20 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.ok(electionNews.priorityDomains.includes('jdih.kpu.go.id'));
   assert.ok(electionNews.priorityDomains.includes('kompas.com'));
 
+  const orderedElectionNews = resolveSourcePlan(
+    'Cari berita terbaru tentang KPU hari ini. Utamakan sumber resmi KPU, kemudian bandingkan dengan media berita.',
+    'berita terbaru KPU hari ini',
+  );
+  assert.equal(orderedElectionNews.id, 'kpu-election');
+  assert.deepEqual(orderedElectionNews.categories, ['kpu-election', 'news']);
+  assert.ok(orderedElectionNews.priorityDomains.includes('jdih.kpu.go.id'));
+  assert.ok(orderedElectionNews.priorityDomains.includes('kpu.go.id'));
+  assert.ok(!orderedElectionNews.priorityDomains.includes('antaranews.com'));
+  assert.ok(!orderedElectionNews.priorityDomains.includes('kompas.com'));
+  assert.ok(orderedElectionNews.comparisonDomains?.includes('antaranews.com'));
+  assert.ok(orderedElectionNews.comparisonDomains?.includes('kompas.com'));
+  assert.match(orderedElectionNews.label, /kemudian/);
+
   const casualNews = resolveSourcePlan('Apa kabar soal Gibran hari ini?', 'Gibran latest news today');
   assert.equal(casualNews.id, 'news');
   assert.ok(casualNews.priorityDomains.includes('antaranews.com'));
@@ -263,6 +277,64 @@ test('Tavily source-linked images are enabled and attached only to their matchin
     assert.equal(outcome.sources[0].image, 'https://cdn.example.org/article-one.jpg');
     assert.equal(outcome.sources[1].image, undefined);
     assert.equal(outcome.provider, 'tavily');
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test('Explicit official-first request searches KPU domains before a mandatory media comparison', async () => {
+  const oldFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const payload = JSON.parse(init.body);
+    calls.push({ url: String(url), payload });
+    if (String(url).includes('tavily')) {
+      if (payload.include_domains?.includes('jdih.kpu.go.id')) {
+        return { ok: true, json: async () => ({ results: [
+          { url: 'https://jdih.kpu.go.id/produk-hukum/keputusan/one', title: 'Keputusan KPU', content: 'Sumber resmi KPU' },
+          { url: 'https://www.kpu.go.id/berita/one', title: 'Berita KPU RI', content: 'Informasi resmi KPU' },
+        ] }) };
+      }
+      return { ok: true, json: async () => ({ results: [] }) };
+    }
+    if (String(url).includes('exa')) {
+      return { ok: true, json: async () => ({ results: [
+        { url: 'https://www.antaranews.com/berita/one', title: 'ANTARA', content: 'Pembanding media satu' },
+        { url: 'https://www.kompas.com/berita/one', title: 'Kompas', content: 'Pembanding media dua' },
+      ] }) };
+    }
+    throw new Error('Unexpected provider URL: ' + url);
+  };
+  try {
+    const message = 'Cari berita terbaru tentang KPU hari ini. Utamakan sumber resmi KPU, kemudian bandingkan dengan media berita.';
+    const decision = { search: true, query: 'berita terbaru KPU hari ini', explicit: true };
+    const plan = resolveSourcePlan(message, decision.query);
+    const progress = [];
+    const outcome = await collectWebSources(
+      decision,
+      { TAVILY_API_KEY: 'fake-tavily', EXA_API_KEY: 'fake-exa' },
+      (step, count, detail) => progress.push({ step, count, detail }),
+      undefined,
+      plan,
+    );
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].payload.include_domains.includes('jdih.kpu.go.id'));
+    assert.ok(calls[0].payload.include_domains.includes('kpu.go.id'));
+    assert.ok(!calls[0].payload.include_domains.includes('antaranews.com'));
+    assert.ok(calls[1].payload.includeDomains.includes('antaranews.com'));
+    assert.ok(calls[1].payload.includeDomains.includes('kompas.com'));
+    assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'comparison']);
+    assert.deepEqual(outcome.attempts.map(attempt => attempt.provider), ['tavily', 'exa']);
+    assert.equal(outcome.sources.length, 4);
+    assert.match(outcome.sources[0].url, /jdih\.kpu\.go\.id/);
+    assert.match(outcome.sources[1].url, /kpu\.go\.id/);
+    assert.match(outcome.sources[2].url, /antaranews\.com/);
+    assert.match(outcome.sources[3].url, /kompas\.com/);
+    assert.ok(progress.some(item => /bandingkan dengan media berita utama/i.test(item.detail || '')));
+    const evidence = webContextMessage(decision, outcome);
+    assert.match(evidence, /Urutan pembanding yang diminta/);
+    assert.match(evidence, /Tahap pembanding sudah dijalankan/);
+    assert.match(evidence, /jangan menyebut media sebagai sumber resmi/i);
   } finally {
     globalThis.fetch = oldFetch;
   }
