@@ -27,6 +27,15 @@ async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
           status: 200, headers: { 'content-type': 'text/event-stream' },
         });
       }
+      if (url.includes('api.tavily.com/search')) {
+        return Response.json({
+          results: [{
+            url: 'https://example.com/fixture-news',
+            title: 'Fixture article from live-search pipeline',
+            content: 'Verified fixture evidence for deterministic explicit search.',
+          }],
+        });
+      }
       assert.match(url, /fixture\.supabase\.co\/rest\/v1\//);
       const resource = new URL(url).pathname.split('/').at(-1);
       const parsedBody = init.body ? JSON.parse(init.body) : null;
@@ -495,4 +504,29 @@ test('legacy web clients default to Qwen 3.8 Flash despite a stale DeepSeek main
   assert.equal(result.status, 200);
   assert.equal(result.providerCalls[0].model, 'qwen/qwen3.8-flash');
   assert.equal(result.events.find(event => event.phase === 'init')?.model_requested, 'qwen/qwen3.8-flash');
+});
+
+
+test('explicit web requests search directly before the selected model composes the answer', async () => {
+  const result = await captureChatRequest({
+    message: 'Cari informasi publik tentang sejarah komputer.',
+    user_id: userId,
+    model_id: 'z-ai/glm-5.3-flash',
+    web_permission: 'allow',
+  }, {}, {
+    ...env,
+    TAVILY_API_KEY: 'fixture-search-key',
+    AAI_WEB_SEARCH_LIMITER: { limit: async () => ({ success: true }) },
+  });
+
+  assert.equal(result.status, 200);
+  const answerCall = result.providerCalls.find(payload =>
+    payload.messages.some(message =>
+      message.role === 'system' && String(message.content).includes('Fixture article from live-search pipeline')
+    )
+  );
+  assert.ok(answerCall, 'The selected model must receive actual search evidence');
+  assert.equal(answerCall.model, 'z-ai/glm-5.3-flash');
+  assert.equal(answerCall.tools, undefined, 'Explicit search must not rely on model tool calling');
+  assert.ok(result.events.some(event => event.phase === 'progress' && event.step === 'sources'));
 });

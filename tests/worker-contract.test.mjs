@@ -326,3 +326,14 @@ test('Companion micro endpoint is disabled by default and fails closed', () => {
   assert.match(worker, /Fitur Pendamping sedang dinonaktifkan/);
   assert.match(worker, /return handleCompanionMicro\(request, env\)/);
 });
+
+
+test('PWA offline banner probes the live Worker and refreshes its shell cache', () => {
+  const pwa = read('public/assets/js/pwa.js');
+  const sw = read('public/sw.js');
+  assert.match(pwa, /fetch\('\/api\/status\?probe='/);
+  assert.match(pwa, /cache:\s*'no-store'/);
+  assert.match(pwa, /notice\.hidden = response\.ok/);
+  assert.doesNotMatch(pwa, /notice\.hidden = navigator\.onLine/);
+  assert.match(sw, /aai-shell-v37/);
+});

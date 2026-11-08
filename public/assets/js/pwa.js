@@ -57,16 +57,37 @@
     updateInstallButtons();
   });
 
-  function syncNetworkNotice() {
+  let networkProbeRunning = false;
+  async function syncNetworkNotice() {
     const notice = document.getElementById('aaiNetworkNotice');
-    if (notice) notice.hidden = navigator.onLine;
+    if (!notice || networkProbeRunning) return;
+    networkProbeRunning = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 4000);
+    try {
+      // navigator.onLine is only a browser hint; a reachable Worker is the real
+      // signal that AAi can accept messages and use its backend.
+      const response = await fetch('/api/status?probe=' + Date.now(), {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      notice.hidden = response.ok;
+    } catch {
+      notice.hidden = false;
+    } finally {
+      window.clearTimeout(timeout);
+      networkProbeRunning = false;
+    }
   }
 
-  window.addEventListener('online', syncNetworkNotice);
-  window.addEventListener('offline', syncNetworkNotice);
+  window.addEventListener('online', () => { void syncNetworkNotice(); });
+  window.addEventListener('offline', () => { void syncNetworkNotice(); });
   document.addEventListener('DOMContentLoaded', () => {
     updateInstallButtons();
-    syncNetworkNotice();
+    void syncNetworkNotice();
     const reloadButton = document.getElementById('aaiReloadForUpdate');
     if (reloadButton) reloadButton.addEventListener('click', () => location.reload());
   });
