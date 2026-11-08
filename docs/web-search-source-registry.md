@@ -8,13 +8,15 @@ AAi chooses where to look before searching broadly. The goal is not to maximize 
 
 1. The selected model decides whether public web evidence is needed and issues a precise `search_web` query.
 2. The server resolves up to three matching source profiles from the user's request plus the model's public query. This is deterministic and does not call another LLM.
-3. Each profile separates:
+3. If the user explicitly orders source types, the server preserves that order as separate search stages. For example, "official KPU sources first, then compare with news media" searches KPU/JDIH domains first and media domains second; those domain groups are never merged into one unordered priority list.
+4. Each profile separates:
    - **Priority domains**: the most direct official publisher, legal database, or original research source.
    - **Related domains**: other authorities, repositories, or reputable publishers that can cross-check the first results.
-4. Tavily searches the priority domains first with `include_domains`. The server checks returned hostnames against that allowlist again.
-5. If fewer than two distinct priority-domain sources are found, Exa searches the same priority domains with `includeDomains`.
-6. If evidence is still sparse, one additional provider request searches the related domains. If no related domains are defined, that request broadens to the general web instead.
-7. The final model receives the source profile, which domain tier was actually searched, provider attempts, and verified snippets. If no source was found, the model also receives the failed-attempt summary and must state the limitation honestly.
+5. Tavily searches the priority domains first with `include_domains`. The server checks returned hostnames against that allowlist again.
+6. If fewer than two distinct priority-domain sources are found, Exa searches the same priority domains with `includeDomains`.
+7. When an explicit comparison stage exists, it is searched next even if the primary stage already found two sources. Comparison results are appended after primary results, preserving the requested order. If a comparison provider returns nothing, the other provider may be tried when a request slot remains.
+8. If evidence is still sparse and a request slot remains, one additional provider request searches related domains. If no related domains are defined, that request broadens to the general web instead.
+9. The final model receives the source profile, which domain tier was actually searched, provider attempts, and verified snippets. If no source was found, the model also receives the failed-attempt summary and must state the limitation honestly.
 
 The server makes at most three provider requests per model tool call. It does not require both providers when the first search already finds enough distinct sources. The model may make another bounded tool call only when it identifies a concrete evidence gap, using a different query.
 
@@ -50,7 +52,7 @@ The server makes at most three provider requests per model tool call. It does no
 | Government / ASN | bkn.go.id, menpan.go.id, kemendagri.go.id, setkab.go.id | indonesia.go.id, jdih.setneg.go.id |
 | News | antaranews.com, kompas.com, tempo.co, detik.com, cnnindonesia.com | reuters.com, apnews.com, bbc.com |
 
-A question can match more than one profile, up to three. For example, "berita KPU" combines the election and news profiles, while "riset Qwen" combines research repositories and Qwen-owned sources. The highest-priority matching profile remains the primary category for audit display.
+A question can match more than one profile, up to three. For example, "berita KPU" combines the election and news profiles, while "riset Qwen" combines research repositories and Qwen-owned sources. The highest-priority matching profile remains the primary category for audit display. Without an explicit source order, matching profiles retain the existing combined-domain behavior. With an explicit order, such as official KPU first and news media afterward, the KPU profile remains the primary stage and the news profile becomes a mandatory comparison stage.
 
 This registry is a routing aid, not a guarantee that every page on a listed domain is authoritative. The model must still assess whether the specific page supports the claim. Domain matching accepts the exact hostname and its subdomains; it does not trust lookalike hostnames.
 
@@ -76,8 +78,8 @@ This registry is a routing aid, not a guarantee that every page on a listed doma
 
 Each search completion records:
 - primary category and all matched categories;
-- priority and related domains selected by the registry;
-- provider, search tier, exact domains, and accepted result count for each attempt;
+- priority, comparison, and related domains selected by the registry;
+- provider, search tier (priority/comparison/related/general), exact domains, and accepted result count for each attempt;
 - final source count and whether the search expanded beyond priority domains.
 
 These fields support review without exposing API keys or full private user messages.
