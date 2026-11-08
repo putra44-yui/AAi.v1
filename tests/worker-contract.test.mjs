@@ -235,13 +235,13 @@ test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
   assert.ok(client.includes("strategy: 'fa-compass'"));
 });
-test('AAi streams sanitized Markdown without reprocessing settled blocks', () => {
+test('AAi streams safe text incrementally and formats settled Markdown blocks once', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
   assert.match(client, /function ensureStreamingMarkdownNode/);
   assert.match(client, /function findStableStreamMarkdownBoundary/);
   assert.match(client, /function prepareStreamingPlainText/);
-  assert.match(client, /streamingMarkdownRenderer\\.code/);
+  assert.match(client, /streamingMarkdownRenderer\.code/);
   assert.match(client, /requestAnimationFrame\(\(\) => \{/);
   assert.match(client, /lastNode\.appendData\(delta\)/);
   assert.match(client, /liveEl\.textContent = displayTail/);
@@ -249,6 +249,11 @@ test('AAi streams sanitized Markdown without reprocessing settled blocks', () =>
   assert.match(client, /formatContent\(fullText\)/);
   assert.doesNotMatch(client, /STREAM_RENDER_INTERVAL_MS|STREAM_SCROLL_INTERVAL_MS/);
   assert.doesNotMatch(client, /liveEl\.innerHTML = tailText/);
+  assert.match(css, /\.aai-streaming-committed/);
+  const source = client.match(/function findStableStreamMarkdownBoundary\(text\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(source, 'Missing stable Markdown boundary parser');
+  const boundary = new Function(source + '\nreturn findStableStreamMarkdownBoundary;')();
+  assert.equal(boundary('**Halo**\n\nLanjut'), 10);
   assert.equal(boundary('```js\nconst x = 1;\n\nconst y = 2;\n'), 0, 'Never split an unclosed code fence');
   assert.equal(boundary('```js\nconst x = 1;\n```\n\nTeks'), 24);
 });
