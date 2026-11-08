@@ -1062,7 +1062,8 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
     logTiming('session_ready');
-    const { supabase, sessionId, userMessageId, message, history, sessionRecall, isNewSession, provisionalTitle } = prepared.value;
+    const { supabase, sessionId, userMessageId, message, history, sessionRecall, isNewSession: preparedIsNewSession, provisionalTitle } = prepared.value;
+    const isNewSession = preparedIsNewSession || Boolean(browserContinuation && browserContinuation.state.isNewSession);
     if (requestBody.value.userMessageId && !requestBody.value.visionImages.length &&
         message.includes('[📷 Lampiran gambar:')) {
       return createJsonError(400, 'Gambar lama tidak disimpan. Kirim ulang fotonya untuk dianalisis lagi.', traceId);
