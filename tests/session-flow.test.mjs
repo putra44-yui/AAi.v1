@@ -106,7 +106,7 @@ test('new chat is saved before stream reports completion, with real DB IDs', asy
       'Live JSON duration and persisted JSON duration must not change after reload');
     assert.equal(completed.timings.first_token_ms, trace.firstTokenMs);
     assert.doesNotMatch(JSON.stringify(trace), /fixture-not-a-secret/);
-    assert.equal(providerCalls[0].model, 'qwen/qwen3.8-omni-flash');
+    assert.equal(providerCalls[0].model, 'qwen/qwen3.8-flash');
     assert.match(providerCalls[0].messages[0].content, /AAi.*Teguh/);
     assert.deepEqual(providerCalls[0].messages.at(-1), { role: 'user', content: 'Halo AAi' });
   } finally {
