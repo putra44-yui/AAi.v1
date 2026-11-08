@@ -1243,7 +1243,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             const agentStartedAt = Date.now();
             while (!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS
               && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
-              const toolChoice = toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto';
+              const toolChoice = 'auto';
               enqueueEvent({ phase: 'progress', step: 'assess',
                 message: toolRounds === 0 ? 'Memeriksa apakah perlu mencari informasi terbaru...'
                   : 'Memeriksa apakah sumber yang ada sudah cukup...' });
@@ -1295,8 +1295,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               logTiming('tool_decision_complete', { round: toolRounds + 1, tool_calls: calls.length });
               if (!calls.length) {
                 const candidate = replyParts.join('');
-                if (toolRounds === 0 && (toolChoice === 'required'
-                  || (requestedWebDecision.search && looksLikeUnexecutedSearchPayload(candidate)))) {
+                if (requestedWebDecision.search && looksLikeUnexecutedSearchPayload(candidate)) {
                   failUnexecutedSearch('Model mengirim teks tanpa memanggil alat pencarian. Belum ada hasil web yang bisa dilaporkan.');
                 } else {
                   // The decision marker (or any malformed decision text) is never

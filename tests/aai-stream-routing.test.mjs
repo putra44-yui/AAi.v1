@@ -37,7 +37,9 @@ test('web permission and providers gate actual searches even for fresh questions
 
 test('a tool-decision response never becomes a single buffered public answer', () => {
   assert.match(chatSource, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
-  assert.match(chatSource, /if \(shouldRunToolDecision\) \{/);
+  assert.match(chatSource, /if \(shouldRunModelToolDecision\) \{/);
+  assert.match(chatSource, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
+  assert.match(chatSource, /const shouldRunModelToolDecision = shouldRunToolDecision && !requestedWebDecision\.explicit/);
   assert.match(chatSource, /\[KEPUTUSAN TOOL SAJA\]/);
   assert.match(chatSource, /max_tokens: 320/);
   assert.match(chatSource, /await receiveProviderResponse\(result\.response, nativeCalls, true\)/);
@@ -48,8 +50,9 @@ test('a tool-decision response never becomes a single buffered public answer', (
 });
 
 test('tool failure never silently turns an explicit search into an unverified answer', () => {
-  assert.match(chatSource, /toolChoice === 'required'/);
+  assert.match(chatSource, /const toolChoice = 'auto'/);
   assert.match(chatSource, /failUnexecutedSearch\('Model mengirim teks tanpa memanggil alat pencarian/);
+  assert.match(chatSource, /const hasToolResults = providerPayload\.messages\.some\(item => item\.role === 'tool'\) \|\| directSearchCompleted/);
   assert.match(chatSource, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(chatSource, /upstreamAbortController\.abort\(\)/);
   assert.match(chatSource, /\[PENCARIAN TIDAK TERSEDIA\]/);

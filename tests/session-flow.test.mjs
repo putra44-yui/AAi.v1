@@ -381,7 +381,7 @@ test('search-required model returning only a keyword never leaks or saves it as 
       return mockNewChatDatabase(input, init, inserted);
     };
     const response = await POST(new Request('https://aai.example/api/chat', {
-      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita tentang Raffi Ahmad terbaru', user_id: userId, web_permission: 'allow' }),
+      method: 'POST', body: JSON.stringify({ message: 'Apa berita terbaru tentang Raffi Ahmad?', user_id: userId, web_permission: 'allow' }),
     }), { ...env, TAVILY_API_KEY: 'fixture-only' });
     assert.equal(response.status, 200);
     const events = await response.text();
@@ -390,8 +390,8 @@ test('search-required model returning only a keyword never leaks or saves it as 
     assert.doesNotMatch(events, /berita Raffi Ahmad terbaru Juni 2026/);
     assert.equal(inserted.find(row => row.role === 'assistant').content.includes('belum berhasil menjalankan pencarian web'), true);
     assert.ok(inserted.find(row => row.role === 'assistant').activity_trace.steps.some(step => step.step === 'unavailable'));
-    assert.equal(providerCalls[0].tool_choice, 'required');
-    assert.equal(providerCalls.filter(call => call.tools).length, 1, 'Do not silently retry a required search without tools');
+    assert.equal(providerCalls[0].tool_choice, 'auto');
+    assert.equal(providerCalls.filter(call => call.tools).length, 1, 'Do not silently retry a failed model tool decision without tools');
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -411,7 +411,7 @@ test('a provider that rejects native tools cannot invent a search result in a fa
       return mockNewChatDatabase(input, init, inserted);
     };
     const response = await POST(new Request('https://aai.example/api/chat', {
-      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita terbaru tentang Raffi Ahmad', user_id: userId, web_permission: 'allow' }),
+      method: 'POST', body: JSON.stringify({ message: 'Apa berita terbaru tentang Raffi Ahmad?', user_id: userId, web_permission: 'allow' }),
     }), { ...env, TAVILY_API_KEY: 'fixture-only' });
     assert.equal(response.status, 200);
     const events = await response.text();
@@ -419,7 +419,7 @@ test('a provider that rejects native tools cannot invent a search result in a fa
     assert.match(events, /Belum ada pencarian web yang dijalankan/);
     assert.equal(inserted.find(row => row.role === 'assistant').content.includes('belum berhasil menjalankan pencarian web'), true);
     assert.equal(providerCalls.length, 1, 'No second, tool-less model request after failed explicit search');
-    assert.equal(providerCalls[0].tool_choice, 'required');
+    assert.equal(providerCalls[0].tool_choice, 'auto');
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -449,7 +449,7 @@ test('model cannot report empty search results before the real tool response', a
       return mockNewChatDatabase(input, init, inserted);
     };
     const response = await POST(new Request('https://aai.example/api/chat', {
-      method: 'POST', body: JSON.stringify({ message: 'Coba cari berita tentang Raffi Ahmad terbaru', user_id: userId, web_permission: 'allow' }),
+      method: 'POST', body: JSON.stringify({ message: 'Apa berita terbaru tentang Raffi Ahmad?', user_id: userId, web_permission: 'allow' }),
     }), { ...env, TAVILY_API_KEY: 'fixture-only', AAI_WEB_SEARCH_LIMITER: { limit: async () => ({ success: true }) } });
     assert.equal(response.status, 200);
     const events = await response.text();
