@@ -378,6 +378,8 @@ test('Browser extension tools are model-directed, allowlisted, and resumed throu
   assert.match(server, /phase: 'browser_tool_call'/);
   assert.match(server, /signBrowserContinuation\(/);
   assert.match(server, /verifyBrowserContinuation\(/);
+  assert.match(server, /Browser tool continuation hanya tersedia untuk extension/);
+  assert.match(server, /!isJsonObject\(parsedToolResult\)/);
   assert.match(server, /action === 'browser_tool_continue'/);
   assert.match(server, /role: 'tool'/);
   assert.match(tools, /name: 'inspect_page'/);
