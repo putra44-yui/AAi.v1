@@ -276,7 +276,8 @@ test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
 test('agent loop can make bounded, sequential model-selected web calls', () => {
   const server = read('src/chat.ts');
   assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
-  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
+  assert.match(server, /const maxToolRounds = isBrowserExtension \? 12 : MAX_WEB_TOOL_ROUNDS/);
+  assert.match(server, /while \(!streamCanceled && toolRounds < maxToolRounds/);
   assert.match(server, /const toolChoice = 'auto'/);
   assert.match(server, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
   assert.match(server, /shouldOfferWebToolToModel\(message, requestBody\.value\.webPermission, hasSearchProvider\)/);
@@ -301,7 +302,8 @@ test('family identity uses the linked account and speaks to the person directly'
 
 test('web tool loop exits at the hard cap and final composition omits tool schema', () => {
   const server = read('src/chat.ts');
-  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
+  assert.match(server, /const maxToolRounds = isBrowserExtension \? 12 : MAX_WEB_TOOL_ROUNDS/);
+  assert.match(server, /while \(!streamCanceled && toolRounds < maxToolRounds/);
   assert.doesNotMatch(server, /toolRounds <= MAX_WEB_TOOL_ROUNDS/);
   const finalStart = server.indexOf('const finalPayload: ProviderRequestBody');
   const finalEnd = server.indexOf('const final = await fetchProviderStream', finalStart);
