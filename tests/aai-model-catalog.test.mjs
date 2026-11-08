@@ -40,6 +40,18 @@ test('model selection accepts supported IDs and rejects unknown or expensive pro
   assert.deepEqual(catalog.parseModelSelection('arbitrary/model'), { ok: false });
 });
 
+test('provider model IDs are accepted directly, including the Qwen Flash default', () => {
+  assert.deepEqual(catalog.parseModelSelection('qwen/qwen3.8-flash'), {
+    ok: true,
+    value: 'qwen/qwen3.8-flash',
+  });
+  assert.equal(catalog.resolveModelSelection('qwen/qwen3.8-flash'), 'qwen/qwen3.8-flash');
+  assert.deepEqual(catalog.parseModelSelection('qwen/qwen3.8-omni-flash'), {
+    ok: true,
+    value: 'qwen/qwen3.8-omni-flash',
+  });
+});
+
 test('manual model selections resolve to the exact allowlisted provider IDs', () => {
   assert.equal(catalog.resolveModelSelection('qwen/qwen3.8-omni-flash'), 'qwen/qwen3.8-omni-flash');
   assert.equal(catalog.resolveModelSelection('z-ai/glm-5.3-flash'), 'z-ai/glm-5.3-flash');
