@@ -42,7 +42,7 @@ async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
       if (resource === 'messages' && method === 'POST') {
         return Response.json({ id: parsedBody.role === 'user' ? userMessageId : assistantMessageId }, { status: 201 });
       }
-      throw new Error(\`Unexpected request: \${method} \${url}\`);
+      throw new Error('Unexpected request: ' + method + ' ' + url);
     };
     const response = await POST(new Request('https://aai.example/api/chat', {
       method: 'POST',
