@@ -385,7 +385,9 @@ function parseRequestBody(input: string): ParseRequestResult {
   if (action === 'browser_tool_continue') {
     const continuationToken = readTrimmedString(parsedValue.continuation_token);
     const toolResult = readTrimmedString(parsedValue.tool_result);
-    if (!continuationToken || continuationToken.length > 180_000 || !toolResult || toolResult.length > 40_000) {
+    const parsedToolResult = toolResult ? parseJsonValue(toolResult) : null;
+    if (!continuationToken || continuationToken.length > 180_000 || !toolResult ||
+        toolResult.length > 40_000 || !isJsonObject(parsedToolResult)) {
       return { ok: false, message: 'Data lanjutan browser tool tidak valid atau terlalu besar.' };
     }
     return { ok: true, value: { kind: 'browser_tool_continue', continuationToken, toolResult } };
@@ -1010,6 +1012,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     let requestBody = parseRequestBody(rawBody);
     let browserContinuation: { state: BrowserContinuationState; toolResult: string } | null = null;
     if (requestBody.ok && requestBody.value.kind === 'browser_tool_continue') {
+      if (request.headers.get('X-AAI-Client') !== 'browser-extension') {
+        return createJsonError(403, 'Browser tool continuation hanya tersedia untuk extension.', traceId);
+      }
       const state = await verifyBrowserContinuation(requestBody.value.continuationToken, env);
       if (!state) return createJsonError(400, 'Sesi lanjutan browser tool tidak valid atau sudah kedaluwarsa.', traceId);
       browserContinuation = { state, toolResult: requestBody.value.toolResult };
