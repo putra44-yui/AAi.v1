@@ -49,7 +49,8 @@
   ],
   "previews": {
     "vars": {
-      "AAI_ENVIRONMENT": "preview"
+      "AAI_ENVIRONMENT": "preview",
+      "AAI_PREVIEW_API_VERSION_ID": "33b4164f-11bb-4fbc-8896-c95dd03466bc"
     },
     "ratelimits": [
       {
