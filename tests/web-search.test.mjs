@@ -42,6 +42,10 @@ test('Source registry selects primary domains based on the question topic', () =
   assert.ok(electionNews.priorityDomains.includes('jdih.kpu.go.id'));
   assert.ok(electionNews.priorityDomains.includes('kompas.com'));
 
+  const casualNews = resolveSourcePlan('Apa kabar soal Gibran hari ini?', 'Gibran latest news today');
+  assert.equal(casualNews.id, 'news');
+  assert.ok(casualNews.priorityDomains.includes('antaranews.com'));
+
   const qwenResearch = resolveSourcePlan('Cari riset Qwen terbaru', 'paper Qwen');
   assert.equal(qwenResearch.id, 'research');
   assert.ok(qwenResearch.categories.includes('research'));
