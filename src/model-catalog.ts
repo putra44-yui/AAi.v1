@@ -21,10 +21,13 @@ export const MODEL_CATALOG = [
   },
 ] as const;
 
-export type ModelSelectionId = typeof MODEL_CATALOG[number]['id'];
+export type ModelSelectionId = typeof MODEL_CATALOG[number]['id'] | typeof MODEL_CATALOG[number]['model_id'];
 
 const MODEL_SELECTIONS = new Map<string, string>(
-  MODEL_CATALOG.map((model) => [model.id, model.model_id] as const),
+  MODEL_CATALOG.flatMap((model) => [
+    [model.id, model.model_id] as const,
+    [model.model_id, model.model_id] as const,
+  ]),
 );
 
 export function parseModelSelection(value: unknown):
