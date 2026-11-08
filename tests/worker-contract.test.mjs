@@ -351,9 +351,14 @@ test('web search chooses curated primary domains before widening to the general 
   assert.ok(server.includes('searched_domains: outcome.sourcePlan.domains'));
   assert.ok(web.includes('include_domains: domains'));
   assert.ok(web.includes('includeDomains: domains'));
+  assert.ok(web.includes('priorityDomains'));
+  assert.ok(web.includes('relatedDomains'));
   assert.ok(web.includes('sourceMatchesDomains(source.url, domains)'));
-  assert.ok(web.includes('Sumber primer belum cukup'));
-  assert.ok(tool.includes('Sistem akan memilih domain sumber primer yang sesuai topik'));
+  assert.ok(web.includes('normalizeWebSources(result?.results, 20)'));
+  assert.ok(web.includes("scope === 'related'"));
+  assert.ok(server.includes('priority_domains: outcome.sourcePlan.priorityDomains'));
+  assert.ok(server.includes('related_domains: outcome.sourcePlan.relatedDomains'));
+  assert.ok(tool.includes('memeriksa domain utama lebih dulu'));
 });
 
 test('Android debug APK workflow is manual-only until explicitly requested', () => {
