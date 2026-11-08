@@ -6,6 +6,7 @@ on:
       - feat/aai-companion-rig-motion-20261104
     paths:
       - 'src/**'
+      - 'tests/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/aai-source-first-preview-version.yml'
@@ -43,5 +44,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 98bb20c5c760a9cc29971f6457ab219d
         run: |
-          npx wrangler versions upload --message "AAi source-first search preview ${GITHUB_SHA}"
+          npx wrangler versions upload --keep-vars --message "AAi source-first search preview ${GITHUB_SHA}"
           echo "::notice::Version uploaded only. No deployment or production traffic change was made."
