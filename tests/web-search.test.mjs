@@ -169,6 +169,28 @@ test('Tavily is first; Exa runs only if initial results are insufficient', async
   }
 });
 
+test('A failed targeted search gives the model an honest, auditable limitation', async () => {
+  const decision = { search: true, query: 'PKPU Nomor 99 Tahun 2099', explicit: true };
+  const sourcePlan = resolveSourcePlan('Cari PKPU Nomor 99 Tahun 2099', decision.query);
+  const context = webContextMessage(decision, {
+    sources: [],
+    provider: null,
+    attempted: true,
+    sourcePlan,
+    attempts: [
+      { provider: 'tavily', scope: 'priority', domains: sourcePlan.priorityDomains, sourceCount: 0 },
+      { provider: 'exa', scope: 'priority', domains: sourcePlan.priorityDomains, sourceCount: 0 },
+      { provider: 'tavily', scope: 'related', domains: sourcePlan.relatedDomains, sourceCount: 0 },
+    ],
+    broadened: true,
+  });
+  assert.match(context, /Domain utama yang diperiksa/);
+  assert.match(context, /domain rujukan terkait/);
+  assert.match(context, /tavily \(priority, 0 hasil\)/);
+  assert.match(context, /tidak menghasilkan sumber yang lolos pemeriksaan/);
+  assert.doesNotMatch(context, /mengaku telah menemukan informasi terbaru/);
+});
+
 test('No external API call for an offline or private query', async () => {
   const result = await collectWebSources(decideWebSearch('Cerita tentang anakku'), {TAVILY_API_KEY:'fake'}, () => {
     throw new Error('Should not search');
@@ -269,7 +291,12 @@ test('Enough primary-domain results stop early without paying for an unnecessary
     assert.ok(calls[0].payload.include_domains.includes('jdih.kpu.go.id'));
     assert.equal(outcome.sources.length, 2);
     assert.equal(outcome.broadened, false);
-    assert.deepEqual(outcome.attempts, [{ provider: 'tavily', scope: 'targeted', sourceCount: 2 }]);
+    assert.deepEqual(outcome.attempts, [{
+      provider: 'tavily',
+      scope: 'priority',
+      domains: plan.priorityDomains,
+      sourceCount: 2,
+    }]);
   } finally {
     globalThis.fetch = oldFetch;
   }
