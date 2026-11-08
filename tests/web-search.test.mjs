@@ -188,7 +188,7 @@ test('A failed targeted search gives the model an honest, auditable limitation',
   assert.match(context, /domain rujukan terkait/);
   assert.match(context, /tavily \(priority, 0 hasil\)/);
   assert.match(context, /tidak menghasilkan sumber yang lolos pemeriksaan/);
-  assert.doesNotMatch(context, /mengaku telah menemukan informasi terbaru/);
+  assert.match(context, /Jangan mengaku telah menemukan informasi terbaru/);
 });
 
 test('No external API call for an offline or private query', async () => {
