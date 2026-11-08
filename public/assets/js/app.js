@@ -1025,12 +1025,17 @@ function normalizeAssistantModelLabel(modelName = '', explicitLabel = '') {
     .join(' ');
 }
 
-function buildAssistantHeaderHTML(versionHtml) {
+function buildAssistantHeaderHTML(versionHtml, modelName = '', modelLabel = '') {
+  const actualModel = String(modelName || '').trim();
+  const actualLabel = String(modelLabel || actualModel).trim();
+  const modelTag = actualModel
+    ? `<span class="assistant-model-tag" title="Model yang benar-benar membalas: ${escHtml(actualModel)}">${escHtml(actualLabel)}</span>`
+    : '';
   return `
-    <div style="display:flex;align-items:center;gap:10px;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <div class="avatar"><img src="/aai-mascot-studio.png" alt="AAi"></div>
       <div style="font-weight:800;font-size:15px;color:var(--blue-dark);font-family:'Plus Jakarta Sans',sans-serif;">
-        AAi ${versionHtml}
+        AAi ${versionHtml} ${modelTag}
       </div>
     </div>`;
 }

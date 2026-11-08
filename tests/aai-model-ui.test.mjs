@@ -13,6 +13,9 @@ test('web app model menu uses the server model catalog instead of main/free alia
   assert.match(app, /z-ai\/glm-5\.3-flash/);
   assert.match(app, /function selectModelUI\(val\)[\s\S]*aaiModelCatalog\.some/);
   assert.doesNotMatch(app, /currentModelPreference/);
+  assert.match(app, /function buildAssistantHeaderHTML\(versionHtml, modelName = '', modelLabel = ''\)/);
+  assert.match(app, /assistant-model-tag/);
+  assert.match(app, /buildAssistantHeaderHTML\(versionHtml, modelName, modelLabel\)/);
 });
 
 test('new chat, regeneration and edited branches all send the selected model ID', () => {

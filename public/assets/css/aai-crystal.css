@@ -437,6 +437,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, input:focus-visib
 .settings-menu { border:1px solid #e0dcf4;box-shadow:0 15px 36px rgba(88,79,141,.18); }
 .settings-item:hover {background:#f3efff;}
 .settings-item.active {color:#7065c5;}
+.assistant-model-tag {display:inline-flex;align-items:center;margin-left:6px;padding:2px 7px;border:1px solid #e5e0f8;border-radius:999px;background:#f4f1ff;color:#8179b7;font-size:9px;font-weight:700;letter-spacing:.01em;vertical-align:middle;}
 .file-preview-item {border-color:#dddaf3;box-shadow:var(--shadow-sm);}
 .modal-overlay { background:rgba(47,42,79,.44);backdrop-filter:blur(12px); }
 .modal-box, .clarify-modal-box, .msgbox-box {
