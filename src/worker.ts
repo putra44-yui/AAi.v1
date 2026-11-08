@@ -3,14 +3,16 @@ import { handleCompanionMicro } from './companion-micro';
 import { handleSessionApi } from './session-api';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
-// Preview uses the latest frontend but intentionally proxies account/chat APIs to the existing production Worker.
-// This keeps the user's existing Teguh login and Supabase history without creating a paid database branch.
+// Preview keeps the user's existing login and history, but pins API traffic to an explicitly selected
+// uploaded aai-v0 version through Cloudflare's service-binding version override. The selected version
+// remains at 0% normal traffic; the active production version continues serving production requests.
 type WorkerBindings = Record<string, unknown> & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   AAI_PRODUCTION_API?: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   AAI_ENVIRONMENT?: string;
+  AAI_PREVIEW_API_VERSION_ID?: string;
 };
 
 type QueryValue = string | string[] | undefined;
@@ -136,7 +138,7 @@ export default {
         ok: true,
         runtime: 'cloudflare-worker',
         environment: env.AAI_ENVIRONMENT || 'unknown',
-        api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker',
+        api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'preview-version-override' : 'local-worker',
       }, {
         headers: { 'cache-control': 'no-store' },
       });
@@ -146,13 +148,20 @@ export default {
       return handleCompanionMicro(request, env);
     }
 
-    // Keep the mascot's tiny local reaction endpoint on Preview; send login, sessions, chat,
-    // memory, and web-tool requests to the already-running production API.
+    // Keep the mascot's tiny local reaction endpoint on Preview. Route other API calls
+    // through the production service binding, but pin them to the uploaded test version.
+    // Fail closed: never silently fall back to the live production version.
     if (path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview') {
       if (!env.AAI_PRODUCTION_API) {
-        return jsonError(503, 'Preview API binding belum tersedia. Tidak ada request yang diteruskan ke backend lokal.');
+        return jsonError(503, 'Preview API binding belum tersedia.');
       }
-      return env.AAI_PRODUCTION_API.fetch(request);
+      const previewVersionId = String(env.AAI_PREVIEW_API_VERSION_ID || '').trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previewVersionId)) {
+        return jsonError(503, 'Versi backend Preview belum dikonfigurasi. Tidak ada request yang diteruskan ke backend produksi.');
+      }
+      const headers = new Headers(request.headers);
+      headers.set('Cloudflare-Workers-Version-Overrides', `aai-v0="${previewVersionId}"`);
+      return env.AAI_PRODUCTION_API.fetch(new Request(request, { headers }));
     }
 
     if (path === '/api/chat' || path === '/api/chat/') {
