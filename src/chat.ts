@@ -3,7 +3,7 @@ import { findEarlierSessionRecall, sessionRecallGuidance, type SessionRecall } f
 import { parseVisionFiles, buildVisionContent, VISION_MAX_BODY_BYTES, type VisionImage, type VisionContentPart } from './aai-vision.ts';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, shouldRunWebToolDecision, shouldOfferWebToolToModel, resolveSourcePlan, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
-import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, sanitizeUnverifiedToolOpening, type NativeToolCall } from './aai-tools.ts';
+import { SEARCH_WEB_TOOL, BROWSER_TOOLS, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, parseBrowserToolCall, sanitizeUnverifiedToolOpening, type NativeToolCall, type ParsedBrowserToolCall } from './aai-tools.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 import { buildAAiClockContext, normalizeAAiTimeZone } from './aai-clock.ts';
@@ -116,11 +116,36 @@ interface ParsedChatRequest {
   modelSelection: ModelSelectionId | null;
   webPermission: WebToolPermission;
   timeZone: string | null;
+  browserDebugSession: { id: string; tabId: number } | null;
   visionImages: VisionImage[];
   persistedMessage: string;
 }
 
-type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedChatRequest;
+interface ParsedBrowserToolContinueRequest {
+  kind: 'browser_tool_continue';
+  continuationToken: string;
+  toolResult: string;
+}
+
+type ParsedRouteRequest = ParsedLoadSessionRequest | ParsedBrowserToolContinueRequest | ParsedChatRequest;
+
+interface BrowserContinuationState {
+  expiresAt: number;
+  sessionId: string;
+  userId: string;
+  userMessageId: string;
+  model: string;
+  providerUser: string;
+  messages: ProviderMessage[];
+  toolCall: NativeToolCall;
+  personaName: string;
+  modelPreference: 'main' | 'free-auto';
+  modelSelection: ModelSelectionId | null;
+  webPermission: WebToolPermission;
+  timeZone: string | null;
+  isNewSession: boolean;
+  debugSessionId: string | null;
+}
 
 interface ProviderMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -135,7 +160,7 @@ interface ProviderRequestBody {
   messages: ProviderMessage[];
   temperature: number;
   user: string;
-  tools?: Array<typeof SEARCH_WEB_TOOL>;
+  tools?: Array<typeof SEARCH_WEB_TOOL | (typeof BROWSER_TOOLS)[number]>;
   tool_choice?: 'auto' | 'none' | 'required';
   parallel_tool_calls?: boolean;
   max_tokens?: number;
@@ -217,7 +242,15 @@ interface ErrorEvent {
   user_message_id?: string;
 }
 
-type StreamEvent = InitEvent | PrefaceEvent | ToolSwitchEvent | ReplaceEvent | ProgressEvent | TokenEvent | DoneEvent | ErrorEvent;
+interface BrowserToolCallEvent {
+  phase: 'browser_tool_call';
+  tool_name: 'inspect_page' | 'type_text';
+  tool_call_id: string;
+  arguments: Record<string, unknown>;
+  continuation_token: string;
+}
+
+type StreamEvent = InitEvent | PrefaceEvent | ToolSwitchEvent | ReplaceEvent | ProgressEvent | BrowserToolCallEvent | TokenEvent | DoneEvent | ErrorEvent;
 
 interface ParseRequestSuccess {
   ok: true;
@@ -267,6 +300,75 @@ function readTrimmedString(value: JsonValue | undefined): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+async function browserContinuationKey(env: RuntimeEnv): Promise<CryptoKey | null> {
+  const secret = readEnv('SUPABASE_SERVICE_ROLE_KEY', env);
+  if (!secret) return null;
+  return crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'],
+  );
+}
+
+async function signBrowserContinuation(state: BrowserContinuationState, env: RuntimeEnv): Promise<string | null> {
+  const key = await browserContinuationKey(env);
+  if (!key) return null;
+  const payload = new TextEncoder().encode(JSON.stringify(state));
+  if (payload.byteLength > 100_000) return null;
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, payload));
+  return base64UrlEncode(payload) + '.' + base64UrlEncode(signature);
+}
+
+async function verifyBrowserContinuation(token: string, env: RuntimeEnv): Promise<BrowserContinuationState | null> {
+  try {
+    const [encodedPayload, encodedSignature, extra] = token.split('.');
+    if (!encodedPayload || !encodedSignature || extra !== undefined) return null;
+    const payload = base64UrlDecode(encodedPayload);
+    const signature = base64UrlDecode(encodedSignature);
+    if (payload.byteLength > 100_000 || signature.byteLength !== 32) return null;
+    const key = await browserContinuationKey(env);
+    if (!key || !await crypto.subtle.verify('HMAC', key, signature, payload)) return null;
+    const value: unknown = parseJsonValue(new TextDecoder().decode(payload));
+    if (!isJsonObject(value)) return null;
+    if (typeof value.expiresAt !== 'number' || value.expiresAt <= Date.now() ||
+        value.expiresAt > Date.now() + 180_000) return null;
+    if (typeof value.sessionId !== 'string' || !isUuidLike(value.sessionId) ||
+        typeof value.userId !== 'string' || !isUuidLike(value.userId) ||
+        typeof value.userMessageId !== 'string' || !isUuidLike(value.userMessageId)) return null;
+    if (typeof value.model !== 'string' || value.model.length > 160 ||
+        typeof value.providerUser !== 'string' || value.providerUser.length > 160) return null;
+    if (typeof value.personaName !== 'string' || value.personaName.length > 80) return null;
+    if (value.modelPreference !== 'main' && value.modelPreference !== 'free-auto') return null;
+    if (value.webPermission !== 'allow' && value.webPermission !== 'deny') return null;
+    if (value.timeZone !== null && typeof value.timeZone !== 'string') return null;
+    if (typeof value.isNewSession !== 'boolean') return null;
+    if (value.debugSessionId !== null && typeof value.debugSessionId !== 'string') return null;
+    if (!Array.isArray(value.messages) || value.messages.length > 80) return null;
+    if (!value.messages.every(item => isJsonObject(item) &&
+      ['system', 'user', 'assistant', 'tool'].includes(String(item.role)) &&
+      (typeof item.content === 'string' || item.content === null || Array.isArray(item.content)))) return null;
+    if (!isJsonObject(value.toolCall)) return null;
+    const call = value.toolCall as unknown as NativeToolCall;
+    if (!parseBrowserToolCall(call)) return null;
+    if (value.modelSelection !== null && typeof value.modelSelection !== 'string') return null;
+    return value as unknown as BrowserContinuationState;
+  } catch {
+    return null;
+  }
+}
+
 function parseRequestBody(input: string): ParseRequestResult {
   if (input.trim().length === 0) {
     return { ok: false, message: 'Body request tidak boleh kosong.' };
@@ -278,6 +380,14 @@ function parseRequestBody(input: string): ParseRequestResult {
   }
 
   const action = readTrimmedString(parsedValue.action);
+  if (action === 'browser_tool_continue') {
+    const continuationToken = readTrimmedString(parsedValue.continuation_token);
+    const toolResult = readTrimmedString(parsedValue.tool_result);
+    if (!continuationToken || continuationToken.length > 180_000 || !toolResult || toolResult.length > 12_000) {
+      return { ok: false, message: 'Data lanjutan browser tool tidak valid atau terlalu besar.' };
+    }
+    return { ok: true, value: { kind: 'browser_tool_continue', continuationToken, toolResult } };
+  }
   if (action === 'load_session') {
     const sessionId = readTrimmedString(parsedValue.session_id);
     if (sessionId === null) {
@@ -327,6 +437,12 @@ function parseRequestBody(input: string): ParseRequestResult {
   // Missing or unrecognized permission always fails closed, including old clients.
   const webPermission: WebToolPermission = parsedValue.web_permission === 'allow' ? 'allow' : 'deny';
   const timeZone = normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone));
+  const debugValue = parsedValue.browser_debug_session;
+  const browserDebugSession = isJsonObject(debugValue) && debugValue.active === true &&
+    typeof debugValue.id === 'string' && debugValue.id.length <= 120 &&
+    Number.isInteger(debugValue.tab_id) && (debugValue.tab_id as number) > 0
+    ? { id: debugValue.id, tabId: debugValue.tab_id as number }
+    : null;
 
   return {
     ok: true,
@@ -345,6 +461,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       modelSelection,
       webPermission,
       timeZone,
+      browserDebugSession,
       visionImages: imagesResult.images,
       persistedMessage: imagesResult.images.length
         ? message + '\n\n[📷 Lampiran gambar: ' + imagesResult.images.length
