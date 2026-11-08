@@ -328,17 +328,20 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
 });
 
-test('Preview uses the branch UI and routes account APIs to the existing production Worker', () => {
+test('Preview routes account APIs to a pinned backend version and fails closed without one', () => {
   const worker = read('src/worker.ts');
   const config = JSON.parse(read('wrangler.jsonc'));
   assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
   assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
   assert.deepEqual(config.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
-  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(request)'));
+  assert.ok(worker.includes('AAI_PREVIEW_API_VERSION_ID'));
+  assert.ok(worker.includes('Cloudflare-Workers-Version-Overrides'));
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(new Request(request, { headers }))'));
   assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
-  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'production-service-binding' : 'local-worker'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'preview-version-override' : 'local-worker'"));
   assert.ok(worker.includes("path === '/api/companion/reaction'"));
-  assert.ok(worker.includes('Preview API binding belum tersedia'));
+  assert.ok(worker.includes('Versi backend Preview belum dikonfigurasi'));
+  assert.ok(worker.includes('Tidak ada request yang diteruskan ke backend produksi'));
 });
 
 test('web search chooses curated primary domains before widening to the general web', () => {
