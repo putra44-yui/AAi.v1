@@ -394,16 +394,17 @@ function cleanSource(value: unknown): WebSource | null {
   };
 }
 
-export function normalizeWebSources(input: unknown): WebSource[] {
+export function normalizeWebSources(input: unknown, maxResults = 5): WebSource[] {
   if (!Array.isArray(input)) return [];
+  const limit = Number.isFinite(maxResults) ? Math.max(0, Math.min(20, Math.floor(maxResults))) : 5;
   const seen = new Set<string>();
   const output: WebSource[] = [];
   for (const row of input) {
+    if (output.length >= limit) break;
     const source = cleanSource(row);
     if (!source || seen.has(source.url)) continue;
     seen.add(source.url);
     output.push(source);
-    if (output.length === 5) break;
   }
   return output;
 }
