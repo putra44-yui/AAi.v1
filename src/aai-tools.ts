@@ -9,7 +9,7 @@ export const SEARCH_WEB_TOOL = {
   type: 'function',
   function: {
     name: 'search_web',
-    description: 'Cari informasi publik terbaru atau verifikasi klaim yang dapat berubah. Gunakan hanya bila sumber eksternal benar-benar membantu jawaban. Jangan kirim nama pribadi, memori, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
+    description: 'Cari informasi publik terbaru atau verifikasi klaim yang dapat berubah. Gunakan hanya bila sumber eksternal benar-benar membantu jawaban. Buat query spesifik berisi entitas dan detail yang dicari (nomor/tahun dokumen, versi, tanggal, pasal, atau fakta), bukan kata kunci terlalu umum. Sistem memilih domain resmi atau penerbit yang relevan dan mempertahankan urutan sumber yang diminta pengguna, termasuk pencarian sumber resmi dahulu lalu media pembanding. Jangan kirim nama pribadi, memori, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
     parameters: {
       type: 'object',
       properties: {

@@ -2,6 +2,29 @@
    Cross-app Android overlay belongs to the native phase, not this web view. */
 (function () {
   'use strict';
+  // Reversible release gate: retain all Companion code and assets, but disable
+  // the user-facing mode for this production release.
+  const COMPANION_MODE_ENABLED = false;
+  if (!COMPANION_MODE_ENABLED) {
+    const modeButton = document.getElementById('aaiCompanionSwitch');
+    const stage = document.getElementById('aaiCompanionStage');
+    if (modeButton) {
+      modeButton.hidden = true;
+      modeButton.setAttribute('aria-hidden', 'true');
+    }
+    if (stage) stage.hidden = true;
+    document.body.classList.remove(
+      'aai-companion-active',
+      'aai-companion-composer-hidden',
+      'aai-companion-low-motion'
+    );
+    const nativePlugin = window.Capacitor?.Plugins?.AAiCompanion;
+    try {
+      const hiding = nativePlugin?.hide?.();
+      if (hiding && typeof hiding.catch === 'function') void hiding.catch(() => {});
+    } catch { /* An older native bridge must not affect Chatbot. */ }
+    return;
+  }
   const core = window.AAiCompanionCore;
   if (!core) return;
   const el = id => document.getElementById(id);

@@ -132,3 +132,15 @@ test('transparent pixels do not trigger mascot reactions in browser or Android',
   assert.match(native, /Color\.alpha\(canonicalSprite\.getPixel\(x,y\)\)<35/);
   assert.match(native, /if\(hitVisibleSprite\(event\)<0\) return false/);
 });
+
+
+test('Companion mode is disabled for production but its implementation and stage remain', () => {
+  const index = read('public/index.html');
+  const css = read('public/assets/css/aai-companion.css');
+  const client = read('public/assets/js/aai-companion.js');
+  assert.match(index, /id="aaiCompanionSwitch" hidden/);
+  assert.match(index, /id="aaiCompanionStage"/);
+  assert.match(client, /const COMPANION_MODE_ENABLED = false/);
+  assert.match(client, /window\.AAiCompanionCore/);
+  assert.match(css, /\.aai-companion-switch\[hidden\]\s*\{\s*display:none !important/);
+});

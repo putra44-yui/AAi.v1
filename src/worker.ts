@@ -9,6 +9,7 @@ type WorkerBindings = Record<string, unknown> & {
   ASSETS: { fetch(request: Request): Promise<Response> };
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
+  AAI_COMPANION_ENABLED?: string;
 };
 
 type QueryValue = string | string[] | undefined;
@@ -142,6 +143,9 @@ export default {
     }
 
     if (path === '/api/companion/reaction') {
+      if (env.AAI_COMPANION_ENABLED !== 'true') {
+        return jsonError(404, 'Fitur Pendamping sedang dinonaktifkan.');
+      }
       return handleCompanionMicro(request, env);
     }
 

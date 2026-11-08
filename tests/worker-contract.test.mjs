@@ -316,3 +316,11 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(server.includes('buildAAiClockContext(requestBody.value.timeZone, history.length === 0)'));
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
 });
+
+
+test('Companion micro endpoint is disabled by default and fails closed', () => {
+  const worker = read('src/worker.ts');
+  assert.match(worker, /AAI_COMPANION_ENABLED !== 'true'/);
+  assert.match(worker, /Fitur Pendamping sedang dinonaktifkan/);
+  assert.match(worker, /return handleCompanionMicro\(request, env\)/);
+});
