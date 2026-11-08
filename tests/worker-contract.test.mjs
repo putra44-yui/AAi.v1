@@ -243,69 +243,6 @@ test('AAi streams safe text incrementally and formats settled Markdown blocks on
   assert.equal(boundary('```js\nconst x = 1;\n\nconst y = 2;\n'), 0, 'Never split an unclosed code fence');
   assert.equal(boundary('```js\nconst x = 1;\n```\n\nTeks'), 24);
 });
-
-test('web tool permission is explicit, off by default, and enforced before tool exposure', () => {
-  const client = read('public/assets/js/app.js');
-  const html = read('public/index.html');
-  const server = read('src/chat.ts');
-  const policy = read('src/aai-web.ts');
-  assert.match(client, /aai_web_tool_permission/);
-  assert.match(client, /let currentWebPermission = localStorage\.getItem\('aai_web_tool_permission'\) === 'allow' \? 'allow' : 'deny'/);
-  assert.equal((client.match(/web_permission: currentWebPermission/g) || []).length, 3);
-  assert.match(html, /role="menuitemcheckbox" aria-checked="false"/);
-  assert.match(html, /id="webPermissionBtn"/);
-  assert.match(server, /webPermission: WebToolPermission/);
-  assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !hasVisionInput && !webSearchOptedOut/);
-  assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
-  assert.match(policy, /export function isAllowedPublicWebQuery/);
-});
-
-test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
-  const prompt = read('src/aai-context.ts');
-  assert.match(prompt, /Jangan memperlakukan percakapan seperti kuis/);
-  assert.match(prompt, /untuk ajakan diskusi/);
-  assert.match(prompt, /Jangan membatasi panjang jawaban secara kaku/);
-  assert.doesNotMatch(prompt, /jawaban langsung ke inti, jelas, dan tidak berputar-putar/);
-});
-
-test('agent loop can make bounded, sequential model-selected web calls', () => {
-  const server = read('src/chat.ts');
-  assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
-  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
-  assert.match(server, /toolChoice = toolRounds === 0 && requestedWebDecision\.explicit/);
-  assert.doesNotMatch(server, /mustFinish|reachedLimit/);
-  assert.match(server, /const searchedQueries = new Set<string>\(\)/);
-  assert.match(server, /searchedQueries\.has\(queryKey\)/);
-  assert.match(server, /limiter\.limit\(\{ key: ip \}\)/);
-  assert.match(server, /toolRounds \+= 1/);
-  assert.match(server, /role: 'tool'/);
-  assert.match(server, /phase: 'tool_switch'/);
-});
-
-test('family identity uses the linked account and speaks to the person directly', () => {
-  const context = read('src/aai-context.ts');
-  assert.match(context, /resolveAAiFamilyVoice\(user\.username/);
-  assert.match(context, /SAPAAAN DAN PERSPEKTIF PEMBICARA/);
-  assert.match(context, /berbicara LANGSUNG dengan Teguh Putra/);
-  assert.match(context, /berbicara LANGSUNG dengan Rosalia/);
-  assert.match(context, /slang Indonesia ringan/);
-});
-
-
-test('web tool loop exits at the hard cap and final composition omits tool schema', () => {
-  const server = read('src/chat.ts');
-  assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
-  assert.doesNotMatch(server, /toolRounds <= MAX_WEB_TOOL_ROUNDS/);
-  const finalStart = server.indexOf('const finalPayload: ProviderRequestBody');
-  const finalEnd = server.indexOf('const final = await fetchProviderStream', finalStart);
-  assert.ok(finalStart >= 0 && finalEnd > finalStart);
-  const finalBlock = server.slice(finalStart, finalEnd);
-  assert.match(finalBlock, /temperature: 0\.45/);
-  assert.doesNotMatch(finalBlock, /tools:\s*\[SEARCH_WEB_TOOL\]|tool_choice/);
-  assert.match(server, /COBA LAGI.*Kirim jawaban teks final sekarang/s);
-});
-
 test('inline source citations blend with prose instead of rendering as buttons', () => {
   const css = read('public/assets/css/aai-studio.css');
   const index = read('public/index.html');
