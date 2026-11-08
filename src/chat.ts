@@ -1145,7 +1145,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           ? '[BATASAN PENGGUNA] Pengguna meminta tanpa pencarian web. Jawab dari pengetahuan dan konteks yang tersedia. Jangan mengaku memakai tools atau memverifikasi sumber terkini.'
           : requestedWebDecision.explicit
             ? '[IZIN WEB BELUM AKTIF] Pengguna secara eksplisit meminta pencarian web. Kamu TIDAK bisa menjalankan pencarian pada permintaan ini. Jangan mengganti pencarian dengan tebakan dari bobot. Balas singkat dan alami: jelaskan bahwa izin web harus diaktifkan melalui tombol +, lalu pengguna dapat mengulang permintaannya. Jangan klaim sudah mencari.'
-            : '[IZIN TOOLS] Web belum diizinkan. Jangan mengaku menggunakan tools atau memverifikasi sumber terkini. Untuk pertanyaan yang tidak perlu web, jawab langsung dari konteks; untuk informasi terkini, jelaskan batasannya.',
+            : '[IZIN WEB] Pencarian web publik belum diizinkan. Jangan panggil search_web atau mengaku memverifikasi sumber terkini. Browser tools inspect_page dan type_text tetap tersedia untuk membaca/mengisi halaman aktif hanya bila diminta pengguna.',
       });
     } else if (!shouldRunToolDecision && !shouldRunModelToolDecision) {
       providerPayload.messages.splice(context.systemMessages.length, 0, {
