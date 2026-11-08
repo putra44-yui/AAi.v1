@@ -195,6 +195,7 @@ test('Preview serves the branch UI and pins account APIs to the selected backend
   const worker = read('src/worker.ts');
   const wrangler = JSON.parse(read('wrangler.jsonc'));
   assert.equal(wrangler.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.match(wrangler.previews.vars.AAI_PREVIEW_API_VERSION_ID, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.deepEqual(wrangler.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
   assert.ok(worker.includes('AAI_PREVIEW_API_VERSION_ID'));
   assert.ok(worker.includes('Cloudflare-Workers-Version-Overrides'));
