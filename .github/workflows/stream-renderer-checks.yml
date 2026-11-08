@@ -1,0 +1,36 @@
+name: AAi streaming renderer checks
+
+on:
+  push:
+    branches:
+      - fix/aai-stream-renderer-20261108
+  pull_request:
+    branches:
+      - feat/aai-companion-rig-motion-20261104
+    paths:
+      - 'public/assets/js/app.js'
+      - 'public/assets/css/aai-studio.css'
+      - 'public/index.html'
+      - 'tests/**'
+      - '.github/workflows/stream-renderer-checks.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aai-stream-renderer-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node --check public/assets/js/app.js
+      - run: npx wrangler deploy --dry-run
