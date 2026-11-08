@@ -264,7 +264,7 @@ test('Tavily source-linked images are enabled and attached only to their matchin
   }
 });
 
-test('Enough primary-domain results stop early without paying for an unnecessary Exa or broad search', async () => {
+test('Enough priority-domain results stop early without paying for an unnecessary Exa or expansion', async () => {
   const oldFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
@@ -273,7 +273,7 @@ test('Enough primary-domain results stop early without paying for an unnecessary
       ok: true,
       json: async () => ({ results: [
         { url: 'https://jdih.kpu.go.id/produk-hukum/one', title: 'Dokumen KPU', content: 'Sumber primer satu' },
-        { url: 'https://peraturan.bpk.go.id/Details/two', title: 'Peraturan BPK', content: 'Sumber primer dua' },
+        { url: 'https://kpu.go.id/berita/two', title: 'Situs KPU', content: 'Sumber utama kedua' },
       ] }),
     };
   };
