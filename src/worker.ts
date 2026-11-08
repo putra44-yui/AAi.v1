@@ -1,6 +1,7 @@
 import { POST as chatPost } from './chat';
 import { handleCompanionMicro } from './companion-micro';
 import { handleSessionApi } from './session-api';
+import { getPublicModelCatalog } from './model-catalog';
 
 // AAi does not need a frontend framework: Cloudflare serves public/ as static assets.
 // Only /api/* and the /login alias run through this Worker.
@@ -127,6 +128,12 @@ export default {
   async fetch(request: Request, env: WorkerBindings): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if ((path === '/api/models' || path === '/api/models/') && request.method === 'GET') {
+      return Response.json(getPublicModelCatalog(), {
+        headers: { 'cache-control': 'no-store' },
+      });
+    }
 
     if (path === '/api/status' && request.method === 'GET') {
       return Response.json({ ok: true, runtime: 'cloudflare-worker' }, {
