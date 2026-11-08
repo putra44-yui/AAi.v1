@@ -81,22 +81,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 98bb20c5c760a9cc29971f6457ab219d
         run: |
-          npx wrangler preview --name aai-streaming-test --message "AAi streaming renderer preview ${GITHUB_SHA}" --json > preview-result.json
-          node --input-type=commonjs <<'NODE'
-          const fs = require('node:fs');
-          const result = JSON.parse(fs.readFileSync('preview-result.json', 'utf8'));
-          const urls = result.preview_urls || result.deployment_urls || [];
-          if (!urls.length) throw new Error('Preview deployed but Wrangler returned no Preview URL: ' + JSON.stringify(result));
-          const summary = [
-            '## AAi streaming Preview deployed',
-            '',
-            ...urls.map(url => '- ' + url),
-            '',
-            'Preview name: `' + (result.preview_name || 'aai-streaming-test') + '`',
-            'Backend test version: `' + process.env.AAI_PREVIEW_API_VERSION_ID + '`',
-            '',
-            'Production traffic was not changed.'
-          ].join('\n');
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-          console.log(summary);
-          NODE
+          npx wrangler preview --name aai-streaming-test --message "AAi streaming renderer preview ${GITHUB_SHA}"
+          {
+            echo "## AAi streaming Preview deployed"
+            echo
+            echo "- https://aai-streaming-test-aai-v0.aai-agents-yuiputra44.workers.dev"
+            echo
+            echo "Preview name: `aai-streaming-test`"
+            echo "Backend test version: `$AAI_PREVIEW_API_VERSION_ID`"
+            echo
+            echo "Production traffic was not changed."
+          } >> "$GITHUB_STEP_SUMMARY"
