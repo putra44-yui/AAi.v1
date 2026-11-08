@@ -12,6 +12,7 @@ type WorkerBindings = Record<string, unknown> & {
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
   AAI_ENVIRONMENT?: string;
+  AAI_COMPANION_ENABLED?: string;
   AAI_PREVIEW_API_VERSION_ID?: string;
 };
 
@@ -145,6 +146,9 @@ export default {
     }
 
     if (path === '/api/companion/reaction') {
+      if (env.AAI_COMPANION_ENABLED !== 'true') {
+        return jsonError(404, 'Fitur Pendamping sedang dinonaktifkan.');
+      }
       return handleCompanionMicro(request, env);
     }
 
