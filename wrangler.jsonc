@@ -3,6 +3,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-31",
   "keep_vars": true,
+  "limits": {
+    "cpu_ms": 30000
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 0.25,
