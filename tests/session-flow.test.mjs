@@ -354,7 +354,7 @@ test('model cannot report empty search results before the real tool response', a
         return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
       }
       if (url.hostname === 'api.tavily.com') return Response.json({ results: [{
-        url: 'https://berita.example/raffi', title: 'Berita Raffi Ahmad', content: 'Sumber uji.',
+        url: 'https://antaranews.com/raffi', title: 'Berita Raffi Ahmad', content: 'Sumber uji.',
       }] });
       return mockNewChatDatabase(input, init, inserted);
     };
@@ -369,7 +369,7 @@ test('model cannot report empty search results before the real tool response', a
     assert.match(events, /Aku menemukan satu sumber/);
     assert.equal(inserted.find(row => row.role === 'assistant').content, 'Aku menemukan satu sumber yang bisa dibaca.');
     assert.ok(inserted.find(row => row.role === 'assistant').activity_trace.steps.some(step =>
-      step.step === 'sources' && step.sources[0].url === 'https://berita.example/raffi'));
+      step.step === 'sources' && step.sources[0].url === 'https://antaranews.com/raffi'));
     assert.equal(providerCalls.filter(call => call.tools).length, 2);
   } finally {
     globalThis.fetch = previousFetch;
