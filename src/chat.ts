@@ -7,10 +7,11 @@ import { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extract
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 import { buildAAiClockContext, normalizeAAiTimeZone } from './aai-clock.ts';
+import { DEFAULT_MODEL_ID, parseModelSelection, resolveModelSelection, type ModelSelectionId } from './model-catalog.ts';
 type RuntimeEnv = Record<string, unknown>;
 
 const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'qwen/qwen3.8-omni-flash';
+const DEFAULT_MODEL = DEFAULT_MODEL_ID;
 const DEFAULT_FREE_MODEL = 'openrouter/free';
 const DEFAULT_PERSONA = 'Auto';
 const DEFAULT_REFERER = 'https://aai.family';
@@ -112,6 +113,7 @@ interface ParsedChatRequest {
   updateOnly: boolean;
   personaName: string;
   modelPreference: 'main' | 'free-auto';
+  modelSelection: ModelSelectionId | null;
   webPermission: WebToolPermission;
   timeZone: string | null;
   visionImages: VisionImage[];
@@ -312,6 +314,9 @@ function parseRequestBody(input: string): ParseRequestResult {
   }
   const personaName = readTrimmedString(parsedValue.persona_name) || DEFAULT_PERSONA;
   const modelPreference = readTrimmedString(parsedValue.model_preference) === 'free-auto' ? 'free-auto' : 'main';
+  const modelSelectionResult = parseModelSelection(parsedValue.model_id);
+  if (!modelSelectionResult.ok) return { ok: false, message: 'Pilihan model tidak tersedia.' };
+  const modelSelection = modelSelectionResult.value;
   // Missing or unrecognized permission always fails closed, including old clients.
   const webPermission: WebToolPermission = parsedValue.web_permission === 'allow' ? 'allow' : 'deny';
   const timeZone = normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone));
@@ -330,6 +335,7 @@ function parseRequestBody(input: string): ParseRequestResult {
       updateOnly,
       personaName,
       modelPreference,
+      modelSelection,
       webPermission,
       timeZone,
       visionImages: imagesResult.images,
@@ -911,9 +917,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     const visionImages = requestBody.value.visionImages;
     const modelName = visionImages.length
       ? (readEnv('OPENROUTER_VISION_MODEL', env) || 'deepseek/deepseek-v4.1-flash-1017')
-      : requestBody.value.modelPreference === 'free-auto'
-        ? DEFAULT_FREE_MODEL
-        : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
+      : requestBody.value.modelSelection !== null
+        ? resolveModelSelection(requestBody.value.modelSelection)
+        : requestBody.value.modelPreference === 'free-auto'
+          ? DEFAULT_FREE_MODEL
+          : (readEnv('OPENROUTER_MAIN_MODEL', env) || DEFAULT_MODEL);
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
