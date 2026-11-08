@@ -365,7 +365,7 @@ test('model cannot report empty search results before the real tool response', a
     const events = await response.text();
     assert.match(events, /"done":true/);
     assert.doesNotMatch(events, /Hasil pencariannya kosong/);
-    assert.match(events, /https:\/\/berita\.example\/raffi/);
+    assert.match(events, /https:\/\/antaranews\.com\/raffi/);
     assert.match(events, /Aku menemukan satu sumber/);
     assert.equal(inserted.find(row => row.role === 'assistant').content, 'Aku menemukan satu sumber yang bisa dibaca.');
     assert.ok(inserted.find(row => row.role === 'assistant').activity_trace.steps.some(step =>
