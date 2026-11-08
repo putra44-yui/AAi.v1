@@ -9,7 +9,7 @@ export const SEARCH_WEB_TOOL = {
   type: 'function',
   function: {
     name: 'search_web',
-    description: 'Cari informasi publik terbaru atau verifikasi klaim yang dapat berubah. Gunakan hanya bila sumber eksternal benar-benar membantu jawaban. Buat query spesifik berisi entitas dan detail yang dicari (nomor/tahun dokumen, versi, tanggal, pasal, atau fakta), bukan kata kunci terlalu umum. Sistem memilih domain resmi atau penerbit yang relevan dan mempertahankan urutan sumber yang diminta pengguna, termasuk pencarian sumber resmi dahulu lalu media pembanding. Jangan kirim nama pribadi, memori, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
+    description: 'Model menentukan sendiri apakah informasi publik perlu diverifikasi; jangan menunggu kata pemicu seperti "cari" atau "web". Gunakan tanggal/waktu lokal pada konteks sistem. Cari untuk berita dan peristiwa terkini, status/jabatan yang dapat berubah, aturan yang masih berlaku, jadwal, harga, kurs, cuaca, ketersediaan, pengumuman, versi/rilis, dokumentasi yang berubah, atau fakta setelah pengetahuan model. Jangan cari untuk pengetahuan stabil, hitungan, penulisan kreatif, obrolan pribadi, atau memori keluarga. Buat query spesifik berisi entitas dan detail (nomor/tahun dokumen, versi, tanggal, pasal, atau fakta). Sistem memilih domain resmi atau penerbit relevan dan mempertahankan urutan sumber resmi lalu media pembanding bila diminta. Jangan kirim nama pribadi, memori, kredensial, atau isi dokumen rahasia. Jawab langsung tanpa tool bila pengetahuan dan konteks sudah cukup.',
     parameters: {
       type: 'object',
       properties: {

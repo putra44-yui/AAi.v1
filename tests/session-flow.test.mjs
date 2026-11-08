@@ -530,3 +530,26 @@ test('explicit web requests search directly before the selected model composes t
   assert.equal(answerCall.tools, undefined, 'Explicit search must not rely on model tool calling');
   assert.ok(result.events.some(event => event.phase === 'progress' && event.step === 'sources'));
 });
+
+
+test('with web permission enabled, the selected model receives the router tool even without search keywords', async () => {
+  const result = await captureChatRequest({
+    message: 'Jelaskan secara sederhana apa itu demokrasi.',
+    user_id: userId,
+    model_id: 'z-ai/glm-5.3-flash',
+    web_permission: 'allow',
+  }, {}, {
+    ...env,
+    TAVILY_API_KEY: 'fixture-search-key',
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.providerCalls.length, 2, 'The model makes a short routing pass, then a normal answer pass');
+  assert.equal(result.providerCalls[0].model, 'z-ai/glm-5.3-flash');
+  assert.ok(Array.isArray(result.providerCalls[0].tools), 'The selected model receives search_web');
+  assert.equal(result.providerCalls[0].tool_choice, 'auto');
+  assert.equal(result.providerCalls[1].tools, undefined, 'The final answer is composed without exposing the router tool');
+  assert.ok(result.providerCalls[0].messages.some(message =>
+    message.role === 'system' && String(message.content).includes('[PILIHAN TOOL — ROUTER MODEL]')
+  ));
+});

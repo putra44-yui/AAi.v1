@@ -1083,9 +1083,12 @@ function createPublicActivityReport(trace = {}) {
       message: step === 'strategy' ? 'Model memberikan pembuka publik.' : String(entry?.message || '').slice(0, 220),
     };
     if (step === 'sources' && Array.isArray(entry.sources)) {
-      item.sources = entry.sources.slice(0, 5).flatMap(source => {
+      item.sources = entry.sources.slice(0, 10).flatMap(source => {
         const url = parsePublicSourceUrl(source?.url);
-        return url ? [{ url: url.href, title: String(source?.title || '').slice(0, 100) }] : [];
+        return url ? [{
+          url: url.href, title: String(source?.title || '').slice(0, 100),
+          ...(['priority', 'comparison', 'related', 'general'].includes(source?.scope) ? { scope: source.scope } : {}),
+        }] : [];
       });
     }
     return item;
@@ -1128,12 +1131,18 @@ function renderActivitySourceHTML(source) {
   if (!parsed) return '';
   const hostname = parsed.hostname.replace(/^www\./i, '');
   const title = String(source?.title || hostname).replace(/\s+/g, ' ').trim().slice(0, 100);
+  const kind = source?.scope === 'priority' ? 'Sumber utama'
+    : source?.scope === 'comparison' ? 'Media pembanding'
+      : source?.scope === 'related' ? 'Rujukan terkait'
+        : source?.scope === 'general' ? 'Web umum' : '';
   // Only the public source hostname is sent to the favicon service.
   const favicon = 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(hostname) + '&sz=32';
   return '<a class="aai-activity-source-link" href="' + escHtml(parsed.href) + '" target="_blank" rel="noopener noreferrer nofollow">'
     + '<span class="aai-activity-source-icon" aria-hidden="true"><i class="fas fa-globe"></i>'
     + '<img class="aai-activity-source-favicon" data-aai-favicon src="' + escHtml(favicon) + '" alt="" width="16" height="16" loading="lazy" referrerpolicy="no-referrer"></span>'
-    + '<span class="aai-activity-source-title">' + escHtml(title) + '</span>'
+    + '<span class="aai-activity-source-title">' + escHtml(title)
+    + (kind ? ' <small class="aai-activity-source-kind">· ' + escHtml(kind) + '</small>' : '')
+    + '</span>'
     + '<span class="aai-activity-source-arrow" aria-hidden="true">↗</span></a>';
 }
 
@@ -1162,7 +1171,7 @@ function collectActivitySources(activityTrace) {
       if (!parsed || seen.has(parsed.href)) continue;
       seen.add(parsed.href);
       sources.push({ ...source, url: parsed.href });
-      if (sources.length >= 5) return sources;
+      if (sources.length >= 10) return sources;
     }
   }
   return sources;
@@ -1271,7 +1280,7 @@ function renderActivityStepHTML(entry) {
   const { step, message } = publicStep;
   const safeText = escHtml(message);
   const sourceLinks = Array.isArray(entry?.sources)
-    ? entry.sources.slice(0, 5).map(renderActivitySourceHTML).filter(Boolean).join('')
+    ? entry.sources.slice(0, 10).map(renderActivitySourceHTML).filter(Boolean).join('')
     : '';
   if (step === 'sources') {
     const icon = AAI_ACTIVITY_STEP_ICONS[step] || 'fa-book-open';
@@ -2245,11 +2254,13 @@ async function processStream(response, streamId, onDone) {
           message: parsed.message.slice(0, 220),
           atMs: Number.isFinite(Number(parsed.at_ms)) ? Math.max(0, Number(parsed.at_ms)) : Date.now() - activityStartedAt,
           ...(Array.isArray(parsed.sources)
-            ? { sources: parsed.sources.slice(0, 5).map(source => ({
+            ? { sources: parsed.sources.slice(0, 10).map(source => ({
                 url: String(source?.url || '').slice(0, 600),
                 title: String(source?.title || '').slice(0, 140),
                 ...(typeof source?.snippet === 'string' ? { snippet: source.snippet.slice(0, 420) } : {}),
-                ...(typeof source?.image === 'string' ? { image: source.image.slice(0, 1200) } : {})
+                ...(typeof source?.image === 'string' ? { image: source.image.slice(0, 1200) } : {}),
+
+                ...(['priority', 'comparison', 'related', 'general'].includes(source?.scope) ? { scope: source.scope } : {})
               })) } : {})
         };
         // Keep full bounded trace in storage for audit, never print router state.

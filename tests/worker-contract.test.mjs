@@ -201,16 +201,17 @@ test('a public preface remains visible while the details panel stays collapsed',
   assert.doesNotMatch(client, /activityEl\.open = true/);
 });
 
-test('AAi searches explicit requests deterministically and lets the selected LLM handle implicit tool calls', () => {
+test('AAi lets the selected LLM decide web use on every permitted non-explicit turn', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
   assert.ok(server.includes("tool_choice: toolChoice"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
   assert.ok(server.includes('answerReady = true'));
-  assert.ok(server.includes("const shouldRunModelToolDecision = shouldRunToolDecision && !requestedWebDecision.explicit"));
+  assert.ok(server.includes("shouldOfferWebToolToModel(message, requestBody.value.webPermission, hasSearchProvider)"));
   assert.ok(server.includes("if (shouldRunToolDecision && requestedWebDecision.explicit)"));
   assert.ok(server.includes("const toolChoice = 'auto'"));
+  assert.ok(server.includes("tanggal dan waktu lokal yang tersedia di konteks sistem"));
   assert.ok(server.includes("const finalPayload: ProviderRequestBody"));
   assert.ok(!server.includes("tool_choice: 'none'"));
   assert.ok(server.includes("phase: 'tool_switch'"));
@@ -251,6 +252,10 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
+  assert.match(policy, /export function shouldOfferWebToolToModel/);
+  assert.match(client, /entry\.sources\.slice\(0, 10\)/);
+  assert.match(client, /Media pembanding/);
+  assert.match(server, /outcome\.sources\.slice\(0, 10\)/);
 });
 
 test('AAi conversation depth is adaptive, not an answer-length quiz', () => {
@@ -267,6 +272,7 @@ test('agent loop can make bounded, sequential model-selected web calls', () => {
   assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
   assert.match(server, /const toolChoice = 'auto'/);
   assert.match(server, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
+  assert.match(server, /shouldOfferWebToolToModel\(message, requestBody\.value\.webPermission, hasSearchProvider\)/);
   assert.doesNotMatch(server, /mustFinish|reachedLimit/);
   assert.match(server, /const searchedQueries = new Set<string>\(\)/);
   assert.match(server, /searchedQueries\.has\(queryKey\)/);

@@ -290,18 +290,24 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     calls.push({ url: String(url), payload });
     if (String(url).includes('tavily')) {
       if (payload.include_domains?.includes('jdih.kpu.go.id')) {
-        return { ok: true, json: async () => ({ results: [
-          { url: 'https://jdih.kpu.go.id/produk-hukum/keputusan/one', title: 'Keputusan KPU', content: 'Sumber resmi KPU' },
-          { url: 'https://www.kpu.go.id/berita/one', title: 'Berita KPU RI', content: 'Informasi resmi KPU' },
-        ] }) };
+        return { ok: true, json: async () => ({ results: Array.from({ length: 5 }, (_, index) => ({
+          url: 'https://jdih.kpu.go.id/produk-hukum/keputusan/' + index,
+          title: 'Keputusan KPU ' + index, content: 'Sumber resmi KPU ' + index,
+        })) }) };
       }
       return { ok: true, json: async () => ({ results: [] }) };
     }
     if (String(url).includes('exa')) {
       return { ok: true, json: async () => ({ results: [
-        { url: 'https://www.antaranews.com/berita/one', title: 'ANTARA', content: 'Pembanding media satu' },
-        { url: 'https://www.kompas.com/berita/one', title: 'Kompas', content: 'Pembanding media dua' },
-      ] }) };
+        ['antaranews.com', 'ANTARA'],
+        ['kompas.com', 'Kompas'],
+        ['tempo.co', 'Tempo'],
+        ['detik.com', 'Detik'],
+        ['cnnindonesia.com', 'CNN Indonesia'],
+      ].map(([domain, title], index) => ({
+        url: 'https://www.' + domain + '/berita/' + index,
+        title, content: 'Pembanding media ' + title,
+      })) }) };
     }
     throw new Error('Unexpected provider URL: ' + url);
   };
@@ -330,17 +336,20 @@ test('Explicit official-first request searches KPU domains before a mandatory me
     assert.doesNotMatch(calls[1].payload.query, /sumber resmi|utamakan|kemudian|bandingkan/i);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.scope), ['priority', 'comparison']);
     assert.deepEqual(outcome.attempts.map(attempt => attempt.provider), ['tavily', 'exa']);
-    assert.equal(outcome.sources.length, 4);
+    assert.equal(outcome.sources.length, 10);
+    assert.ok(outcome.sources.slice(0, 5).every(source => source.scope === 'priority'));
+    assert.ok(outcome.sources.slice(5, 10).every(source => source.scope === 'comparison'));
     assert.match(outcome.sources[0].url, /jdih\.kpu\.go\.id/);
-    assert.match(outcome.sources[1].url, /kpu\.go\.id/);
-    assert.match(outcome.sources[2].url, /antaranews\.com/);
-    assert.match(outcome.sources[3].url, /kompas\.com/);
+    assert.match(outcome.sources[5].url, /antaranews\.com/);
+    assert.match(outcome.sources[6].url, /kompas\.com/);
+    assert.match(outcome.sources[9].url, /cnnindonesia\.com/);
     assert.ok(progress.some(item => /bandingkan dengan media berita utama/i.test(item.detail || '')));
     const evidence = webContextMessage(decision, outcome);
     assert.match(evidence, /Urutan pembanding yang diminta/);
     assert.match(evidence, /Tahap pembanding sudah dijalankan/);
     assert.match(evidence, /exa 2 hasil/i);
     assert.match(evidence, /jangan menyebut media sebagai sumber resmi/i);
+    assert.match(evidence, /"scope":"comparison"/);
   } finally {
     globalThis.fetch = oldFetch;
   }
