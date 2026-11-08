@@ -354,10 +354,10 @@ test('PWA offline banner probes the live Worker and refreshes its shell cache', 
   assert.match(sw, /aai-shell-v37/);
 });
 
-test('streamed provider tokens are batched and the Worker has a safe CPU budget', () => {
+test('streamed provider tokens are batched without requesting a paid CPU override', () => {
   const server = read('src/chat.ts');
   const wrangler = JSON.parse(read('wrangler.jsonc'));
-  assert.equal(wrangler.limits.cpu_ms, 30000);
+  assert.equal(wrangler.limits, undefined);
   assert.match(server, /let pendingTokenText = ''/);
   assert.match(server, /pendingTokenText.length >= 64/);
   assert.match(server, /setTimeout\(flushTokenBuffer, 24\)/);
