@@ -1,0 +1,102 @@
+name: AAi streaming renderer preview deploy
+
+on:
+  push:
+    branches:
+      - fix/aai-stream-renderer-20261108
+    paths:
+      - 'public/**'
+      - 'src/**'
+      - 'wrangler.jsonc'
+      - 'tests/**'
+      - '.github/workflows/stream-renderer-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aai-streaming-preview
+  cancel-in-progress: false
+
+jobs:
+  deploy-preview:
+    name: Upload test backend and deploy isolated Preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: node --check public/assets/js/app.js
+      - run: npx wrangler deploy --dry-run
+
+      - name: Verify Cloudflare credential is configured
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not configured in GitHub Actions secrets."
+            exit 1
+          fi
+          echo "Cloudflare credential is configured."
+
+      - name: Upload backend test version without changing production traffic
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 98bb20c5c760a9cc29971f6457ab219d
+          WRANGLER_OUTPUT_FILE_PATH: wrangler-output.ndjson
+        run: |
+          npx wrangler versions upload --keep-vars --message "AAi streaming renderer preview ${GITHUB_SHA}"
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+          const records = fs.readFileSync('wrangler-output.ndjson', 'utf8')
+            .split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+          const uploaded = [...records].reverse().find(item => item.type === 'version-upload' && item.version_id);
+          if (!uploaded) throw new Error('Wrangler did not report an uploaded version ID.');
+          fs.appendFileSync(process.env.GITHUB_ENV, 'AAI_PREVIEW_API_VERSION_ID=' + uploaded.version_id + '\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, 'Backend test version uploaded: `' + uploaded.version_id + '` (no production traffic change).\n');
+          NODE
+
+      - name: Pin Preview API to the uploaded test version
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          if (!config.previews || !config.previews.vars) {
+            throw new Error('Preview configuration is missing previews.vars.');
+          }
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(process.env.AAI_PREVIEW_API_VERSION_ID || '')) {
+            throw new Error('Uploaded backend version ID is invalid.');
+          }
+          config.previews.vars.AAI_PREVIEW_API_VERSION_ID = process.env.AAI_PREVIEW_API_VERSION_ID;
+          fs.writeFileSync('wrangler.jsonc', JSON.stringify(config, null, 2) + '\n');
+          NODE
+
+      - name: Deploy AAi streaming Preview (production remains unchanged)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 98bb20c5c760a9cc29971f6457ab219d
+        run: |
+          npx wrangler preview --name aai-streaming-test --message "AAi streaming renderer preview ${GITHUB_SHA}" --json > preview-result.json
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+          const result = JSON.parse(fs.readFileSync('preview-result.json', 'utf8'));
+          const urls = result.preview_urls || result.deployment_urls || [];
+          if (!urls.length) throw new Error('Preview deployed but Wrangler returned no Preview URL: ' + JSON.stringify(result));
+          const summary = [
+            '## AAi streaming Preview deployed',
+            '',
+            ...urls.map(url => '- ' + url),
+            '',
+            'Preview name: `' + (result.preview_name || 'aai-streaming-test') + '`',
+            'Backend test version: `' + process.env.AAI_PREVIEW_API_VERSION_ID + '`',
+            '',
+            'Production traffic was not changed.'
+          ].join('\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+          console.log(summary);
+          NODE
