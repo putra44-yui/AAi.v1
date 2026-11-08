@@ -244,7 +244,7 @@ const SOURCE_REGISTRY: SourceRegistryEntry[] = [
   {
     id: 'news',
     label: 'media berita utama',
-    match: /\b(?:berita|breaking news|berita terbaru|kabar terbaru|peristiwa hari ini|news)\b/i,
+    match: /\b(?:berita|breaking news|berita terbaru|kabar(?:\s+(?:terbaru|tentang|soal))?|apa kabar|peristiwa hari ini|update terbaru|news)\b/i,
     priorityDomains: ['antaranews.com', 'kompas.com', 'tempo.co', 'detik.com', 'cnnindonesia.com'],
     relatedDomains: ['reuters.com', 'apnews.com', 'bbc.com'],
   },
