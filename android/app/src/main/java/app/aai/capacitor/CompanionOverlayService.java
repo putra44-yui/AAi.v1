@@ -16,6 +16,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -31,19 +33,21 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.UUID;
 
 /** AAi's opt-in Android overlay. It uses the canonical bundled PNG, not the old
  * Next/Vercel site or a newly generated mascot.
  *
  * F3 prototype: native comic pages, independent bottom composer, touch gestures,
- * local reactions. Actual sending of text is delegated to the existing AAi
- * Chatbot Activity while per-user native Auth and background SSE are unfinished.
+ * local reactions. User messages are forwarded only to the existing AAi WebView;
+ * Android never holds a Supabase service key or starts a second chat session.
  */
 public final class CompanionOverlayService extends Service {
     public static final String ACTION_SHOW = "id.aai.personal.COMPANION_SHOW";
     public static final String ACTION_STOP = "id.aai.personal.COMPANION_STOP";
     public static final String ACTION_UPDATE = "id.aai.personal.COMPANION_UPDATE";
     public static final String ACTION_COMPOSER = "id.aai.personal.COMPANION_COMPOSER";
+    public static final String ACTION_SEND_ACK = "id.aai.personal.COMPANION_SEND_ACK";
     public static final String ACTION_APP_FOREGROUND = "id.aai.personal.APP_FOREGROUND";
     public static final String ACTION_APP_BACKGROUND = "id.aai.personal.APP_BACKGROUND";
     private static final int NOTIFICATION_ID = 8426;
@@ -73,6 +77,15 @@ public final class CompanionOverlayService extends Service {
     private boolean appForeground = true;
     private String overlayOwnerId = "";
     private boolean streaming = false;
+    private EditText composerInput;
+    private Button composerSend;
+    private String pendingOverlayRequestId = "";
+    private String pendingOverlayDraft = "";
+    private final Handler sendHandler = new Handler(Looper.getMainLooper());
+    private Runnable sendTimeout;
+    private String latestModelText = "Aku di sini, ya.";
+    private long reactionUntilMs = 0L;
+    private Runnable reactionRestore;
     private long lastReactionAt = 0L;
     private int reactionCount = 0;
 
@@ -109,6 +122,24 @@ public final class CompanionOverlayService extends Service {
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !Settings.canDrawOverlays(this)) {
             stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_SEND_ACK.equals(action)) {
+            if (intent != null && intent.getStringExtra("ownerId") != null
+                    && intent.getStringExtra("ownerId").equals(overlayOwnerId)
+                    && pendingOverlayRequestId.equals(intent.getStringExtra("requestId"))
+                    && !pendingOverlayRequestId.isEmpty()) {
+                final boolean accepted = intent.getBooleanExtra("accepted", false);
+                if (sendTimeout != null) sendHandler.removeCallbacks(sendTimeout);
+                pendingOverlayRequestId = "";
+                if (composerSend != null) { composerSend.setEnabled(true); composerSend.setAlpha(1f); }
+                if (accepted) {
+                    if (composerInput != null && pendingOverlayDraft.equals(composerInput.getText().toString().trim()))
+                        composerInput.setText("");
+                    if (!streaming) setPages("Aku cek dulu, ya. ✦");
+                } else setPages("Pesan belum terkirim. Teks tetap ada, coba lagi setelah AAi siap.");
+                pendingOverlayDraft = "";
+            }
             return START_NOT_STICKY;
         }
         if (ACTION_APP_FOREGROUND.equals(action) || ACTION_APP_BACKGROUND.equals(action)) {
@@ -340,7 +371,6 @@ public final class CompanionOverlayService extends Service {
     }
 
     private void onMascotTap(float relativeY) {
-        if (!composerVisible) {composerVisible=true;updateComposerVisibility();}
         if(breathing!=null)breathing.cancel();
         mascotImage.animate().rotation(-4f).setDuration(120).withEndAction(() ->
             mascotImage.animate().rotation(0f).setDuration(220).withEndAction(() -> {
@@ -359,8 +389,15 @@ public final class CompanionOverlayService extends Service {
         int selected=random.nextInt(pool.length);
         if(selected==previousReaction)selected=(selected+1)%pool.length;
         previousReaction=selected;
-        streaming=false;
+        if (reactionRestore != null) sendHandler.removeCallbacks(reactionRestore);
         setPages(pool[selected]);
+        reactionUntilMs = System.currentTimeMillis() + 1800L;
+        reactionRestore = () -> {
+            reactionUntilMs = 0L;
+            reactionRestore = null;
+            setPages(latestModelText);
+        };
+        sendHandler.postDelayed(reactionRestore, 1800L);
     }
 
     private void createBottomComposer() {
@@ -370,6 +407,7 @@ public final class CompanionOverlayService extends Service {
         bottomComposer.setGravity(Gravity.CENTER_VERTICAL);
         bottomComposer.setBackground(shape(0xF7FFFFFF,0xFFDACDEE,21));
         EditText edit=new EditText(this);
+        composerInput=edit;
         edit.setSingleLine(true);
         edit.setTextSize(15);
         edit.setHint("Tulis pesan untuk AAi…");
@@ -378,18 +416,33 @@ public final class CompanionOverlayService extends Service {
         LinearLayout.LayoutParams editParams=new LinearLayout.LayoutParams(0,dp(44),1);
         bottomComposer.addView(edit,editParams);
         Button send=new Button(this);
-        send.setText("Chat");send.setAllCaps(false);
+        composerSend=send;
+        send.setText("↑");send.setAllCaps(false);
         send.setTextColor(Color.rgb(72,54,116));
-        send.setContentDescription("Buka AAi Chatbot untuk mengirim pesan");
+        send.setContentDescription("Kirim pesan dari AAi Pendamping tanpa membuka Chatbot");
         send.setBackground(shape(0xFFEDE4FF,0xFFCCBCE8,14));
-        bottomComposer.addView(send,new LinearLayout.LayoutParams(dp(67),dp(46)));
+        bottomComposer.addView(send,new LinearLayout.LayoutParams(dp(49),dp(46)));
         send.setOnClickListener(v -> {
-            Intent app=new Intent(this,MainActivity.class);
-            app.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            String draft=edit.getText().toString().trim();
-            if(!draft.isEmpty()) { app.putExtra("AAI_COMPANION_DRAFT",draft); app.putExtra("AAI_COMPANION_OWNER",overlayOwnerId); }
-            startActivity(app);
-            edit.setText("");
+            final String draft=edit.getText().toString().trim();
+            if (draft.isEmpty() || !pendingOverlayRequestId.isEmpty()) return;
+            final String requestId=UUID.randomUUID().toString();
+            if (!AAiCompanionPlugin.offerOverlaySend(overlayOwnerId,requestId,draft)) {
+                setPages("AAi belum siap di latar belakang. Pesan tetap ada; buka AAi bila perlu.");
+                return;
+            }
+            pendingOverlayRequestId=requestId;
+            pendingOverlayDraft=draft;
+            send.setEnabled(false);send.setAlpha(.55f);
+            setPages("Mengirim pesan…");
+            if (sendTimeout != null) sendHandler.removeCallbacks(sendTimeout);
+            sendTimeout=() -> {
+                if (!requestId.equals(pendingOverlayRequestId)) return;
+                pendingOverlayRequestId="";pendingOverlayDraft="";
+                send.setEnabled(true);send.setAlpha(1f);
+                // No acknowledgment means unknown outcome, so never auto-retry.
+                setPages("Belum ada konfirmasi. Periksa riwayat sebelum mencoba lagi; teks masih tersimpan.");
+            };
+            sendHandler.postDelayed(sendTimeout,11000L);
         });
         composerParams=new WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.WRAP_CONTENT,
@@ -412,7 +465,10 @@ public final class CompanionOverlayService extends Service {
     }
     private void updateSpeech(String text) {
         if(text==null||text.trim().isEmpty())return;
-        setPages(text);
+        latestModelText = text;
+        if(System.currentTimeMillis() >= reactionUntilMs) setPages(text);
+        // While AAi reacts to a touch, keep new model tokens safely buffered.
+        // The reaction timer restores the latest answer rather than old text.
     }
     private void setPages(String original) {
         String text=original.replaceAll("[\r\n]+"," ").replaceAll("\\s+"," ").trim();
@@ -450,12 +506,15 @@ public final class CompanionOverlayService extends Service {
 
     @Override public void onDestroy() {
         running=false;
+        if(sendTimeout!=null)sendHandler.removeCallbacks(sendTimeout);
+        if(reactionRestore!=null)sendHandler.removeCallbacks(reactionRestore);
+        pendingOverlayRequestId="";pendingOverlayDraft="";
         if(breathing!=null){breathing.cancel();breathing=null;}
         if(wm!=null){
             try{if(floatingWidget!=null&&floatingWidget.getParent()!=null)wm.removeView(floatingWidget);}catch(Exception ignored){}
             try{if(bottomComposer!=null&&bottomComposer.getParent()!=null)wm.removeView(bottomComposer);}catch(Exception ignored){}
         }
-        floatingWidget=null;bottomComposer=null;
+        floatingWidget=null;bottomComposer=null;composerInput=null;composerSend=null;
         super.onDestroy();
     }
 }

@@ -1,7 +1,7 @@
 # AAi — Kerangka Kerja Dua Mode (Chatbot + Pendamping Android)
 
 **Tanggal:** 3 November 2026  
-**Status:** PLAN ONLY — belum membuat APK, animasi, atau overlay  
+**Status:** F1 prototipe animasi pixel-part di cabang fitur; APK baru tidak dibuat. Uji visual HP masih diperlukan.  
 **Revisi:** 3 November 2026 — identitas maskot, gesture, modesty response, micro-LLM, dan larangan memakai APK Vercel/Next lawas sebagai acuan  
 **Repository:** putra44-yui/AAi.v1  
 **Branch kerja produk:** design/aai-crystal-refresh  
@@ -249,3 +249,91 @@ Setiap fase wajib mencatat **(a)** gejala/tujuan pengguna, **(b)** baseline file
 **Belum:** pose animasi tangan yang benar-benar melindungi kepala/bagian pribadi (sprite saat ini hanya gerak lembut, bukan animasi tulang), uji overlay/IME pada HP fisik, uji sejumlah merek Android, autentikasi global produksi, aktifkan micro-LLM, dan pengiriman pesan langsung dari overlay (sementara hanya mengirim draf ke Chatbot). APK masih debug dan belum lulus gate F4/F5. Kredensial penandatanganan lama yang pernah masuk riwayat Git publik harus dirotasi sebelum rilis.
 
 **Langkah pertama berikutnya:** tuntaskan uji nyata F3 (tap alpha, rotasi, keyboard, izin overlay, perbedaan vendor), validasi pose turunan maskot **tanpa mengubah tulisan AAi**, lalu selesaikan pengamanan login F4 sebelum mengaktifkan model reaksi cepat atau mendistribusikan APK pribadi.
+
+
+## F1.A — Implementasi rig animasi Pendamping (4 November 2026)
+
+**Branch uji:** feat/aai-companion-rig-motion-20261104 (berasal dari fix/aai-companion-no-double-icon-20261103).
+
+**Alasan perubahan / catatan dataset:**
+- Pengguna melaporkan PNG hanya bergeser/berputar, tanpa gerak tangan. Gerakan seluruh gambar tidak memenuhi kebutuhan ekspresif dan respons kontekstual.
+- Gunakan *pixel-part cutout rig* dari master public/aai-mascot-studio.png (1230×1278), bukan mengganti karakter. Delapan wilayah raster mencakup tangan kiri/kanan, rambut samping kiri/kanan, ujung pakaian kiri/kanan, pita kiri/kanan. Teks **AAi** di kristal tetap berada pada lapisan inti yang tidak dipotong.
+- Renderer Canvas 2D membuang piksel posisi awal setiap potongan dan menggambar kembali potongan yang diputar pada sendinya. Gerak tangan bukan translasi satu PNG. Perkiraan bentuk dan sambungan perlu audit visual pada ukuran HP; ini masih rig prototipe, bukan ilustrasi frame tidur meringkuk yang disempurnakan.
+- States: sleep (awal), wake, idle, think (sebelum token), talk (streaming), shy (sentuhan), happy (selesai), fly (tombol uji). Otomatis tidur lagi setelah 42 detik idle.
+- Gambar kanonis dipertahankan sebagai fallback serta sumber hit-test alpha; Canvas akan aktif hanya jika dimensi master sesuai. Gerak maksimal ~30 FPS dan berhenti saat tab tersembunyi; opsi Kurangi Gerakan/reduced-motion menghasilkan gambar statis.
+- Mode Chatbot, satu SSE, pagination balon komik, dan composer bawah tidak diubah. Tombol ✦ Coba AAi terbang hanya menguji web animasi; tidak menambah APK atau overlay native baru.
+
+**Validasi yang wajib sebelum menganggap final:** cek jahitan batas segmen, bentuk mata/mulut tertutup, rambut/gaun saat bergerak, sentuhan kepala/tubuh, tombol terbang, perubahan dari berpikir ke bicara, reduced motion, tab background, drag, orientasi HP, performa/baterai. Jika tampak ada bagian terpotong atau identitas kristal rusak, jangan deploy ke produksi: revisi koordinat rig atau produksi keyframe ilustrasi manual dari master.
+
+
+## F1.B — Audit kode Pendamping (4 November 2026, PR #17)
+
+**Temuan terkonfirmasi dari inspeksi source:**
+- Saat `tick()` berpindah dari tidur→bangun, bangun→diam, malu→diam, atau terbang→diam, `setPhase()` memanggil `ensure()` ketika timer kosong. `tick()` sebelumnya selalu menjadwalkan RAF baru tanpa mengecek timer yang sudah dijadwalkan. Hasilnya dua loop aktif, dan jumlahnya dapat bertambah. Perbaikan: jadwalkan RAF hanya bila belum ada timer.
+- Sentuhan pada maskot sebelumnya mengubah preferensi `composer=false` menjadi `true`. Ini melanggar pilihan pengguna untuk menyembunyikan kolom ketik. Perbaikan: reaksi sentuhan tidak lagi mengubah preferensi.
+- Alpha hit-test sebelumnya memakai koordinat PNG diam; setelah tubuh berputar saat tidur/terbang, titik sentuh dan gambar tidak cocok. Perbaikan: sampel transparansi dari frame Canvas yang benar-benar ditampilkan, lalu balik transformasi tubuh untuk klasifikasi zona; bila Canvas tak tersedia, gunakan peta PNG lama.
+- Tap di area transparan sebelumnya tetap menambah hitungan sentuhan berulang, meskipun tidak bereaksi. Perbaikan: hitungan hanya bertambah pada hit yang sah.
+- Tombol uji terbang berada di dalam panel pengaturan yang tetap terbuka dan dapat menutupi animasinya. Perbaikan: panel menutup sebelum terbang.
+- Aset gambar dapat memicu `onImage()` melalui event `load` dan pemeriksaan gambar cache. Perbaikan: lindungi inisialisasi agar Canvas tidak terpasang dua kali.
+
+**Batas validasi:** Browser lokal terhubung tidak tersedia pada sesi ini. Pemeriksaan di atas berbasis kode, dan CI otomatis hanya membuktikan logika/build—belum membuktikan kualitas visual. Gate visual pada HP (jahitan segmen, mata/mulut, gerak tidur) tetap **BELUM LULUS**. Jangan gabungkan PR atau deploy produksi sebelum uji visual.
+
+
+## F1.C — Balon jawaban dan Send di HP (4 November 2026)
+
+**Keluhan:** chat pengguna tidak boleh tertimpa karakter/balon, dan tombol Send harus tetap di dalam baris kolom input. Pengiriman dari mode Pendamping tetap memakai satu request/riwayat SSE yang sama; tidak boleh membuka Chatbot atau membuat maskot ganda.
+
+**Temuan di source:**
+- Markup hanya memiliki satu `#sendBtn`. CSS lama pada breakpoint HP menyembunyikan `.send-btn` sambil mengharapkan `#mobileSendBtn` (yang tidak ada di markup). CSS studio lebih baru memang menampilkan kembali Send, tetapi mengubah composer menjadi kolom sementara elemen Send tetap berada di luar baris teks. Urutan visual tidak konsisten.
+- `reactToTouch()` memanggil `showSpeech()`, yang mengosongkan `pages` dan `fullText`. Ini tidak menghapus pesan pada sesi backend, tetapi balon jawaban sebelumnya hilang dari tampilan saat maskot disentuh.
+- Alur web `handleSend()` sendiri sudah mengirim ke `sendMessage()` dan meneruskan SSE ke `AAiCompanionBridge`; tidak memerlukan peralihan mode. Perilaku overlay native Android yang membuka layar Chatbot adalah tahap terpisah dan **belum diperbaiki** pada perubahan web ini.
+
+**Perbaikan:** tata letak grid tiga kolom (+, teks, Send) dengan satu tombol Send untuk Chatbot dan Pendamping, termasuk ukuran sentuh HP; reaksi maskot disimpan sementara lalu balon jawaban sebelumnya dipulihkan setelah 3,2 detik. Saat chat baru dimulai atau mode berpindah, pemulihan reaksi lama dibatalkan agar tidak menimpa respons streaming terbaru.
+
+**Tes wajib:** CSS dan unit test otomatis, lalu audit layar HP untuk respons keyboard virtual, elemen tidak saling tindih, Send/Stop saat streaming, serta sentuhan beruntun dan chat baru yang datang sebelum balon reaksi kembali. **Belum divalidasi secara visual** karena browser terhubung tidak tersedia pada sesi ini. Jangan mengklaim bug overlay Android selesai sebelum APK native terpisah diuji.
+
+
+## F1.D — Send langsung dari overlay native Android (5 November 2026, PR #17)
+
+**Masalah yang ditangani:**
+1. Tombol kirim pada bar input native sebelumnya bertuliskan `Chat` dan membuka `MainActivity`, sehingga pengguna melihat Chatbot, AAi Pendamping seperti menggandakan layar/maskot, dan pesan masih berupa draft.
+2. Reaksi sentuhan native memaksa composer yang disembunyikan menjadi terlihat, mereset `streaming=false`, lalu mengganti balon yang sedang menampilkan jawaban dengan teks reaksi tanpa memulihkannya.
+3. Saat Chrome/WebView di background, `requestAnimationFrame` bisa berhenti sementara, sehingga pembaruan balon native pada token streaming dapat tertunda.
+
+**Implementasi pada cabang fitur (bukan produksi):**
+- Tombol Send overlay bertanda ↑ mengirim event dari `CompanionOverlayService` → `AAiCompanionPlugin` → pendengar `overlaySend` di **WebView AAi yang sudah ada**. Tidak memanggil `MainActivity` dan tidak memulai Chatbot kedua.
+- Handler `AAiSendFromOverlay` memeriksa owner ID pengguna, batas panjang teks, dan keadaan chat yang tidak sedang mengirim. Pesan diproses oleh `sendMessage()` yang sama dengan mode Chatbot, termasuk sesi/branch/SSE/riwayat.
+- Plugin mengirim ACK dengan owner dan request ID **setelah server menyetujui request HTTP**, bukan sekadar setelah tombol disentuh. Input native tetap disimpan selama menunggu. ACK negatif menjaga teks dan menampilkan pesan gagal; jika tidak ada ACK dalam 11 detik, tombol pulih, draft tetap ada, dan pengguna diminta memeriksa riwayat sebelum mencoba lagi; tidak ada *automatic retry* yang berisiko mengirim ganda.
+- Request ID yang telah diterima disimpan sementara di WebView untuk mencegah pengiriman ulang pada duplikasi event selama sesi JS masih hidup.
+- Balon native menyimpan `latestModelText`: reaksi usil hanya tampil 1,8 detik, lalu jawaban terkini dipulihkan. Composer tersembunyi tidak dibuka oleh tap; `streaming` tidak direset oleh reaksi. Token saat `document.hidden` langsung memicu pembaruan balon native (dengan throttle).
+- Kunci rahasia Worker, database, ataupun API model **tidak** diberikan kepada layanan Android.
+
+**Risiko dan gate yang masih terbuka:**
+- **Autentikasi masih prototipe**: login web saat ini berdasarkan nama pengguna saja; `user_id` bukan bukti identitas kuat. Alur ini mewarisi kelemahan backend dan **hanya untuk uji internal**, tidak aman untuk rilis multi-pengguna sampai Supabase Auth/JWT dan otorisasi per pemilik sesi dibenahi.
+- Android dapat menangguhkan/mematikan WebView saat app di background atau sistem menghemat baterai. Event akan berhenti atau ACK gagal. Draft dilindungi oleh batas waktu, tetapi **pengiriman latar belakang tidak dapat dijamin** dengan arsitektur ini. Solusi produksi butuh auth yang benar dan jalur kerja background yang disepakati, bukan service-role key di APK.
+- ACK HTTP membuktikan permintaan diterima, **belum menjamin** streaming selesai atau pesan tersimpan utuh. Jika koneksi putus, lihat sesi chat sebelum mengirim ulang.
+- Belum ada kompilasi APK baru atau uji perangkat nyata dalam tahap ini. Perlu validasi di Android 11–15: tampilan di atas aplikasi lain, izin overlay, keyboard, Home/background, layar terkunci, penundaan server, stop/rekoneksi, logout/ganti akun, dua tap Send, dan balon yang disentuh ketika token mengalir. Wajib lolos sebelum PR di-merge atau rilis.
+- Perubahan mengikuti larangan membuat APK sampai animasi/UX dinilai layak; status PR tetap draft.
+
+
+## F1.E — APK pengujian Android Pendamping (5 November 2026)
+
+Keputusan terbaru dari Guh: **buat APK pengujian AAi Pendamping**. Ini menggantikan larangan membuat APK pada fase F1.D; penggabungan ke produksi masih menunggu uji HP.
+
+- Build memakai workflow GitHub Actions `AAi Companion Android Debug APK` pada cabang fitur. Workflow menguji JavaScript, memverifikasi URL Preview berisi event `overlaySend`, mengganti URL Capacitor **hanya di checkout runner**, menyinkronkan Capacitor, dan melakukan `assembleDebug`. URL produksi di `capacitor.config.json` dalam Git **tidak diubah**.
+- APK uji menunjuk ke Preview `feat-aai-companion-rig-motion-20261104-aai-v0.aai-agents-yuiputra44.workers.dev` yang harus dibangun dari commit fitur terbaru. **Jangan** membangun against Worker produksi yang belum memuat jembatan kirim native; hasilnya akan menampilkan tombol Send tanpa pendengar JS.
+- Android tetap `applicationIdSuffix ".qa"`, sehingga paket uji `id.aai.personal.qa` tidak menimpa `id.aai.personal` yang mungkin berisi data lokal. Nama launcher `AAi Pendamping (Uji)` supaya tidak tertukar dengan aplikasi lama. Ikon diambil dari `drawable-nodpi/aai_brand.png` (maskot kristal AAi asli yang baru, bukan ikon APK Vercel/Next).
+- Versi internal `versionCode 2`, `versionName 1.1.0-qa`; build memakai penandatanganan debug otomatis, bukan key release. Paket ZIP Actions berisi `app-debug.apk` dan checksum SHA-256; masa simpan 7 hari.
+- Repo tidak memiliki berkas `.apk` yang terlacak untuk dihapus. **APK lama yang terpasang di HP tidak dapat dihapus dari GitHub.** Setelah memeriksa data lokal dan riwayat, pengguna perlu uninstall AAi lawas melalui Pengaturan Android → Aplikasi → AAi → Uninstall. Jika QA lama memiliki tanda tangan debug berbeda, Android mungkin mewajibkan uninstall versi QA lawas juga sebelum install yang baru. Jangan menghapus data secara diam-diam.
+- APK ini adalah **uji internal**, bukan rilis publik; login username-only dan WebView background masih batas keamanan/ketersediaan. Preview bisa dihapus otomatis saat PR ditutup/digabung, sehingga APK uji bergantung pada keberadaan Preview.
+
+
+## F1.F — Perbaikan 503 Supabase di APK Preview (5 November 2026)
+
+**Regresi:** APK QA menunjuk ke Cloudflare Worker Preview, bukan Worker produksi. Preview memiliki kode/UI Pendamping terbaru, tetapi tidak mewarisi `SUPABASE_URL` dan `SUPABASE_SERVICE_ROLE_KEY` dari Worker produksi. Login, sesi, dan chat mengembalikan 503 "Konfigurasi Supabase belum tersedia".
+
+**Fix tanpa menyalin secret:** `previews.services` mendeklarasikan `AAI_PRODUCTION_API` yang mengarah ke Worker produksi `aai-v0`. Pada Preview saja, `src/worker.ts` meneruskan request API autentikasi/sesi/chat (kecuali status dan reaksi lokal Pendamping) menggunakan service binding `env.AAI_PRODUCTION_API.fetch(request)`. File statis/animasi tetap disajikan oleh Preview. Produksi tidak memiliki binding ini dan jalurnya tidak berubah.
+
+**Pertimbangan:** panggilan API Preview sekarang benar-benar menggunakan data dan sesi **produksi**, bukan database uji terisolasi. Ini mengikuti tujuan akun yang sama antara APK QA dan Chatbot, tetapi membuat Preview publik bergantung pada backend produksi yang login-nya masih username-only. Untuk uji internal keluarga saja, hindari data sensitif dan jangan rilis publik sampai Supabase Auth/JWT diperbaiki. Jika nanti memakai lingkungan staging, gantikan service binding target dengan Worker staging beserta DB terpisah.
+
+**Validasi:** tes wiring + Wrangler dry-run; cek `GET /api/login` pada URL Preview harus mengembalikan 405 (bukan 503), sedangkan request invalid `POST /api/login` seharusnya 400 tanpa membuat akun/riwayat. APK QA lama tidak perlu diubah karena alamat Preview stabil; setelah Preview dibangun ulang, buka kembali aplikasi agar kode server terbaru terpakai.

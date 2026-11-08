@@ -2,6 +2,29 @@
    Cross-app Android overlay belongs to the native phase, not this web view. */
 (function () {
   'use strict';
+  // Reversible release gate: keep the Companion implementation and assets in
+  // this repository, but disable the user-facing mode for the current release.
+  const COMPANION_MODE_ENABLED = false;
+  if (!COMPANION_MODE_ENABLED) {
+    const modeButton = document.getElementById('aaiCompanionSwitch');
+    const stage = document.getElementById('aaiCompanionStage');
+    if (modeButton) {
+      modeButton.hidden = true;
+      modeButton.setAttribute('aria-hidden', 'true');
+    }
+    if (stage) stage.hidden = true;
+    document.body.classList.remove(
+      'aai-companion-active',
+      'aai-companion-composer-hidden',
+      'aai-companion-low-motion'
+    );
+    const nativePlugin = window.Capacitor?.Plugins?.AAiCompanion;
+    try {
+      const hiding = nativePlugin?.hide?.();
+      if (hiding && typeof hiding.catch === 'function') void hiding.catch(() => {});
+    } catch { /* A missing/older native bridge must not affect Chatbot. */ }
+    return;
+  }
   const core = window.AAiCompanionCore;
   if (!core) return;
   const el = id => document.getElementById(id);
@@ -19,6 +42,7 @@
   const showComposer = el('aaiCompanionShowComposer');
   const showPreview = el('aaiCompanionShowPreview');
   const lowMotion = el('aaiCompanionLowMotion');
+  const flyButton = el('aaiCompanionFly');
   const useMicro = el('aaiCompanionUseMicro');
   const nativeButton = el('aaiCompanionAndroidOverlay');
   const nativePlugin = window.Capacitor?.Plugins?.AAiCompanion || null;
@@ -46,7 +70,8 @@
   const state = {
     pages: [], index: 0, fullText: '', streaming: false, shownFromServer: false,
     status: '', recent: [], tapHistory: [], currentRequestId: null, renderScheduled: false,
-    gesture: null, reactionAbort: null, reactionSequence: 0, alphaMap: null, emotion:'idle',
+    gesture: null, reactionAbort: null, reactionSequence: 0, returnAfterReaction:null,
+    alphaMap: null, emotion:'idle',
     microAvailable:true, lastMicroAt:0, nativeOn:false, nativeLastUpdate:0,
   };
   const persist = () => { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch {} };
@@ -94,6 +119,36 @@
         ? 'Hentikan AAi di atas aplikasi lain' : 'Aktifkan AAi di atas aplikasi lain';
     }).catch(()=>{});
   }
+
+  // Only the signed-in AAi WebView may dispatch an overlay draft into the
+  // existing chat session. If Android suspends this WebView, the native composer
+  // keeps the text and times out rather than silently opening another UI.
+  const recentOverlayRequests=new Set();
+  async function registerNativeSendChannel(){
+    if(!ownerId||!nativePlugin?.addListener||!nativePlugin?.setSendChannel
+        ||!nativePlugin?.acknowledgeSend)return;
+    try {
+      await nativePlugin.addListener('overlaySend',async incoming=>{
+        const requestId=typeof incoming?.requestId==='string'?incoming.requestId:'';
+        const text=typeof incoming?.text==='string'?incoming.text.trim():'';
+        if(incoming?.ownerId!==ownerId||!requestId||!text||text.length>700)return;
+        let accepted=recentOverlayRequests.has(requestId);
+        if(!accepted){
+          if(!isActive())chooseMode(true);
+          accepted=(await window.AAiSendFromOverlay?.(text,ownerId))===true;
+          if(accepted){
+            recentOverlayRequests.add(requestId);
+            if(recentOverlayRequests.size>32)
+              recentOverlayRequests.delete(recentOverlayRequests.values().next().value);
+          }
+        }
+        try {await nativePlugin.acknowledgeSend({ownerId,requestId,accepted});}
+        catch { /* Android retains the draft until acknowledgment or timeout. */ }
+      });
+      await nativePlugin.setSendChannel({ownerId});
+    } catch { /* Older APKs stay on their documented draft-only handoff. */ }
+  }
+  void registerNativeSendChannel();
 
   function layoutWidget() {
     if (!isActive()) return;
@@ -209,6 +264,9 @@
     }
   }
   function chooseMode(active) {
+    // A pending touch reaction must not restore stale text after switching modes.
+    state.reactionSequence++;
+    state.returnAfterReaction=null;
     prefs.active = Boolean(active);
     persist();
     refreshView();
@@ -237,6 +295,12 @@
   });
   showPreview.addEventListener('change', () => { prefs.preview = showPreview.checked; persist(); refreshView(); });
   lowMotion.addEventListener('change', () => { prefs.lowMotion = lowMotion.checked; persist(); refreshView(); });
+  flyButton?.addEventListener('click', () => {
+    if (state.streaming) return;
+    settings.hidden=true; // Let the user actually see the flight animation.
+    settingsButton.setAttribute('aria-expanded','false');
+    window.AAiCompanionMotion?.fly();
+  });
   useMicro.addEventListener('change', () => {
     prefs.micro = useMicro.checked; persist();
     state.microAvailable = true;
@@ -291,9 +355,19 @@
     } catch { state.alphaMap = null; } // CORS or malformed image: general touch only.
   }
   function touchZone(clientX,clientY) {
-    if (!state.alphaMap) return 'normal';
     const img = mascot.querySelector('img');
     if (!img?.naturalWidth || !img.naturalHeight) return 'normal';
+    const rigHit=window.AAiCompanionMotion?.hitTest?.(clientX,clientY);
+    if(rigHit===null)return null;
+    if(rigHit!==undefined){
+      if(!state.alphaMap)return 'normal';
+      const map=state.alphaMap;
+      const y=rigHit.y/img.naturalHeight*map.canvas.height;
+      const r=map.rect;
+      const relY=(y-r.top)/Math.max(r.bottom-r.top,1);
+      return relY<.32?'head':relY>.39&&relY<.72?'protect':'normal';
+    }
+    if (!state.alphaMap) return 'normal';
     const box=img.getBoundingClientRect();
     // The canonical sprite is drawn with object-fit: contain; its transparent
     // visual content is NOT the whole image tag rectangle.
@@ -348,30 +422,45 @@
       if (state.reactionAbort===controller) state.reactionAbort=null;
     }
   }
-  function reactToTouch(clientX,clientY) {
+  function reactToTouch(clientX,clientY,keyboard=false) {
     if (state.streaming) return; // Never overwrite a live answer with a tap line.
     const now=Date.now();
     state.tapHistory=state.tapHistory.filter(t=>now-t<3400);
-    state.tapHistory.push(now);
     let zone=touchZone(clientX,clientY);
-    if (zone === null) return;
+    if (zone === null) {
+      if (!keyboard) return; // A pointer on transparent space isn't a touch.
+      zone='normal'; // Enter/Space on the focused mascot remains operable.
+    }
+    state.tapHistory.push(now);
     if(state.tapHistory.length>3) zone='repeat';
     const local=core.reactionFor(zone,state.recent);
     const sequence=++state.reactionSequence;
     state.recent.push(local);
     if(state.recent.length>8) state.recent.shift();
     const emotion=zone==='head'||zone==='protect'||zone==='repeat'?'shy':'idle';
-    if (!prefs.composer) { prefs.composer=true; persist(); refreshView(); }
+    // The greeting is transient. Keep the real chat answer intact underneath.
+    if(!state.returnAfterReaction) state.returnAfterReaction={
+      pages:state.pages.slice(),index:state.index,fullText:state.fullText,
+      status:state.status,emotion:state.emotion,
+    };
+    // Touch reactions must not override the user's hidden-composer setting.
+    window.AAiCompanionMotion?.react(zone);
     showSpeech(local,emotion);
     // Visual reaction does NOT wait for the model. The protected micro endpoint
     // can replace the sentence only if it responds quickly and remains current.
     void getDynamicReaction(zone,local,sequence);
     setTimeout(() => {
-      if (!state.streaming && state.emotion==='shy') {
-        state.emotion='idle';
-        widget.dataset.emotion='idle';
-      }
-    },900);
+      if(sequence!==state.reactionSequence||state.streaming||!isActive())return;
+      const previous=state.returnAfterReaction;
+      state.returnAfterReaction=null;
+      if(!previous)return;
+      state.pages=previous.pages;
+      state.index=previous.index;
+      state.fullText=previous.fullText;
+      state.status=previous.status;
+      state.emotion=previous.emotion;
+      renderSpeech(); // Restore the answer; never delete or rewrite chat history.
+    },3200);
   }
   mascot.addEventListener('pointerdown', event => {
     if (event.button !== 0 || touchZone(event.clientX,event.clientY) === null) return;
@@ -403,8 +492,10 @@
   mascot.addEventListener('keydown', event => {
     if(event.key==='Enter'||event.key===' ') {
       event.preventDefault();
-      reactToTouch(mascot.getBoundingClientRect().left+mascot.offsetWidth/2,
-        mascot.getBoundingClientRect().top+mascot.offsetHeight/2);
+      // Keyboard activation is intentional, even if the centre is transparent
+      // in the current sleeping/flying pose.
+      const box=mascot.getBoundingClientRect();
+      reactToTouch(box.left+box.width/2,box.top+box.height/2,true);
     }
     if(event.key.startsWith('Arrow')){
       const step=20;
@@ -422,28 +513,35 @@
       if(!isActive()) return;
       if(kind==='begin'){
         state.reactionSequence++;
+        state.returnAfterReaction=null;
         if (state.reactionAbort) state.reactionAbort.abort();
         state.streaming=true;state.currentRequestId=data.streamId||null;
-        state.fullText='';state.pages=[];state.index=0;state.status='Aku cek dulu, ya.';
+        window.AAiCompanionMotion?.activity('begin');
+        state.fullText='';state.pages=[];state.index=0;state.status='';
         setPreviewText(data.userMessage||'');
         renderSpeech();
         return;
       }
       if(data.streamId && state.currentRequestId && data.streamId!==state.currentRequestId) return;
       if(kind==='status' && !state.fullText.trim()){
-        state.status=String(data.message||'Aku cek dulu, ya.').slice(0,200);
+        state.status=String(data.message||'').trim().slice(0,200);
+        window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }
       if(kind==='reset'){
-        state.fullText='';state.pages=[];state.index=0;state.status='Aku cek sumbernya dulu, ya.';
+        state.fullText='';state.pages=[];state.index=0;state.status='';
+        window.AAiCompanionMotion?.activity('status');
         renderSpeech();return;
       }
       if(kind==='token'){
         state.status='';state.fullText+=String(data.token||'');
+        window.AAiCompanionMotion?.activity('token');
+        if(document.hidden)nativeBubbleUpdate(); // RAF can pause in background.
         scheduleStreamRender();return;
       }
       if(kind==='done'){
         state.streaming=false;state.currentRequestId=null;
+        window.AAiCompanionMotion?.activity('done');
         renderFullText(data.text||state.fullText,false);
         return;
       }
@@ -451,6 +549,7 @@
         state.streaming=false;state.currentRequestId=null;
         state.pages=[];state.index=0;
         state.status='Koneksi terputus. Coba lagi, ya.';
+        window.AAiCompanionMotion?.activity('error');
         renderSpeech();
       }
     },

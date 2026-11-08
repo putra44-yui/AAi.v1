@@ -2039,3 +2039,40 @@ body:not(.aai-login-page) .msg-actions button {
   body:not(.aai-login-page) .aai-activity .aai-activity-live {font-size:14px;}
   body:not(.aai-login-page) .session-title {font-size: 13.5px;}
 }
+
+
+/* Companion + Chatbot composer: one send button alongside the user's draft.
+   The old mobile rule hides #sendBtn expecting #mobileSendBtn, which is not
+   present in the page; later CSS also stacked send above the textarea. */
+body:not(.aai-login-page) .input-wrap {
+  display:grid;
+  grid-template-columns:38px minmax(0,1fr) 40px;
+  align-items:end;
+  column-gap:9px;
+  row-gap:0;
+  padding:9px 11px;
+  border-radius:21px;
+}
+body:not(.aai-login-page) .composer-plus-wrap {
+  grid-column:1; grid-row:1; align-self:end; min-width:0;
+}
+body:not(.aai-login-page) #messageInput {
+  grid-column:2; grid-row:1; order:0; min-width:0;
+  width:100%; margin:0; flex:none;
+  padding:7px 5px!important;
+  resize:none;
+}
+body:not(.aai-login-page) #sendBtn {
+  grid-column:3; grid-row:1; order:0;
+  display:flex!important; align-self:end; justify-self:end;
+  width:40px; height:40px; min-width:40px; border-radius:13px;
+  touch-action:manipulation;
+}
+@media (max-width:720px) {
+  body:not(.aai-login-page) .input-wrap {
+    grid-template-columns:34px minmax(0,1fr) 38px;
+    column-gap:7px; padding:7px 9px;
+  }
+  body:not(.aai-login-page) #messageInput {font-size:16px;line-height:1.45;max-height:116px;}
+  body:not(.aai-login-page) #sendBtn {width:38px;height:38px;min-width:38px;}
+}

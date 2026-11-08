@@ -1,0 +1,48 @@
+name: AAi source-first backend version (upload only)
+
+on:
+  push:
+    branches:
+      - feat/aai-companion-rig-motion-20261104
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/aai-source-first-preview-version.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aai-source-first-preview-version-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upload-preview-version:
+    name: Upload backend version without routing production traffic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Verify Cloudflare credential is configured (never print it)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN is not configured in GitHub Actions secrets."
+            exit 1
+          fi
+          echo "Cloudflare credential is configured."
+      - name: Upload a new aai-v0 version only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 98bb20c5c760a9cc29971f6457ab219d
+        run: |
+          npx wrangler versions upload --keep-vars --message "AAi source-first search preview ${GITHUB_SHA}"
+          echo "::notice::Version uploaded only. No deployment or production traffic change was made."

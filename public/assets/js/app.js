@@ -17,7 +17,8 @@ let currentSessionId = null;
 let currentSessionMeta = null;
 let sessionLoadSerial = 0;
 const currentPersona = 'Auto'; // Single adaptive AAi voice; legacy persona preferences ignored.
-let currentModelPreference = localStorage.getItem('aai_model_preference') === 'free-auto' ? 'free-auto' : 'main';
+const savedModelPreference = localStorage.getItem('aai_model_preference');
+let currentModelPreference = savedModelPreference === 'free-auto' || savedModelPreference === 'glm-5.3-flash' ? savedModelPreference : 'main';
 // External search requires an affirmative, persisted user choice (off by default).
 let currentWebPermission = localStorage.getItem('aai_web_tool_permission') === 'allow' ? 'allow' : 'deny';
 const currentMemoryExperimentMode = 'context-heavy';
@@ -2425,7 +2426,7 @@ async function processStream(response, streamId, onDone) {
 // ══════════════════════════════════════════
 // KIRIM PESAN BARU
 // ══════════════════════════════════════════
-async function sendMessage(text, files = []) {
+async function sendMessage(text, files = [], { onRequestAccepted = null, onRequestRejected = null } = {}) {
   if (chatMutationRunning) return;
   chatMutationRunning = true;
   const area = document.getElementById('chatArea');
@@ -2478,6 +2479,7 @@ async function sendMessage(text, files = []) {
       throw new Error(errMsg);
     }
 
+    onRequestAccepted?.();
     await processStream(res, streamId, (parsed, fullText, preview) => {
       const resolvedSessionId = parsed.session_id || currentSessionId;
       if (requestLoadSerial !== sessionLoadSerial) return; // User has opened another session.
@@ -2528,6 +2530,7 @@ async function sendMessage(text, files = []) {
     });
 
     } catch (e) {
+    onRequestRejected?.();
     console.error('❌ SendMessage Error:', e);
     clearTimeout(timeoutId);
     renderStreamErrorUI(streamId, e.message, e.streamMeta || null);
@@ -2755,6 +2758,30 @@ async function saveEdit(btn, msgId) {
 
   await sendMessageBranched(newText, originalMessage.parent_id, msgId, row);
 }
+
+// Native overlay send bridge: dispatch through the EXISTING web session and SSE.
+// No background API keys, service-role credentials or parallel chat threads.
+window.AAiSendFromOverlay = function (rawText, ownerId) {
+  const text=typeof rawText==='string'?rawText.trim():'';
+  if(!text||text.length>700||!currentUser?.id||currentUser.id!==ownerId
+      ||chatMutationRunning||!document.getElementById('chatArea')) return false;
+  return new Promise(resolve => {
+    let settled = false;
+    const acknowledge = success => {
+      if (settled) return;
+      settled = true;
+      resolve(Boolean(success));
+    };
+    // Confirm only after /api/chat accepts the request, not just on button tap.
+    void sendMessage(text, [], {
+      onRequestAccepted: () => acknowledge(true),
+      onRequestRejected: () => acknowledge(false)
+    }).catch(error => {
+      acknowledge(false);
+      console.warn('[AAi overlay] Pengiriman via sesi web gagal:', error?.message||'unknown');
+    });
+  });
+};
 
 // ══════════════════════════════════════════
 // KIRIM PESAN DARI EDIT (branched)
@@ -3372,7 +3399,7 @@ function appendMessage(role, content, timestamp = null, metadata = null, message
           const safeSrc = (f.preview || f.base64).replace(/"/g, '&quot;');
           filesHtml += `<img src="${safeSrc}" style="width:60px;height:60px;object-fit:cover;border-radius:8px;border:2px solid var(--blue-light);background:#fff;cursor:pointer;" alt="${name}" onclick="window.open('${safeSrc}','_blank')">`;
         } else {
-          const icon = f.type?.includes('word') ? '📝' : f.type?.includes('sheet') ? '📊' : f.type?.includes('pdf') ? '📕' : '📄';
+          const icon = f.type?.startsWith('video/') ? '🎞️' : f.type?.includes('word') ? '📝' : f.type?.includes('sheet') ? '📊' : f.type?.includes('pdf') ? '📕' : '📄';
           filesHtml += `<div style="display:flex;align-items:center;gap:5px;background:#fff;padding:5px 8px;border-radius:8px;font-size:12px;border:1px solid var(--blue-light);color:var(--text);">
             <span style="font-size:16px;">${icon}</span>
             <span style="max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${name}</span>
@@ -3823,19 +3850,20 @@ function toggleSettingsMenu() {
 function renderSettingsMenu() {
   let html = '<div class="settings-header">Model AI · pilih manual</div>';
   const models = [
-    { val: 'main', label: '⚡ Qwen · utama' },
-    { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' }
+    { val: 'main', label: '⚡ Qwen Omni Flash · utama' },
+    { val: 'free-auto', label: '🪄 Model gratis · otomatis (OpenRouter)' },
+    { val: 'glm-5.3-flash', label: '✨ GLM 5.3 Flash · gambar & video' }
   ];
   models.forEach(m => {
     html += `<button class="settings-item ${currentModelPreference===m.val?'active':''}" onclick="selectModelUI('${m.val}')">
       <span>${m.label}</span><i class="fas fa-check check"></i>
     </button>`;
   });
-  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. Rute gratis dipilih otomatis oleh OpenRouter; ketersediaan dapat berubah.</p>';
+  html += '<p class="model-test-note">Pilihan model disimpan di perangkat ini. GLM menerima gambar dan video MP4 (maks. 8 MB). Rute gratis dipilih otomatis oleh OpenRouter; ketersediaan dapat berubah.</p>';
   document.getElementById('settingsMenu').innerHTML = html;
 }
 function selectModelUI(val) {
-  if (val !== 'main' && val !== 'free-auto') return;
+  if (!['main', 'free-auto', 'glm-5.3-flash'].includes(val)) return;
   currentModelPreference = val;
   localStorage.setItem('aai_model_preference', val);
   updateModeLabel();
@@ -3907,15 +3935,21 @@ document.getElementById('fileInput').addEventListener('change', function(e) {
 
 function renderFilePreview() {
   const container = document.getElementById('filePreview');
+  container.querySelectorAll('img').forEach(img => {
+    if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+  });
   container.innerHTML = '';
   selectedFiles.forEach((file, index) => {
     const div = document.createElement('div');
     div.className = 'file-preview-item';
     const isImage = file.type.startsWith('image/');
+    const isVideo = file.type === 'video/mp4' || /\.mp4$/i.test(file.name);
     div.innerHTML = `
       ${isImage
         ? `<img src="${URL.createObjectURL(file)}" alt="preview">`
-        : `<i class="fas fa-file-alt file-icon"></i>`
+        : isVideo
+          ? `<i class="fas fa-film file-icon" aria-label="Video MP4"></i>`
+          : `<i class="fas fa-file-alt file-icon"></i>`
       }
       <div class="file-name">${escHtml(file.name)}</div>
       <span class="remove-file" onclick="removeFile(${index})">×</span>
@@ -3926,11 +3960,6 @@ function renderFilePreview() {
 }
 
 function removeFile(index) {
-  const file = selectedFiles[index];
-  if (file && file.type.startsWith('image/')) {
-    const img = document.querySelectorAll('.file-preview-item img')[index];
-    if (img) URL.revokeObjectURL(img.src);
-  }
   selectedFiles.splice(index, 1);
   renderFilePreview();
 }
@@ -3945,8 +3974,12 @@ function fileToBase64(file) {
 }
 
 const AAI_SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const AAI_SUPPORTED_VIDEO_TYPES = new Set(['video/mp4']);
 const AAI_MAX_IMAGES = 3;
+const AAI_MAX_VIDEOS = 1;
+const AAI_MAX_FILES = 4;
 const AAI_MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const AAI_MAX_VIDEO_BYTES = 8 * 1024 * 1024;
 const AAI_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 
 // Preserve full resolution when small: tiny UI text is easier to read.
@@ -3992,6 +4025,31 @@ async function prepareAAiImage(file) {
   };
 }
 
+async function prepareAAiVideo(file) {
+  if (currentModelPreference !== 'glm-5.3-flash') {
+    throw new Error('Untuk membaca video, pilih GLM 5.3 Flash di menu Model AI dulu, ya.');
+  }
+  const mime = file.type || (/\.mp4$/i.test(file.name) ? 'video/mp4' : '');
+  if (!AAI_SUPPORTED_VIDEO_TYPES.has(mime)) {
+    throw new Error('Untuk saat ini AAi menerima video MP4. Video MOV/WebM menyusul.');
+  }
+  if (file.size > AAI_MAX_VIDEO_BYTES) {
+    throw new Error('Video MP4 maksimal 8 MB untuk uji coba pertama. Potong atau kompres videonya dulu, ya.');
+  }
+  return {
+    name: file.name.slice(0, 100),
+    type: 'video/mp4',
+    base64: await fileToBase64(file),
+    preview: null
+  };
+}
+
+async function prepareAAiMedia(file) {
+  if (file.type.startsWith('image/')) return prepareAAiImage(file);
+  if (file.type === 'video/mp4' || /\.mp4$/i.test(file.name)) return prepareAAiVideo(file);
+  throw new Error('AAi menerima foto JPG/PNG/WebP dan video MP4.');
+}
+
 async function handleSend() {
   const inp = document.getElementById('messageInput');
   const text = inp.value.trim();
@@ -4013,22 +4071,33 @@ async function handleSend() {
       }
     }
 
-    if (selectedFiles.length > AAI_MAX_IMAGES) throw new Error('Maksimal tiga gambar untuk satu pesan.');
-    const filesPayload = await Promise.all(selectedFiles.map(prepareAAiImage));
+    if (selectedFiles.length > AAI_MAX_FILES) throw new Error('Maksimal tiga gambar dan satu video untuk satu pesan.');
+    const imageCount = selectedFiles.filter(file => file.type.startsWith('image/')).length;
+    const videoCount = selectedFiles.filter(file => file.type === 'video/mp4' || /\.mp4$/i.test(file.name)).length;
+    if (imageCount > AAI_MAX_IMAGES) throw new Error('Maksimal tiga gambar untuk satu pesan.');
+    if (videoCount > AAI_MAX_VIDEOS) throw new Error('Maksimal satu video MP4 untuk satu pesan.');
+    if (videoCount && currentModelPreference !== 'glm-5.3-flash') {
+      throw new Error('Pilih GLM 5.3 Flash di menu Model AI untuk mengirim video.');
+    }
+    const filesPayload = await Promise.all(selectedFiles.map(prepareAAiMedia));
     const bytes = filesPayload.reduce((sum, file) => {
       const value = String(file.base64).split(',')[1] || '';
       return sum + Math.floor(value.length * 3 / 4);
     }, 0);
     if (bytes > AAI_MAX_TOTAL_BYTES) {
-      filesPayload.forEach(file => URL.revokeObjectURL(file.preview));
-      throw new Error('Total gambar maksimal 8 MB. Kurangi jumlahnya dulu, ya.');
+      filesPayload.forEach(file => { if (file.preview) URL.revokeObjectURL(file.preview); });
+      throw new Error('Total lampiran maksimal 8 MB. Kurangi atau kompres lampirannya dulu, ya.');
     }
 
     inp.value = ''; autoResize(inp); updateMobileSendVisibility();
     const previewContainer = document.getElementById('filePreview');
     previewContainer.classList.add('fading-out');
 
-    void sendMessage(text || 'Tolong jelaskan gambar yang kulampirkan.', filesPayload);
+    const attachmentKinds = [
+      filesPayload.some(file => file.type.startsWith('image/')) ? 'gambar' : '',
+      filesPayload.some(file => file.type.startsWith('video/')) ? 'video' : ''
+    ].filter(Boolean).join(' dan ');
+    void sendMessage(text || 'Tolong jelaskan ' + attachmentKinds + ' yang kulampirkan.', filesPayload);
 
     setTimeout(() => {
       selectedFiles = [];

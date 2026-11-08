@@ -24,6 +24,16 @@ test('essential API routes still have Worker handlers', () => {
   assert.match(worker, /Konfigurasi Supabase belum tersedia/);
 });
 
+test('Companion micro-model endpoint is disabled by default without deleting its handler', () => {
+  const worker = read('src/worker.ts');
+  const wrangler = JSON.parse(read('wrangler.jsonc'));
+  assert.match(worker, /import \{ handleCompanionMicro \}/);
+  assert.match(worker, /AAI_COMPANION_ENABLED !== 'true'/);
+  assert.match(worker, /return handleCompanionMicro\(request, env\)/);
+  assert.equal(wrangler.vars.AAI_COMPANION_ENABLED, 'false');
+  assert.equal(wrangler.previews.vars.AAI_COMPANION_ENABLED, 'false');
+});
+
 test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
@@ -31,6 +41,17 @@ test('OpenRouter free-auto is explicitly opt-in, not an automatic fallback', () 
   assert.match(server, /modelPreference === 'free-auto'/);
   assert.match(client, /model_preference: currentModelPreference/);
   assert.doesNotMatch(server, /OPENROUTER_FALLBACK_MODEL/);
+});
+
+test('GLM 5.3 Flash is an explicit opt-in while Qwen Omni remains the default', () => {
+  const server = read('src/chat.ts');
+  const client = read('public/assets/js/app.js');
+  assert.match(client, /val: 'main', label: '⚡ Qwen Omni Flash · utama'/);
+  assert.match(client, /val: 'glm-5\.3-flash'/);
+  assert.match(client, /savedModelPreference === 'free-auto' \|\| savedModelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /modelPreference === 'glm-5\.3-flash'/);
+  assert.match(server, /z-ai\/glm-5\.3-flash/);
+  assert.match(server, /modelPreference === 'free-auto'/);
 });
 
 test('PWA precache references real files and prefers network for updated app code', () => {
@@ -244,7 +265,7 @@ test('web tool permission is explicit, off by default, and enforced before tool 
   assert.match(html, /id="webPermissionBtn"/);
   assert.match(server, /webPermission: WebToolPermission/);
   assert.match(server, /parsedValue\.web_permission === 'allow' \? 'allow' : 'deny'/);
-  assert.match(server, /const shouldRunToolDecision = !visionImages\.length && !webSearchOptedOut/);
+  assert.match(server, /const shouldRunToolDecision = !hasVisionInput && !webSearchOptedOut/);
   assert.match(server, /isAllowedPublicWebQuery\(message, query\)/);
   assert.match(policy, /export function isAllowedPublicWebQuery/);
 });
@@ -315,4 +336,47 @@ test('all three chat flows provide timezone to server current clock', () => {
   assert.ok(server.includes('normalizeAAiTimeZone(readTrimmedString(parsedValue.time_zone))'));
   assert.ok(server.includes('buildAAiClockContext(requestBody.value.timeZone, history.length === 0)'));
   assert.ok(clock.includes('DEFAULT_AAI_TIME_ZONE'));
+});
+
+test('Preview routes account APIs to a pinned backend version and fails closed without one', () => {
+  const worker = read('src/worker.ts');
+  const config = JSON.parse(read('wrangler.jsonc'));
+  assert.equal(config.vars.AAI_ENVIRONMENT, 'production');
+  assert.equal(config.previews.vars.AAI_ENVIRONMENT, 'preview');
+  assert.match(config.previews.vars.AAI_PREVIEW_API_VERSION_ID, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.deepEqual(config.previews.services, [{ binding: 'AAI_PRODUCTION_API', service: 'aai-v0' }]);
+  assert.ok(worker.includes('AAI_PREVIEW_API_VERSION_ID'));
+  assert.ok(worker.includes('Cloudflare-Workers-Version-Overrides'));
+  assert.ok(worker.includes('env.AAI_PRODUCTION_API.fetch(new Request(request, { headers }))'));
+  assert.ok(worker.includes("path.startsWith('/api/') && env.AAI_ENVIRONMENT === 'preview'"));
+  assert.ok(worker.includes("api_backend: env.AAI_ENVIRONMENT === 'preview' ? 'preview-version-override' : 'local-worker'"));
+  assert.ok(worker.includes("path === '/api/companion/reaction'"));
+  assert.ok(worker.includes('Versi backend Preview belum dikonfigurasi'));
+  assert.ok(worker.includes('Tidak ada request yang diteruskan ke backend produksi'));
+});
+
+test('web search chooses curated primary domains before widening to the general web', () => {
+  const server = read('src/chat.ts');
+  const web = read('src/aai-web.ts');
+  const tool = read('src/aai-tools.ts');
+  assert.ok(server.includes('resolveSourcePlan(message, query)'));
+  assert.ok(server.includes('source_category: outcome.sourcePlan.id'));
+  assert.ok(server.includes('broadened: outcome.broadened'));
+  assert.ok(server.includes('searched_domains: outcome.sourcePlan.domains'));
+  assert.ok(web.includes('include_domains: domains'));
+  assert.ok(web.includes('includeDomains: domains'));
+  assert.ok(web.includes('priorityDomains'));
+  assert.ok(web.includes('relatedDomains'));
+  assert.ok(web.includes('sourceMatchesDomains(source.url, domains)'));
+  assert.ok(web.includes('normalizeWebSources(result?.results, 20)'));
+  assert.ok(web.includes("scope === 'related'"));
+  assert.ok(server.includes('priority_domains: outcome.sourcePlan.priorityDomains'));
+  assert.ok(server.includes('related_domains: outcome.sourcePlan.relatedDomains'));
+  assert.ok(tool.includes('memeriksa domain utama lebih dulu'));
+});
+
+test('Android debug APK workflow is manual-only until explicitly requested', () => {
+  const workflow = read('.github/workflows/aai-companion-android.yml');
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
 });
