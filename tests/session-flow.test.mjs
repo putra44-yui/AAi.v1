@@ -23,11 +23,11 @@ async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
       const method = init.method || 'GET';
       if (url.includes('openrouter.ai')) {
         providerCalls.push(JSON.parse(init.body));
-        return new Response('data: {"choices":[{"delta":{"content":"Halo dari model terpilih."}}]}\\n\\ndata: [DONE]\\n\\n', {
+        return new Response('data: {"choices":[{"delta":{"content":"Halo dari model terpilih."}}]}\n\ndata: [DONE]\n\n', {
           status: 200, headers: { 'content-type': 'text/event-stream' },
         });
       }
-      assert.match(url, /fixture\\.supabase\\.co\\/rest\\/v1\\//);
+      assert.match(url, /fixture\.supabase\.co\/rest\/v1\//);
       const resource = new URL(url).pathname.split('/').at(-1);
       const parsedBody = init.body ? JSON.parse(init.body) : null;
       dbCalls.push({ resource, method, body: parsedBody });
@@ -42,7 +42,7 @@ async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
       if (resource === 'messages' && method === 'POST') {
         return Response.json({ id: parsedBody.role === 'user' ? userMessageId : assistantMessageId }, { status: 201 });
       }
-      throw new Error(`Unexpected request: ${method} ${url}`);
+      throw new Error(\`Unexpected request: \${method} \${url}\`);
     };
     const response = await POST(new Request('https://aai.example/api/chat', {
       method: 'POST',
@@ -50,7 +50,7 @@ async function captureChatRequest(body, requestHeaders = {}, runtimeEnv = env) {
       body: JSON.stringify(body),
     }), runtimeEnv);
     const stream = await response.text();
-    const events = stream.split('\\n\\n').filter((line) => line.startsWith('data: '))
+    const events = stream.split('\n\n').filter((line) => line.startsWith('data: '))
       .map((line) => JSON.parse(line.slice(6))).filter((event) => typeof event === 'object');
     return { status: response.status, providerCalls, dbCalls, events };
   } finally {
