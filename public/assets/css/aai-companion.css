@@ -6,6 +6,7 @@
 #aaiCompanionPreview[hidden],
 #aaiCompanionReveal[hidden] { display:none !important; }
 
+.aai-companion-switch[hidden] { display:none !important; }
 .aai-companion-switch {
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
   border:1px solid rgba(144,121,205,.26);
