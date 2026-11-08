@@ -235,15 +235,20 @@ test('AAi asks the selected LLM to call a real tool or reply directly', () => {
   assert.ok(client.includes("assess: 'fa-lightbulb'"));
   assert.ok(client.includes("strategy: 'fa-compass'"));
 });
-test('AAi streams sanitized Markdown without reprocessing settled blocks', () => {
+test('AAi streams safe text incrementally and formats settled Markdown blocks once', () => {
   const client = read('public/assets/js/app.js');
   const css = read('public/assets/css/aai-studio.css');
   assert.match(client, /function ensureStreamingMarkdownNode/);
   assert.match(client, /function findStableStreamMarkdownBoundary/);
-  assert.match(client, /formatContent\(tailText, \{ streaming: true \}\)/);
+  assert.match(client, /function prepareStreamingPlainText/);
   assert.match(client, /streamingMarkdownRenderer\.code/);
-  assert.match(client, /const STREAM_RENDER_INTERVAL_MS = 105;/);
-  assert.doesNotMatch(client, /streamingNode\.textContent \+= nextChunk/);
+  assert.match(client, /requestAnimationFrame\(\(\) => \{/);
+  assert.match(client, /lastNode\.appendData\(delta\)/);
+  assert.match(client, /liveEl\.textContent = displayTail/);
+  assert.match(client, /committedEl\.insertAdjacentHTML\('beforeend', formatContent\(pending\.slice\(0, boundary\)\)\)/);
+  assert.match(client, /formatContent\(fullText\)/);
+  assert.doesNotMatch(client, /STREAM_RENDER_INTERVAL_MS|STREAM_SCROLL_INTERVAL_MS/);
+  assert.doesNotMatch(client, /liveEl\.innerHTML = tailText/);
   assert.match(css, /\.aai-streaming-committed/);
   const source = client.match(/function findStableStreamMarkdownBoundary\(text\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(source, 'Missing stable Markdown boundary parser');
@@ -323,7 +328,7 @@ test('inline source citations blend with prose instead of rendering as buttons',
   assert.ok(css.includes("font-size: .94em"));
   assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
-  assert.ok(index.includes("aai-studio.css?v=20261101-tables"));
+  assert.ok(index.includes("aai-studio.css?v=20261108-stream-render1"));
   assert.match(sw, /aai-shell-v[0-9]+/);
 });
 

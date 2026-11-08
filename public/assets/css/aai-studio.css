@@ -2076,3 +2076,16 @@ body:not(.aai-login-page) #sendBtn {
   body:not(.aai-login-page) #messageInput {font-size:16px;line-height:1.45;max-height:116px;}
   body:not(.aai-login-page) #sendBtn {width:38px;height:38px;min-width:38px;}
 }
+
+/* Keep the live answer visually stable while new text is arriving. */
+body:not(.aai-login-page) .chat-area.is-streaming {
+  scroll-behavior: auto !important;
+}
+body:not(.aai-login-page) .chat-area.is-streaming .msg-row.assistant .bubble {
+  text-align: left !important;
+  text-justify: auto !important;
+}
+body:not(.aai-login-page) .aai-streaming-live {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
