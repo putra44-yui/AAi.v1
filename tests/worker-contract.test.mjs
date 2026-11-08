@@ -201,14 +201,16 @@ test('a public preface remains visible while the details panel stays collapsed',
   assert.doesNotMatch(client, /activityEl\.open = true/);
 });
 
-test('AAi asks the selected LLM to call a real tool or reply directly', () => {
+test('AAi searches explicit requests deterministically and lets the selected LLM handle implicit tool calls', () => {
   const server = read('src/chat.ts');
   const client = read('public/assets/js/app.js');
   assert.ok(server.includes('tools: [SEARCH_WEB_TOOL]'));
   assert.ok(server.includes("tool_choice: toolChoice"));
   assert.ok(server.includes('completedNativeToolCalls(nativeCalls)'));
   assert.ok(server.includes('answerReady = true'));
-  assert.ok(server.includes("toolChoice = toolRounds === 0 && requestedWebDecision.explicit ? 'required' : 'auto'"));
+  assert.ok(server.includes("const shouldRunModelToolDecision = shouldRunToolDecision && !requestedWebDecision.explicit"));
+  assert.ok(server.includes("if (shouldRunToolDecision && requestedWebDecision.explicit)"));
+  assert.ok(server.includes("const toolChoice = 'auto'"));
   assert.ok(server.includes("const finalPayload: ProviderRequestBody"));
   assert.ok(!server.includes("tool_choice: 'none'"));
   assert.ok(server.includes("phase: 'tool_switch'"));
@@ -263,7 +265,8 @@ test('agent loop can make bounded, sequential model-selected web calls', () => {
   const server = read('src/chat.ts');
   assert.match(server, /MAX_WEB_TOOL_ROUNDS = 3/);
   assert.match(server, /while \(!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS/);
-  assert.match(server, /toolChoice = toolRounds === 0 && requestedWebDecision\.explicit/);
+  assert.match(server, /const toolChoice = 'auto'/);
+  assert.match(server, /if \(shouldRunToolDecision && requestedWebDecision\.explicit\)/);
   assert.doesNotMatch(server, /mustFinish|reachedLimit/);
   assert.match(server, /const searchedQueries = new Set<string>\(\)/);
   assert.match(server, /searchedQueries\.has\(queryKey\)/);
