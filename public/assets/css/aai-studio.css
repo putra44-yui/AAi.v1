@@ -2039,3 +2039,16 @@ body:not(.aai-login-page) .msg-actions button {
   body:not(.aai-login-page) .aai-activity .aai-activity-live {font-size:14px;}
   body:not(.aai-login-page) .session-title {font-size: 13.5px;}
 }
+
+/* Keep the live answer visually stable while new text is arriving. */
+body:not(.aai-login-page) .chat-area.is-streaming {
+  scroll-behavior: auto !important;
+}
+body:not(.aai-login-page) .chat-area.is-streaming .msg-row.assistant .bubble {
+  text-align: left !important;
+  text-justify: auto !important;
+}
+body:not(.aai-login-page) .aai-streaming-live {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
