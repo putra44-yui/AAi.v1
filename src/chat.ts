@@ -144,6 +144,7 @@ interface BrowserContinuationState {
   webPermission: WebToolPermission;
   timeZone: string | null;
   isNewSession: boolean;
+  toolRound: number;
   debugSessionId: string | null;
 }
 
@@ -354,6 +355,7 @@ async function verifyBrowserContinuation(token: string, env: RuntimeEnv): Promis
     if (value.webPermission !== 'allow' && value.webPermission !== 'deny') return null;
     if (value.timeZone !== null && typeof value.timeZone !== 'string') return null;
     if (typeof value.isNewSession !== 'boolean') return null;
+    if (!Number.isInteger(value.toolRound) || (value.toolRound as number) < 1 || (value.toolRound as number) > 12) return null;
     if (value.debugSessionId !== null && typeof value.debugSessionId !== 'string') return null;
     if (!Array.isArray(value.messages) || value.messages.length > 80) return null;
     if (!value.messages.every(item => isJsonObject(item) &&
@@ -1042,6 +1044,9 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     if (requestBody.value.kind === 'load_session') {
       return await handleLoadSession(requestBody.value.sessionId, requestBody.value.userId, traceId, env);
     }
+    if (requestBody.value.kind !== 'chat') {
+      return createJsonError(400, 'Jenis request tidak didukung.', traceId);
+    }
 
     if (requestBody.value.updateOnly) {
       return await updateUserMessage(requestBody.value, env, traceId);
@@ -1111,9 +1116,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       && shouldRunWebToolDecision(requestedWebDecision, requestBody.value.webPermission, hasSearchProvider);
     // Explicit requests are honored directly. For every other turn, the selected
     // model gets to decide whether current/public evidence is needed.
-    const shouldRunModelToolDecision = !visionImages.length
-      && shouldOfferWebToolToModel(message, requestBody.value.webPermission, hasSearchProvider)
-      && !requestedWebDecision.explicit;
+    const shouldRunModelToolDecision = !visionImages.length && (
+      isBrowserExtension || (shouldOfferWebToolToModel(message, requestBody.value.webPermission, hasSearchProvider)
+        && !requestedWebDecision.explicit)
+    );
     if (shouldRunModelToolDecision) {
       providerPayload.messages.splice(context.systemMessages.length, 0, {
         role: 'system',
@@ -1456,10 +1462,11 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
           if (shouldRunModelToolDecision) {
             const searchedQueries = new Set<string>();
-            let toolRounds = 0;
+            let toolRounds = browserContinuation?.state.toolRound || 0;
             let previousSearchFound = 0;
+            const maxToolRounds = isBrowserExtension ? 12 : MAX_WEB_TOOL_ROUNDS;
             const agentStartedAt = Date.now();
-            while (!streamCanceled && toolRounds < MAX_WEB_TOOL_ROUNDS
+            while (!streamCanceled && toolRounds < maxToolRounds
               && Date.now() - agentStartedAt < MAX_AGENT_WALL_MS) {
               const toolChoice = 'auto';
               enqueueEvent({ phase: 'progress', step: 'assess',
@@ -1478,7 +1485,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
                   ...providerPayload,
                   messages: decisionMessages,
                   temperature: 0.2,
-                  tools: [SEARCH_WEB_TOOL],
+                  tools: [
+                    ...(isBrowserExtension ? [...BROWSER_TOOLS] : []),
+                    ...(webPermissionGranted && hasSearchProvider && !webSearchOptedOut ? [SEARCH_WEB_TOOL] : []),
+                  ],
                   tool_choice: toolChoice,
                   parallel_tool_calls: false,
                 },
@@ -1557,6 +1567,51 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               replyParts.length = 0;
               emittedTokenCount = 0;
               displayFilter = createAAiMemoryStreamFilter();
+
+              const browserCall = isBrowserExtension
+                ? calls.find(call => parseBrowserToolCall(call) !== null)
+                : undefined;
+              if (browserCall) {
+                const parsedBrowserCall = parseBrowserToolCall(browserCall)!;
+                const continuationState: BrowserContinuationState = {
+                  expiresAt: Date.now() + 120_000,
+                  sessionId,
+                  userId: requestBody.value.userId!,
+                  userMessageId,
+                  model: modelName,
+                  providerUser: traceId,
+                  messages: providerPayload.messages.slice(),
+                  toolCall: browserCall,
+                  personaName,
+                  modelPreference: requestBody.value.modelPreference,
+                  modelSelection: requestBody.value.modelSelection,
+                  webPermission: requestBody.value.webPermission,
+                  timeZone: requestBody.value.timeZone,
+                  isNewSession,
+                  toolRound: toolRounds + 1,
+                  debugSessionId: requestBody.value.browserDebugSession?.id || null,
+                };
+                const continuationToken = await signBrowserContinuation(continuationState, env);
+                if (!continuationToken) {
+                  const failure = JSON.stringify({
+                    ok: false,
+                    error: 'Sesi tool browser tidak dapat dilanjutkan dengan aman. Jangan mengaku telah menjalankan tindakan.',
+                  });
+                  providerPayload.messages.push({ role: 'assistant', content: null, tool_calls: [browserCall] });
+                  providerPayload.messages.push({ role: 'tool', tool_call_id: browserCall.id, content: failure });
+                  toolRounds += 1;
+                  continue;
+                }
+                enqueueEvent({
+                  phase: 'browser_tool_call',
+                  tool_name: parsedBrowserCall.name,
+                  tool_call_id: browserCall.id,
+                  arguments: parsedBrowserCall.args,
+                  continuation_token: continuationToken,
+                });
+                closeStream();
+                return;
+              }
 
               const chosenCall = calls[0];
               const query = extractSearchWebQuery(chosenCall);
