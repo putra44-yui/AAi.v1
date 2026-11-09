@@ -1316,7 +1316,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 </style>
-<link rel="stylesheet" href="/assets/css/aai-studio.css?v=20261108-stream-render1" />
+<link rel="stylesheet" href="/assets/css/aai-studio.css?v=20261109-mobile-model1" />
 <link rel="stylesheet" href="/assets/css/aai-companion.css?v=20261108-companion-disabled" />
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
@@ -1437,9 +1437,9 @@ body.desktop-sidebar-hidden #topbarTitle {
       <span class="companion-switch-label">Pendamping</span>
     </button>
     <div class="settings-wrapper aai-top-settings">
-      <button class="settings-btn" type="button" onclick="toggleSettingsMenu()" title="Pengaturan model" aria-label="Pengaturan model">
-        <i class="fas fa-sliders-h"></i>
-        <span class="mode-label" id="modeLabel"></span>
+      <button class="settings-btn" type="button" onclick="toggleSettingsMenu()" title="Pilih model" aria-label="Pilih model" aria-controls="settingsMenu" aria-expanded="false">
+        <i class="fas fa-microchip" aria-hidden="true"></i>
+        <span class="mode-label" id="modeLabel">Model</span>
       </button>
       <div class="settings-menu" id="settingsMenu"></div>
     </div>
@@ -1567,7 +1567,7 @@ body.desktop-sidebar-hidden #topbarTitle {
   </div>
 </main>
 
-<script src="/assets/js/app.js?v=20261108-stream-render1"></script>
+<script src="/assets/js/app.js?v=20261109-mobile-model1"></script>
 <script src="/assets/js/aai-companion-core.js?v=20261103-companion1"></script>
 <script src="/assets/js/aai-companion.js?v=20261108-companion-disabled"></script>
 <script src="/assets/js/pwa.js"></script>

@@ -1,11 +1,11 @@
 /* AAi PWA shell: public static assets only; no private chat/API caching. */
-const CACHE_NAME = 'aai-shell-v37';
+const CACHE_NAME = 'aai-shell-v38';
 const PRECACHE_URLS = [
   '/index.html',
   '/login.html',
   '/offline.html',
-  '/assets/css/aai-studio.css',
-  '/assets/js/app.js',
+  '/assets/css/aai-studio.css?v=20261109-mobile-model1',
+  '/assets/js/app.js?v=20261109-mobile-model1',
   '/assets/js/pwa.js',
   '/aai-mascot-studio.png',
   '/icons/aai-192.png',

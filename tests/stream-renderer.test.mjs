@@ -36,6 +36,6 @@ test('streaming scroll is immediate and justified text is restored after complet
 });
 
 test('the page loads the versioned renderer and stylesheet', () => {
-  assert.ok(page.includes('aai-studio.css?v=20261108-stream-render1'));
-  assert.ok(page.includes('app.js?v=20261108-stream-render1'));
+  assert.ok(page.includes('aai-studio.css?v=20261109-mobile-model1'));
+  assert.ok(page.includes('app.js?v=20261109-mobile-model1'));
 });
