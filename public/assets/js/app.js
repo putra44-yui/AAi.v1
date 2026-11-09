@@ -763,15 +763,17 @@ function updateModeLabel() {
   if (!modeLabel) return;
   const selected = aaiModelCatalog.find(model => model.id === currentModelSelection) || aaiModelCatalog[0];
   const shortLabel = selected.id === 'auto'
-    ? 'Qwen 3.8 Flash'
+    ? 'Auto'
     : selected.id === 'qwen/qwen3.8-omni-flash'
-      ? 'Qwen Omni Flash'
-      : selected.label;
-  modeLabel.textContent = shortLabel;
+      ? 'Omni'
+      : selected.id === 'z-ai/glm-5.3-flash'
+        ? 'GLM'
+        : selected.label;
+  modeLabel.textContent = 'Model · ' + shortLabel;
   const button = modeLabel.closest('button.settings-btn');
   if (button) {
-    button.title = 'Pengaturan model · aktif: ' + selected.label;
-    button.setAttribute('aria-label', 'Pengaturan model. Model aktif: ' + selected.label);
+    button.title = 'Model aktif: ' + selected.label + '. Ketuk untuk mengganti model.';
+    button.setAttribute('aria-label', 'Pilih model. Model aktif: ' + selected.label);
   }
 }
 
@@ -3874,8 +3876,11 @@ function scrollBottom(force = false) {
 // ══════════════════════════════════════════
 function toggleSettingsMenu() {
   const menu = document.getElementById('settingsMenu');
-  menu.classList.toggle('show');
-  if (menu.classList.contains('show')) renderSettingsMenu();
+  if (!menu) return;
+  const isOpen = menu.classList.toggle('show');
+  document.querySelector('.aai-top-settings .settings-btn')
+    ?.setAttribute('aria-expanded', String(isOpen));
+  if (isOpen) renderSettingsMenu();
 }
 function renderSettingsMenu() {
   const selected = aaiModelCatalog.find(model => model.id === currentModelSelection) || aaiModelCatalog[0];
@@ -3895,7 +3900,9 @@ function selectModelUI(val) {
   currentModelSelection = val;
   localStorage.setItem(AAI_MODEL_SELECTION_KEY, val);
   updateModeLabel();
-  renderSettingsMenu();
+  document.getElementById('settingsMenu')?.classList.remove('show');
+  document.querySelector('.aai-top-settings .settings-btn')
+    ?.setAttribute('aria-expanded', 'false');
 }
 async function loadAAiModelCatalog() {
   try {
@@ -3927,8 +3934,11 @@ async function loadAAiModelCatalog() {
 
 
 document.addEventListener('click', e => {
-  const w = document.querySelector('.settings-wrapper');
-  if (w && !w.contains(e.target)) document.getElementById('settingsMenu').classList.remove('show');
+  const wrapper = document.querySelector('.aai-top-settings');
+  if (wrapper && !wrapper.contains(e.target)) {
+    document.getElementById('settingsMenu')?.classList.remove('show');
+    wrapper.querySelector('.settings-btn')?.setAttribute('aria-expanded', 'false');
+  }
 });
 
 // ══════════════════════════════════════════
