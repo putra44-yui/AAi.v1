@@ -759,22 +759,10 @@ function logDebug(msg, color = '#2a7a9e') {
 }
 
 function updateModeLabel() {
-  const modeLabel = document.getElementById('modeLabel');
-  if (!modeLabel) return;
-  const selected = aaiModelCatalog.find(model => model.id === currentModelSelection) || aaiModelCatalog[0];
-  const shortLabel = selected.id === 'auto'
-    ? 'Auto'
-    : selected.id === 'qwen/qwen3.8-omni-flash'
-      ? 'Omni'
-      : selected.id === 'z-ai/glm-5.3-flash'
-        ? 'GLM'
-        : selected.label;
-  modeLabel.textContent = 'Model · ' + shortLabel;
-  const button = modeLabel.closest('button.settings-btn');
-  if (button) {
-    button.title = 'Model aktif: ' + selected.label + '. Ketuk untuk mengganti model.';
-    button.setAttribute('aria-label', 'Pilih model. Model aktif: ' + selected.label);
-  }
+  const button = document.querySelector('.aai-top-settings .settings-btn');
+  if (!button) return;
+  button.title = 'Pilih model AI';
+  button.setAttribute('aria-label', 'Pilih model AI');
 }
 
 function updateCompactStatus(forceValue = null) {

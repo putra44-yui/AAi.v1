@@ -324,7 +324,7 @@ test('inline source citations blend with prose instead of rendering as buttons',
   assert.ok(css.includes("font-size: .94em"));
   assert.ok(css.includes("background: transparent"));
   assert.match(css, /aai-inline-source-favicon/);
-  assert.ok(index.includes("aai-studio.css?v=20261109-mobile-model1"));
+  assert.ok(index.includes("aai-studio.css?v=20261109-mobile-model2"));
   assert.match(sw, /aai-shell-v[0-9]+/);
 });
 
@@ -355,7 +355,7 @@ test('PWA offline banner probes the live Worker and refreshes its shell cache', 
   assert.match(pwa, /cache:\s*'no-store'/);
   assert.match(pwa, /notice\.hidden = response\.ok/);
   assert.doesNotMatch(pwa, /notice\.hidden = navigator\.onLine/);
-  assert.match(sw, /aai-shell-v38/);
+  assert.match(sw, /aai-shell-v39/);
 });
 
 test('streamed provider tokens are batched without requesting a paid CPU override', () => {

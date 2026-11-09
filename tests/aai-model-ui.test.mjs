@@ -24,20 +24,26 @@ test('new chat, regeneration and edited branches all send the selected model ID'
   assert.equal((app.match(/model_id: currentModelSelection/g) || []).length, 3);
 });
 
-test('mobile model picker is visible, labeled, and touch-friendly', () => {
-  assert.match(app, /modeLabel\.textContent = 'Model · ' \+ shortLabel/);
-  assert.match(app, /aria-expanded/);
-  assert.match(html, /aria-controls="settingsMenu" aria-expanded="false"/);
+test('model picker stays icon-only in the header while choices remain named in its menu', () => {
+  const labelUpdater = app.slice(app.indexOf('function updateModeLabel()'), app.indexOf('function updateCompactStatus'));
+  assert.match(html, /aria-label="Pilih model AI" aria-controls="settingsMenu"/);
   assert.match(html, /fa-microchip/);
-  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.aai-top-settings \.mode-label \{[\s\S]*?position: static/);
+  assert.doesNotMatch(html, /id="modeLabel"|Model ·|Omni|GLM/);
+  assert.doesNotMatch(labelUpdater, /modeLabel|selected\.label|Auto|Omni|GLM/);
+  assert.match(labelUpdater, /aria-label', 'Pilih model AI'/);
+  assert.match(app, /escHtml\(model\.label\)/);
+  const mobile = css.slice(css.lastIndexOf('/* Mobile model picker: keep the header control icon-only. */'));
+  assert.match(mobile, /\.aai-top-settings \.settings-btn \{[\s\S]*?width: 40px;[\s\S]*?min-width: 40px/);
+  assert.doesNotMatch(mobile, /\.mode-label/);
   assert.match(css, /\.aai-top-settings \.settings-item \{[\s\S]*?min-height: 48px/);
+  assert.match(app, /aria-expanded/);
 });
 
 test('PWA refreshes the mobile model picker assets instead of reusing the old shell cache', () => {
   const sw = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
-  assert.match(sw, /aai-shell-v38/);
-  assert.match(sw, /aai-studio\.css\?v=20261109-mobile-model1/);
-  assert.match(sw, /app\.js\?v=20261109-mobile-model1/);
-  assert.match(html, /aai-studio\.css\?v=20261109-mobile-model1/);
-  assert.match(html, /app\.js\?v=20261109-mobile-model1/);
+  assert.match(sw, /aai-shell-v39/);
+  assert.match(sw, /aai-studio\.css\?v=20261109-mobile-model2/);
+  assert.match(sw, /app\.js\?v=20261109-mobile-model2/);
+  assert.match(html, /aai-studio\.css\?v=20261109-mobile-model2/);
+  assert.match(html, /app\.js\?v=20261109-mobile-model2/);
 });
