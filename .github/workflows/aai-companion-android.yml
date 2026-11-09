@@ -5,11 +5,9 @@ on:
     branches: [design/aai-crystal-refresh]
     paths:
       - 'android/**'
-      - 'public/**'
       - 'capacitor.config.json'
       - 'package.json'
       - 'package-lock.json'
-      - '.github/workflows/aai-companion-android.yml'
   workflow_dispatch:
 
 permissions:
