@@ -996,6 +996,17 @@ async function consumeProviderSSE(response: Response, onPayload: (payload: JsonO
 export async function POST(request: Request, env: RuntimeEnv): Promise<Response> {
   const requestStartedAt = Date.now();
   const traceId = getTraceId(request);
+  // Operational breadcrumbs contain only stage + error class, never user text,
+  // browser HTML, model context, tool token, credentials, or provider payload.
+  let requestStage = 'received';
+  const recordFailure = (stage: string, error: unknown): void => {
+    const errorName = error instanceof Error ? error.name : 'non-error';
+    const safeName = /^[a-z0-9_-]{1,80}$/i.test(errorName) ? errorName : 'Error';
+    console.error('[AAi browser diagnostics]', JSON.stringify({
+      trace_id: traceId, stage, error_type: safeName,
+      elapsed_ms: Date.now() - requestStartedAt,
+    }));
+  };
   // Timing only: never log prompts, queries, response text or credentials.
   const logTiming = (stage: string, details: Record<string, string | number | boolean> = {}): void => {
     console.info('[AAi timing]', JSON.stringify({ trace_id: traceId, stage, elapsed_ms: Date.now() - requestStartedAt, ...details }));
@@ -1005,16 +1016,19 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     if (reportedSize > VISION_MAX_BODY_BYTES) {
       return createJsonError(413, 'Lampiran terlalu besar. Maksimal sekitar 8 MB gambar per pesan.', traceId);
     }
+    requestStage = 'reading_body';
     const rawBody = await request.text();
     if (new TextEncoder().encode(rawBody).byteLength > VISION_MAX_BODY_BYTES) {
       return createJsonError(413, 'Lampiran terlalu besar. Kecilkan gambarnya dulu, ya.', traceId);
     }
+    requestStage = 'parsing_body';
     let requestBody = parseRequestBody(rawBody);
     let browserContinuation: { state: BrowserContinuationState; toolResult: string } | null = null;
     if (requestBody.ok && requestBody.value.kind === 'browser_tool_continue') {
       if (request.headers.get('X-AAI-Client') !== 'browser-extension') {
         return createJsonError(403, 'Browser tool continuation hanya tersedia untuk extension.', traceId);
       }
+      requestStage = 'verifying_browser_continuation';
       const state = await verifyBrowserContinuation(requestBody.value.continuationToken, env);
       if (!state) return createJsonError(400, 'Sesi lanjutan browser tool tidak valid atau sudah kedaluwarsa.', traceId);
       browserContinuation = { state, toolResult: requestBody.value.toolResult };
@@ -1064,6 +1078,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
     // Persist the session and user message before sending the first SSE event.
     // A session ID must always correspond to a real Supabase row.
+    requestStage = browserContinuation ? 'loading_continuation_session' : 'preparing_session';
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
     logTiming('session_ready');
@@ -1096,6 +1111,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             : DEFAULT_MODEL;
     const providerUrl = readEnv('OPENROUTER_API_URL', env) || DEFAULT_PROVIDER_URL;
     // A session's history is not a replacement for AAi's permanent identity and memories.
+    requestStage = 'loading_aai_context';
     const context = await loadAAiContext(supabase as unknown as SupabaseClient, requestBody.value.userId!, message, personaName);
     logTiming('context_ready');
     context.systemMessages.push({ role: 'system', content: buildAAiClockContext(requestBody.value.timeZone, history.length === 0) });
@@ -1198,12 +1214,14 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
 
     let streamCanceled = false;
 
+    requestStage = browserContinuation ? 'continuation_stream' : 'initial_stream';
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         // Include pre-stream context loading in the cross-device duration.
         const activityStartedAt = requestStartedAt;
         const activitySteps: Array<{ step: string; message: string; atMs: number; sources?: Array<{ url: string; title: string; snippet?: string; image?: string; scope?: 'priority' | 'comparison' | 'related' | 'general' }> }> = [];
         let activityPreface = '';
+        let streamStage = browserContinuation ? 'continuation_started' : 'chat_started';
         let streamClosed = false;
         let resolvedModelUsed = modelName;
         let emittedTokenCount = 0;
@@ -1304,6 +1322,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             vision_image_count: visionImages.length,
             client: isBrowserExtension ? 'browser-extension' : 'web-app',
           });
+          streamStage = 'routing_browser_tools';
           // An explicit user request about the CURRENT page is authorization to
           // inspect that page. Do not make success depend on whether the chosen
           // provider happens to emit a function call. All other conversation
@@ -1333,6 +1352,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               toolRound: 1,
               debugSessionId: requestBody.value.browserDebugSession?.id || null,
             };
+            streamStage = 'signing_inspect_request';
             const token = await signBrowserContinuation(inspectContinuation, env);
             if (!token) {
               emitStreamError('Inspeksi halaman belum bisa dimulai secara aman. Coba lagi setelah memeriksa konfigurasi Worker.');
@@ -1517,6 +1537,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             }
           }
 
+          streamStage = 'running_model_tool_loop';
           if (shouldRunModelToolDecision) {
             const searchedQueries = new Set<string>();
             let toolRounds = browserContinuation?.state.toolRound || 0;
@@ -1793,6 +1814,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
               // call search_web again or finish directly. The hard cap exits to composition.
             }
           }
+          streamStage = 'composing_final_answer';
           if (!answerReady) {
             // No permission, incompatible model, empty answer, or exhausted loop:
             // stream one final answer. Tool results remain available as evidence.
@@ -1879,6 +1901,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
           const answerDurationMs = Math.max(0, Date.now() - activityStartedAt);
 
           // Do not report "done" until the assistant answer is durable.
+          streamStage = 'persisting_answer';
           const { data: saved, error: saveError } = await supabase.from('messages')
             .insert({
               session_id: sessionId,
@@ -1945,6 +1968,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             return;
           }
 
+          recordFailure(streamStage, error);
           emitStreamError(normalizeErrorMessage(error));
         }
       },
@@ -1959,6 +1983,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
       headers: createStreamHeaders(traceId),
     });
   } catch (error) {
+    recordFailure(requestStage, error);
     return createJsonError(500, normalizeErrorMessage(error), traceId);
   }
 }
