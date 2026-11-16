@@ -8,7 +8,7 @@ const js = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const { SEARCH_WEB_TOOL, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery,
-  sanitizeUnverifiedToolOpening, looksLikeUnexecutedSearchPayload } = await import(
+  sanitizeUnverifiedToolOpening, looksLikeUnexecutedSearchPayload, needsExplicitPageInspection } = await import(
   'data:text/javascript;base64,' + Buffer.from(js).toString('base64')
 );
 
@@ -54,4 +54,28 @@ test('a raw search query or tool-call syntax is not an assistant answer', () => 
   assert.equal(looksLikeUnexecutedSearchPayload('search_web({"query":"OpenAI news"})'), true);
   assert.equal(looksLikeUnexecutedSearchPayload('Aku belum bisa cek berita terbaru secara langsung.'), false);
   assert.equal(looksLikeUnexecutedSearchPayload('Ini lima fakta yang dapat kujelaskan.\nPertama...'), false);
+});
+
+test('explicit active-page requests trigger inspect, ordinary chat does not', () => {
+  const yes = [
+    'Kau tahu ini halaman apa sayang?',
+    'Apa yang ada di halaman ini?',
+    'Tolong baca soal yang tampil.',
+    'Jawab soal ini!',
+    'Lihat pertanyaan yang ada di tab ini.',
+    'Coba jelaskan website yang sedang kubuka.',
+    'Jawab soal nomor 3 di halaman ini.',
+    'Ini halaman apa?',
+    'Please inspect this page.'
+  ];
+  const no = [
+    'Halo AAi, siapa kamu?',
+    'Jelaskan apa itu tokenizer.',
+    'Buat contoh halaman HTML sederhana.',
+    'Apa arti halaman baru dalam buku?',
+    'Siapa presiden pertama Indonesia?',
+    'Jawab pertanyaan matematika ini: 2 + 2.'
+  ];
+  for (const message of yes) assert.equal(needsExplicitPageInspection(message), true, message);
+  for (const message of no) assert.equal(needsExplicitPageInspection(message), false, message);
 });

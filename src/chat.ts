@@ -3,7 +3,7 @@ import { findEarlierSessionRecall, sessionRecallGuidance, type SessionRecall } f
 import { parseVisionFiles, buildVisionContent, VISION_MAX_BODY_BYTES, type VisionImage, type VisionContentPart } from './aai-vision.ts';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decideWebSearch, hasWebSearchOptOut, isAllowedPublicWebQuery, shouldRunWebToolDecision, shouldOfferWebToolToModel, resolveSourcePlan, collectWebSources, webContextMessage, type WebToolPermission } from './aai-web.ts';
-import { SEARCH_WEB_TOOL, BROWSER_TOOLS, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, parseBrowserToolCall, sanitizeUnverifiedToolOpening, type NativeToolCall, type ParsedBrowserToolCall } from './aai-tools.ts';
+import { SEARCH_WEB_TOOL, BROWSER_TOOLS, addNativeToolDeltas, completedNativeToolCalls, extractSearchWebQuery, looksLikeUnexecutedSearchPayload, parseBrowserToolCall, sanitizeUnverifiedToolOpening, needsExplicitPageInspection, type NativeToolCall, type ParsedBrowserToolCall } from './aai-tools.ts';
 import { loadAAiContext, extractAAiMemoryTags, createAAiMemoryStreamFilter, type AAiContext } from './aai-context.ts';
 import { persistAAiMemory } from './aai-memory-governance.ts';
 import { buildAAiClockContext, normalizeAAiTimeZone } from './aai-clock.ts';
@@ -1304,6 +1304,51 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
             vision_image_count: visionImages.length,
             client: isBrowserExtension ? 'browser-extension' : 'web-app',
           });
+          // An explicit user request about the CURRENT page is authorization to
+          // inspect that page. Do not make success depend on whether the chosen
+          // provider happens to emit a function call. All other conversation
+          // remains model-directed and never automatically reads browser content.
+          if (isBrowserExtension && !browserContinuation && !visionImages.length &&
+              needsExplicitPageInspection(message)) {
+            const inspectCall: NativeToolCall = {
+              id: 'call_aai_inspect_' + randomUUID().replace(/-/g, '').slice(0, 24),
+              type: 'function',
+              function: { name: 'inspect_page', arguments: '{}' },
+            };
+            const inspectContinuation: BrowserContinuationState = {
+              expiresAt: Date.now() + 120_000,
+              sessionId,
+              userId: requestBody.value.userId!,
+              userMessageId,
+              model: modelName,
+              providerUser: traceId,
+              messages: providerPayload.messages.slice(),
+              toolCall: inspectCall,
+              personaName,
+              modelPreference: requestBody.value.modelPreference,
+              modelSelection: requestBody.value.modelSelection,
+              webPermission: requestBody.value.webPermission,
+              timeZone: requestBody.value.timeZone,
+              isNewSession,
+              toolRound: 1,
+              debugSessionId: requestBody.value.browserDebugSession?.id || null,
+            };
+            const token = await signBrowserContinuation(inspectContinuation, env);
+            if (!token) {
+              emitStreamError('Inspeksi halaman belum bisa dimulai secara aman. Coba lagi setelah memeriksa konfigurasi Worker.');
+              return;
+            }
+            enqueueEvent({ phase: 'progress', step: 'inspect', message: 'Memeriksa halaman aktif atas permintaanmu...' });
+            enqueueEvent({
+              phase: 'browser_tool_call',
+              tool_name: 'inspect_page',
+              tool_call_id: inspectCall.id,
+              arguments: {},
+              continuation_token: token,
+            });
+            closeStream();
+            return;
+          }
           if (sessionRecall) {
             enqueueEvent({ phase: 'preface', message: sessionRecall.excerpts.length
               ? 'Nah, ada bagian obrolan sebelumnya yang nyambung. Aku cocokkan dulu, ya.'
