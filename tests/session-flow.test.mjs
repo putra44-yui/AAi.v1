@@ -573,3 +573,73 @@ test('a conversational correction does not invoke the web router and streams dir
   assert.equal(streamingCalls[0].tools, undefined, 'A user correction is conversation context, not a research request');
   assert.ok(result.events.some(event => event.token === 'Halo dari model terpilih.'));
 });
+
+
+test('explicit page inspect survives a complete browser continuation and model answer', async () => {
+  const priorFetch=globalThis.fetch;
+  const calls=[];
+  const inserted=[];
+  try {
+    globalThis.fetch=async(input,init={})=>{
+      const url=new URL(String(input)),method=init.method||'GET';
+      if(url.hostname==='openrouter.ai'){
+        const payload=JSON.parse(init.body);
+        calls.push({where:'provider',payload});
+        return new Response('data: {"choices":[{"delta":{"content":"Ini halaman Google."}}]}\n\ndata: [DONE]\n\n',{
+          status:200,headers:{'content-type':'text/event-stream'}
+        });
+      }
+      assert.equal(url.hostname,'fixture.supabase.co');
+      const resource=url.pathname.split('/').at(-1);
+      calls.push({where:'db',resource,method,query:url.searchParams.toString()});
+      if(resource==='users'&&method==='GET')return Response.json({id:userId,username:'teguh',person_id:null});
+      if(resource==='persons'&&method==='GET')return Response.json([]);
+      if(resource==='ai_personas'&&method==='GET')return Response.json([]);
+      if(resource==='sessions'&&method==='GET')return Response.json({id:sessionId,user_id:userId});
+      if(resource==='sessions'&&method==='PATCH')return new Response(null,{status:204});
+      if(resource==='messages'&&method==='GET'){
+        if(url.searchParams.get('select')==='id, parent_id, content' ||
+           url.searchParams.get('select')==='id,parent_id,content')
+          return Response.json({id:userMessageId,parent_id:null,content:'Sayang, ini halaman apa?'});
+        return Response.json([]);
+      }
+      if(resource==='messages'&&method==='POST'){
+        const row=JSON.parse(init.body);
+        inserted.push(row);
+        return Response.json({id:row.role==='user'?userMessageId:assistantMessageId},{status:201});
+      }
+      throw new Error('Unhandled mock endpoint: '+method+' '+url);
+    };
+    const first=await POST(new Request('https://aai.example/api/chat',{
+      method:'POST',
+      headers:{'content-type':'application/json','X-AAI-Client':'browser-extension'},
+      body:JSON.stringify({message:'Sayang, ini halaman apa?',user_id:userId,session_id:sessionId,
+        model_id:'auto',web_permission:'deny',time_zone:'Asia/Jakarta'})
+    }),env);
+    assert.equal(first.status,200);
+    const firstText=await first.text();
+    const firstEvents=firstText.split('\n\n').filter(x=>x.startsWith('data: ')).map(x=>JSON.parse(x.slice(6)));
+    const inspect=firstEvents.find(e=>e.phase==='browser_tool_call');
+    assert.ok(inspect,'Expected inspect tool call before any response is generated');
+    assert.equal(inspect.tool_name,'inspect_page');
+    assert.ok(inspect.continuation_token);
+    assert.equal(calls.filter(c=>c.where==='provider').length,0,'Model should not be called before inspect');
+    const second=await POST(new Request('https://aai.example/api/chat',{
+      method:'POST',
+      headers:{'content-type':'application/json','X-AAI-Client':'browser-extension'},
+      body:JSON.stringify({action:'browser_tool_continue',continuation_token:inspect.continuation_token,
+        tool_result:JSON.stringify({ok:true,page:{
+          url:'https://www.google.com/',title:'Google',page_text:'Google Search',
+          interactive_elements:[],headings:[]}})})
+    }),env);
+    const secondText=await second.text();
+    assert.equal(second.status,200,secondText.slice(0,700));
+    const secondEvents=secondText.split('\n\n').filter(x=>x.startsWith('data: ')).map(x=>JSON.parse(x.slice(6)));
+    assert.equal(secondEvents.find(e=>e.error),undefined,JSON.stringify(secondEvents.filter(e=>e.error)));
+    assert.ok(secondEvents.find(e=>e.done===true),'Expected completed reply after continuation');
+    assert.match(inserted.find(x=>x.role==='assistant')?.content||'',/Google/);
+    assert.ok(calls.some(c=>c.where==='provider'),'Continuation must reach provider');
+  } finally {
+    globalThis.fetch=priorFetch;
+  }
+});
