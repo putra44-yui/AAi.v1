@@ -128,6 +128,7 @@ export function needsExplicitPageInspection(message: string): boolean {
   const text = String(message || '').toLocaleLowerCase('id-ID').replace(/\s+/g, ' ').trim();
   if (!text || text.length > 6000) return false;
   if (/\b(?:halaman|tab|website|situs|web|page|layar)\s+(?:ini|aktif|terbuka|sekarang|yang sedang (?:ku|aku|saya|kamu|kau)?\s?buka)\b/i.test(text)) return true;
+  if (/\b(?:this|current|active|open)\s+(?:page|tab|website|site|screen)\b/i.test(text)) return true;
   if (/\bini\s+(?:halaman|tab|website|situs|page)\s+apa\b|\bhalaman\s+apa\s+ini\b/i.test(text)) return true;
   if (/\b(?:di|dari|pada)\s+(?:halaman|tab|website|situs|web|layar)\s+(?:ini|yang|aktif|terbuka)\b/i.test(text)) return true;
   if (/\b(?:jawab|kerjakan|baca|cek|periksa|lihat|analisis)\b.{0,80}\b(?:soal|pertanyaan|nomor)\s+(?:ini|yang\s+(?:tampil|terlihat|ada))\b/i.test(text)) return true;
