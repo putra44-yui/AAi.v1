@@ -1029,8 +1029,10 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
         return createJsonError(403, 'Browser tool continuation hanya tersedia untuk extension.', traceId);
       }
       requestStage = 'verifying_browser_continuation';
+      logTiming('browser_continuation_received');
       const state = await verifyBrowserContinuation(requestBody.value.continuationToken, env);
       if (!state) return createJsonError(400, 'Sesi lanjutan browser tool tidak valid atau sudah kedaluwarsa.', traceId);
+      logTiming('browser_continuation_verified');
       browserContinuation = { state, toolResult: requestBody.value.toolResult };
       requestBody = {
         ok: true,
@@ -1079,6 +1081,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     // Persist the session and user message before sending the first SSE event.
     // A session ID must always correspond to a real Supabase row.
     requestStage = browserContinuation ? 'loading_continuation_session' : 'preparing_session';
+    if (browserContinuation) logTiming('browser_continuation_session_start');
     const prepared = await prepareSession(requestBody.value, env, traceId);
     if (!prepared.ok) return prepared.response;
     logTiming('session_ready');
@@ -1215,6 +1218,7 @@ export async function POST(request: Request, env: RuntimeEnv): Promise<Response>
     let streamCanceled = false;
 
     requestStage = browserContinuation ? 'continuation_stream' : 'initial_stream';
+    if (browserContinuation) logTiming('browser_continuation_stream_ready');
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         // Include pre-stream context loading in the cross-device duration.
