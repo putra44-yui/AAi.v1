@@ -44,6 +44,8 @@ public final class CompanionOverlayService extends Service {
     public static final String ACTION_STOP = "id.aai.personal.COMPANION_STOP";
     public static final String ACTION_UPDATE = "id.aai.personal.COMPANION_UPDATE";
     public static final String ACTION_COMPOSER = "id.aai.personal.COMPANION_COMPOSER";
+    public static final String ACTION_APP_FOREGROUND = "id.aai.personal.APP_FOREGROUND";
+    public static final String ACTION_APP_BACKGROUND = "id.aai.personal.APP_BACKGROUND";
     private static final int NOTIFICATION_ID = 8426;
     private static final String CHANNEL = "aai_companion_active";
     private static volatile boolean running = false;
@@ -67,6 +69,8 @@ public final class CompanionOverlayService extends Service {
     private int page = 0;
     private int previousReaction = -1;
     private boolean composerVisible = true;
+    // The in-app Companion owns the screen while MainActivity is visible.
+    private boolean appForeground = true;
     private String overlayOwnerId = "";
     private boolean streaming = false;
     private long lastReactionAt = 0L;
@@ -107,7 +111,13 @@ public final class CompanionOverlayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (ACTION_APP_FOREGROUND.equals(action) || ACTION_APP_BACKGROUND.equals(action)) {
+            appForeground = ACTION_APP_FOREGROUND.equals(action);
+            updateOverlayVisibility();
+            return START_NOT_STICKY;
+        }
         if (ACTION_SHOW.equals(action) || action == null) {
+            appForeground = intent == null || intent.getBooleanExtra("appVisible", true);
             overlayOwnerId = intent == null ? "" : intent.getStringExtra("ownerId");
             if (overlayOwnerId == null || !overlayOwnerId.matches(
                 "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")) {
@@ -121,6 +131,7 @@ public final class CompanionOverlayService extends Service {
                 createBottomComposer();
             }
             running=true;
+            updateOverlayVisibility();
         } else if (ACTION_UPDATE.equals(action) && floatingWidget != null) {
             streaming=intent.getBooleanExtra("streaming",false);
             updateSpeech(intent.getStringExtra("text"));
@@ -129,6 +140,26 @@ public final class CompanionOverlayService extends Service {
             if(floatingWidget!=null) updateComposerVisibility();
         }
         return START_NOT_STICKY; // Never resurrect after user stops the overlay.
+    }
+
+    private void updateOverlayVisibility() {
+        if (wm == null) return;
+        try {
+            if (appForeground) {
+                if (floatingWidget != null && floatingWidget.getParent() != null)
+                    wm.removeView(floatingWidget);
+                if (bottomComposer != null && bottomComposer.getParent() != null)
+                    wm.removeView(bottomComposer);
+            } else {
+                if (floatingWidget != null && floatingWidget.getParent() == null && widgetParams != null)
+                    wm.addView(floatingWidget, widgetParams);
+                updateComposerVisibility();
+            }
+            if (breathing != null) {
+                if (appForeground && breathing.isRunning()) breathing.pause();
+                else if (!appForeground && breathing.isPaused()) breathing.resume();
+            }
+        } catch (Exception ignored) { /* Revoked overlay permission is handled by the OS. */ }
     }
 
     private void createNotificationChannel() {
@@ -239,7 +270,7 @@ public final class CompanionOverlayService extends Service {
         widgetParams.gravity=Gravity.TOP|Gravity.START;
         widgetParams.x=dp(35);
         widgetParams.y=dp(105);
-        try {wm.addView(floatingWidget,widgetParams);} catch (Exception e) {
+        try {if (!appForeground) wm.addView(floatingWidget,widgetParams);} catch (Exception e) {
             floatingWidget=null;stopSelf();return;
         }
 
@@ -373,9 +404,9 @@ public final class CompanionOverlayService extends Service {
     private void updateComposerVisibility() {
         if(wm==null || bottomComposer==null || composerParams==null)return;
         try {
-            if(composerVisible&&bottomComposer.getParent()==null)
+            if(composerVisible&&!appForeground&&bottomComposer.getParent()==null)
                 wm.addView(bottomComposer,composerParams);
-            else if(!composerVisible&&bottomComposer.getParent()!=null)
+            else if((!composerVisible||appForeground)&&bottomComposer.getParent()!=null)
                 wm.removeView(bottomComposer);
         } catch(Exception ignored){}
     }

@@ -32,6 +32,11 @@ android {
     }
 
     buildTypes {
+        // Isolated QA package: installs beside older debug builds without removing data.
+        debug {
+            applicationIdSuffix ".qa"
+            versionNameSuffix "-qa"
+        }
         release {
             minifyEnabled false
             if (project.hasProperty("AAI_RELEASE_STORE_FILE") &&
